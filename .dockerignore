@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+build/
+install/
+log/
+**/build/
+**/install/
+**/log/
+*.bag
+*.mp4
+*.zip
+
+# Calibration images
+**/*.jpg
+**/*.png

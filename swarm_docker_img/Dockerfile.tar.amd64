@@ -1,0 +1,77 @@
+FROM ros:humble
+
+SHELL ["/bin/bash", "-c"]
+
+# ================================
+# System Dependencies
+# ================================
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-colcon-common-extensions \
+    python3-rosdep \
+    libopus-dev \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswscale-dev \
+    ros-humble-xacro \
+    ros-humble-launch-xml \
+    ros-humble-cv-bridge \
+    ros-humble-launch-testing-ament-cmake \
+    ros-humble-robot-state-publisher \
+    ros-humble-joint-state-publisher \
+    ros-humble-joint-state-publisher-gui \
+    ros-humble-joy \
+    ros-humble-joy-teleop \
+    ros-humble-joy-linux \
+    ros-humble-ffmpeg-encoder-decoder \
+    && rm -rf /var/lib/apt/lists/*
+
+# ================================
+# Copy EXACT Python Environment
+# ================================
+RUN mkdir -p /root/.local/lib/python3.10
+
+COPY swarm_docker_img/python_user_env.tar.gz /tmp/
+RUN tar -xzf /tmp/python_user_env.tar.gz -C /root/.local/lib/python3.10 && \
+    rm /tmp/python_user_env.tar.gz
+
+ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
+
+# ================================
+# Workspace
+# ================================
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+COPY ros2_marvelmind/src/ src/
+COPY ros2_robomaster/src/ src/
+COPY ros2_swarm/src/ src/
+
+# ================================
+# rosdep
+# ================================
+RUN rosdep init 2>/dev/null || true && \
+    apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y && \
+    rm -rf /var/lib/apt/lists/*
+
+# ================================
+# Build
+# ================================
+RUN source /opt/ros/humble/setup.bash && \
+    colcon build --symlink-install \
+    --cmake-args -DCMAKE_CXX_FLAGS="-Wno-error=deprecated-declarations"
+
+# ================================
+# Runtime
+# ================================
+COPY swarm_docker_img/init.sh /init.sh
+RUN chmod +x /init.sh
+
+# Allow serial device access
+RUN usermod -aG dialout root
+
+ENTRYPOINT ["/init.sh"]

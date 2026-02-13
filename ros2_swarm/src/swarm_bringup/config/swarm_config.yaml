@@ -1,0 +1,5 @@
+# this file is for now not really used. config is declared directly in python instead.
+
+beacon_addresses: [1, 2, 3]
+robot_labels: ["RM1", "RM2", "RM3"]
+robot_serial_numbers: ["159CKC50070ECX", "159CKC50070E5N", "159CG9V0050HED"]

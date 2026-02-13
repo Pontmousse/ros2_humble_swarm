@@ -1,0 +1,15 @@
+
+# run from root folder: home directory in this case (cd ~)
+
+docker-compose up
+
+
+
+docker buildx build   --platform linux/arm64   -f swarm_docker_img/Dockerfile.tar.arm64   -t ros2-humble-swarm:test-arm   --load .
+
+
+docker buildx build \
+  --platform linux/arm64 \
+  -f swarm_docker_img/Dockerfile.tar.arm64 \
+  -t elghaliasri/ros2-humble-swarm:robot-arm64-v1 \
+  --push .

@@ -1,0 +1,22 @@
+# ROS build artifacts
+**/build/
+**/install/
+**/log/
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# VSCode
+.vscode/
+
+# Do not push amd64 snapshot
+swarm_docker_img/python_user_env.tar.gz
+
+# Calibration images
+**/*.jpg
+**/*.png
+
+# OS
+.DS_Store

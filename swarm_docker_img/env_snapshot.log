@@ -1,0 +1,854 @@
+================ OS =================
+Distributor ID:	Ubuntu
+Description:	Ubuntu 22.04.5 LTS
+Release:	22.04
+Codename:	jammy
+
+================ KERNEL =================
+Linux Ghali-T1700 6.8.0-94-generic #96~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Jan 16 13:19:05 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+
+================ ROS =================
+/opt/ros/humble/bin/ros2
+ROS_DISTRO=humble
+AMENT_PREFIX_PATH=/home/elghali/ros2_swarm/install/swarm_bringup:/home/elghali/ros2_swarm/install/swarm_marvelmind:/home/elghali/ros2_swarm/install/swarm_magnet:/home/elghali/ros2_swarm/install/swarm_kalman_filter:/home/elghali/ros2_swarm/install/swarm_controller:/home/elghali/ros2_swarm/install/swarm_interfaces:/home/elghali/ros2_swarm/install/swarm_filter:/home/elghali/ros2_swarm/install/swarm_aruco:/home/elghali/ros2_marvelmind/install/marvelmind_ros2:/home/elghali/ros2_marvelmind/install/marvelmind_ros2_msgs:/home/elghali/ros2_training/install/actions_py:/home/elghali/ros2_training/install/actions_cpp:/home/elghali/ros2_training/install/my_robot_interfaces:/home/elghali/ros2_training/install/my_robot_description:/home/elghali/ros2_robomaster/install/robomaster_ros:/home/elghali/ros2_robomaster/install/robomaster_msgs:/home/elghali/ros2_robomaster/install/robomaster_description:/home/elghali/ros2_robomaster/install/ffmpeg_image_transport:/home/elghali/ros2_robomaster/install/ffmpeg_image_transport_msgs:/opt/ros/humble
+
+================ ROS PACKAGES (humble) =================
+ros-humble-action-msgs 1.2.1-1jammy.20250325.183311
+ros-humble-action-tutorials-cpp 0.20.5-1jammy.20250429.203932
+ros-humble-action-tutorials-interfaces 0.20.5-1jammy.20250325.184839
+ros-humble-action-tutorials-py 0.20.5-1jammy.20250429.185112
+ros-humble-actionlib-msgs 4.8.0-1jammy.20250325.184301
+ros-humble-ament-clang-format 0.12.12-1jammy.20250325.170546
+ros-humble-ament-cmake 1.3.11-1jammy.20241125.233032
+ros-humble-ament-cmake-auto 1.3.11-1jammy.20241125.235137
+ros-humble-ament-cmake-clang-format 0.12.12-1jammy.20250325.171025
+ros-humble-ament-cmake-copyright 0.12.12-1jammy.20250325.170906
+ros-humble-ament-cmake-core 1.3.11-1jammy.20241125.213936
+ros-humble-ament-cmake-cppcheck 0.12.12-1jammy.20250325.171025
+ros-humble-ament-cmake-cpplint 0.12.12-1jammy.20250325.171129
+ros-humble-ament-cmake-export-definitions 1.3.11-1jammy.20241125.230042
+ros-humble-ament-cmake-export-dependencies 1.3.11-1jammy.20241125.230223
+ros-humble-ament-cmake-export-include-directories 1.3.11-1jammy.20241125.230043
+ros-humble-ament-cmake-export-interfaces 1.3.11-1jammy.20241125.230126
+ros-humble-ament-cmake-export-libraries 1.3.11-1jammy.20241125.230050
+ros-humble-ament-cmake-export-link-flags 1.3.11-1jammy.20241125.225619
+ros-humble-ament-cmake-export-targets 1.3.11-1jammy.20241125.230138
+ros-humble-ament-cmake-flake8 0.12.12-1jammy.20250325.171030
+ros-humble-ament-cmake-gen-version-h 1.3.11-1jammy.20241125.232841
+ros-humble-ament-cmake-gmock 1.3.11-1jammy.20241125.235057
+ros-humble-ament-cmake-gtest 1.3.11-1jammy.20241125.232737
+ros-humble-ament-cmake-include-directories 1.3.11-1jammy.20241125.230103
+ros-humble-ament-cmake-libraries 1.3.11-1jammy.20241125.230151
+ros-humble-ament-cmake-lint-cmake 0.12.12-1jammy.20250325.170333
+ros-humble-ament-cmake-pep257 0.12.12-1jammy.20250325.171028
+ros-humble-ament-cmake-pytest 1.3.11-1jammy.20241125.232240
+ros-humble-ament-cmake-python 1.3.11-1jammy.20241125.230201
+ros-humble-ament-cmake-ros 0.10.0-3jammy.20250325.172310
+ros-humble-ament-cmake-target-dependencies 1.3.11-1jammy.20241125.230301
+ros-humble-ament-cmake-test 1.3.11-1jammy.20241125.230243
+ros-humble-ament-cmake-uncrustify 0.12.12-1jammy.20250325.171023
+ros-humble-ament-cmake-version 1.3.11-1jammy.20241125.230210
+ros-humble-ament-cmake-xmllint 0.12.12-1jammy.20250325.171026
+ros-humble-ament-copyright 0.12.12-1jammy.20250325.170047
+ros-humble-ament-cppcheck 0.12.12-1jammy.20250325.164356
+ros-humble-ament-cpplint 0.12.12-1jammy.20250325.170818
+ros-humble-ament-flake8 0.12.12-1jammy.20250325.164746
+ros-humble-ament-index-cpp 1.4.0-2jammy.20250325.172401
+ros-humble-ament-index-python 1.4.0-2jammy.20250325.170541
+ros-humble-ament-lint 0.12.12-1jammy.20250325.164403
+ros-humble-ament-lint-auto 0.12.12-1jammy.20250325.164553
+ros-humble-ament-lint-cmake 0.12.12-1jammy.20250325.170157
+ros-humble-ament-lint-common 0.12.12-1jammy.20250325.171500
+ros-humble-ament-package 0.14.0-4jammy.20220421.093117
+ros-humble-ament-pep257 0.12.12-1jammy.20250325.165454
+ros-humble-ament-uncrustify 0.12.12-1jammy.20250325.170156
+ros-humble-ament-xmllint 0.12.12-1jammy.20250325.170157
+ros-humble-angles 1.15.0-1jammy.20241126.001244
+ros-humble-builtin-interfaces 1.2.1-1jammy.20250325.182336
+ros-humble-class-loader 2.2.0-3jammy.20250325.175154
+ros-humble-common-interfaces 4.8.0-1jammy.20250325.191037
+ros-humble-composition 0.20.5-1jammy.20250429.203447
+ros-humble-composition-interfaces 1.2.1-1jammy.20250325.183054
+ros-humble-console-bridge-vendor 1.4.1-1jammy.20250325.172315
+ros-humble-cv-bridge 3.2.1-1jammy.20250325.185849
+ros-humble-demo-nodes-cpp 0.20.5-1jammy.20250429.203449
+ros-humble-demo-nodes-cpp-native 0.20.5-1jammy.20250429.204049
+ros-humble-demo-nodes-py 0.20.5-1jammy.20250429.185219
+ros-humble-depthimage-to-laserscan 2.5.1-1jammy.20250429.204051
+ros-humble-desktop 0.10.0-1jammy.20250514.173053
+ros-humble-diagnostic-msgs 4.8.0-1jammy.20250325.185413
+ros-humble-domain-coordinator 0.10.0-3jammy.20250325.170229
+ros-humble-dummy-map-server 0.20.5-1jammy.20250429.201951
+ros-humble-dummy-robot-bringup 0.20.5-1jammy.20250429.205748
+ros-humble-dummy-sensors 0.20.5-1jammy.20250429.201956
+ros-humble-eigen3-cmake-module 0.1.1-4jammy.20250325.171127
+ros-humble-example-interfaces 0.9.3-2jammy.20250325.184851
+ros-humble-examples-rclcpp-minimal-action-client 0.15.3-1jammy.20250429.204200
+ros-humble-examples-rclcpp-minimal-action-server 0.15.3-1jammy.20250429.204205
+ros-humble-examples-rclcpp-minimal-client 0.15.3-1jammy.20250429.202054
+ros-humble-examples-rclcpp-minimal-composition 0.15.3-1jammy.20250429.204220
+ros-humble-examples-rclcpp-minimal-publisher 0.15.3-1jammy.20250429.202054
+ros-humble-examples-rclcpp-minimal-service 0.15.3-1jammy.20250429.202108
+ros-humble-examples-rclcpp-minimal-subscriber 0.15.3-1jammy.20250429.204225
+ros-humble-examples-rclcpp-minimal-timer 0.15.3-1jammy.20250429.202118
+ros-humble-examples-rclcpp-multithreaded-executor 0.15.3-1jammy.20250429.202128
+ros-humble-examples-rclpy-executors 0.15.3-1jammy.20250429.185246
+ros-humble-examples-rclpy-minimal-action-client 0.15.3-1jammy.20250429.185300
+ros-humble-examples-rclpy-minimal-action-server 0.15.3-1jammy.20250429.185314
+ros-humble-examples-rclpy-minimal-client 0.15.3-1jammy.20250429.185312
+ros-humble-examples-rclpy-minimal-publisher 0.15.3-1jammy.20250429.185606
+ros-humble-examples-rclpy-minimal-service 0.15.3-1jammy.20250429.185339
+ros-humble-examples-rclpy-minimal-subscriber 0.15.3-1jammy.20250429.185535
+ros-humble-fastcdr 1.0.24-2jammy.20241125.225655
+ros-humble-fastrtps 2.6.10-1jammy.20250429.150703
+ros-humble-fastrtps-cmake-module 2.2.2-2jammy.20250325.171706
+ros-humble-ffmpeg-encoder-decoder 2.0.0-1jammy.20250429.202420
+ros-humble-foonathan-memory-vendor 1.2.0-3jammy.20250325.171410
+ros-humble-geometry-msgs 4.8.0-1jammy.20250325.184331
+ros-humble-geometry2 0.25.12-1jammy.20250429.220143
+ros-humble-gmock-vendor 1.10.9006-1jammy.20241125.233045
+ros-humble-gtest-vendor 1.10.9006-1jammy.20241125.232503
+ros-humble-ignition-cmake2-vendor 0.0.2-2jammy.20250325.171221
+ros-humble-ignition-math6-vendor 0.0.2-2jammy.20250325.171511
+ros-humble-image-geometry 3.2.1-1jammy.20250325.190617
+ros-humble-image-tools 0.20.5-1jammy.20250429.203450
+ros-humble-image-transport 3.1.11-1jammy.20250429.204313
+ros-humble-interactive-markers 2.3.2-2jammy.20250429.205549
+ros-humble-intra-process-demo 0.20.5-1jammy.20250429.202505
+ros-humble-joint-state-publisher 2.4.0-1jammy.20250429.192014
+ros-humble-joint-state-publisher-gui 2.4.0-1jammy.20250429.192211
+ros-humble-joy 3.3.0-1jammy.20250429.204334
+ros-humble-kdl-parser 2.6.4-1jammy.20250325.180608
+ros-humble-keyboard-handler 0.0.5-1jammy.20250325.171759
+ros-humble-laser-geometry 2.4.0-2jammy.20250429.193336
+ros-humble-launch 1.0.8-1jammy.20250325.170924
+ros-humble-launch-ros 0.19.9-1jammy.20250429.185431
+ros-humble-launch-testing 1.0.8-1jammy.20250325.171311
+ros-humble-launch-testing-ament-cmake 1.0.8-1jammy.20250325.172331
+ros-humble-launch-testing-ros 0.19.9-1jammy.20250429.185613
+ros-humble-launch-xml 1.0.8-1jammy.20250325.171142
+ros-humble-launch-yaml 1.0.8-1jammy.20250325.171133
+ros-humble-libcurl-vendor 3.1.3-1jammy.20250325.164408
+ros-humble-libstatistics-collector 1.3.4-1jammy.20250429.183816
+ros-humble-libyaml-vendor 1.2.2-2jammy.20250325.175212
+ros-humble-lifecycle 0.20.5-1jammy.20250429.203937
+ros-humble-lifecycle-msgs 1.2.1-1jammy.20250325.182941
+ros-humble-logging-demo 0.20.5-1jammy.20250429.203630
+ros-humble-map-msgs 2.1.0-3jammy.20250325.190328
+ros-humble-message-filters 4.3.7-1jammy.20250429.203510
+ros-humble-nav-msgs 4.8.0-1jammy.20250325.185446
+ros-humble-orocos-kdl-vendor 0.2.5-1jammy.20250325.171844
+ros-humble-osrf-pycommon 2.1.6-1jammy.20250325.164408
+ros-humble-pcl-conversions 2.4.5-2jammy.20250429.204415
+ros-humble-pcl-msgs 1.0.0-7jammy.20250325.190402
+ros-humble-pendulum-control 0.20.5-1jammy.20250429.212353
+ros-humble-pendulum-msgs 0.20.5-1jammy.20250325.182854
+ros-humble-plotjuggler 3.10.1-1jammy.20250501.210919
+ros-humble-plotjuggler-ros 2.1.0-1jammy.20250326.164507
+ros-humble-pluginlib 5.1.0-3jammy.20250325.175713
+ros-humble-pybind11-vendor 2.4.2-1jammy.20241125.234440
+ros-humble-python-cmake-module 0.10.0-2jammy.20250325.172142
+ros-humble-python-orocos-kdl-vendor 0.2.5-1jammy.20250325.172351
+ros-humble-python-qt-binding 1.1.2-1jammy.20250325.172324
+ros-humble-qt-dotgraph 2.2.4-1jammy.20250325.172741
+ros-humble-qt-gui 2.2.4-1jammy.20250325.172838
+ros-humble-qt-gui-cpp 2.2.4-1jammy.20250325.180438
+ros-humble-qt-gui-py-common 2.2.4-1jammy.20250325.172622
+ros-humble-quality-of-service-demo-cpp 0.20.5-1jammy.20250429.203451
+ros-humble-quality-of-service-demo-py 0.20.5-1jammy.20250429.185527
+ros-humble-rcl 5.3.9-1jammy.20250429.182459
+ros-humble-rcl-action 5.3.9-1jammy.20250429.184001
+ros-humble-rcl-interfaces 1.2.1-1jammy.20250325.182623
+ros-humble-rcl-lifecycle 5.3.9-1jammy.20250429.183827
+ros-humble-rcl-logging-interface 2.3.1-1jammy.20250325.175220
+ros-humble-rcl-logging-spdlog 2.3.1-1jammy.20250325.175805
+ros-humble-rcl-yaml-param-parser 5.3.9-1jammy.20250325.175556
+ros-humble-rclcpp 16.0.12-1jammy.20250429.184114
+ros-humble-rclcpp-action 16.0.12-1jammy.20250429.202942
+ros-humble-rclcpp-components 16.0.12-1jammy.20250429.202946
+ros-humble-rclcpp-lifecycle 16.0.12-1jammy.20250429.202958
+ros-humble-rclpy 3.3.16-1jammy.20250429.184459
+ros-humble-rcpputils 2.4.5-1jammy.20250325.173709
+ros-humble-rcutils 5.1.6-1jammy.20250325.172513
+ros-humble-resource-retriever 3.1.3-1jammy.20250325.172620
+ros-humble-rmw 6.1.2-1jammy.20250325.174420
+ros-humble-rmw-dds-common 1.6.0-2jammy.20250325.182930
+ros-humble-rmw-fastrtps-cpp 6.2.7-1jammy.20250429.162419
+ros-humble-rmw-fastrtps-shared-cpp 6.2.7-1jammy.20250429.161221
+ros-humble-rmw-implementation 2.8.4-1jammy.20250429.175533
+ros-humble-rmw-implementation-cmake 6.1.2-1jammy.20250325.172142
+ros-humble-robot-state-publisher 3.0.3-2jammy.20250429.205314
+ros-humble-ros-base 0.10.0-1jammy.20250429.225608
+ros-humble-ros-core 0.10.0-1jammy.20250429.212618
+ros-humble-ros-environment 3.2.2-1jammy.20241125.230254
+ros-humble-ros-workspace 1.0.2-2jammy.20241125.214203
+ros-humble-ros2action 0.18.12-1jammy.20250429.185822
+ros-humble-ros2bag 0.15.14-1jammy.20250429.224515
+ros-humble-ros2cli 0.18.12-1jammy.20250429.185631
+ros-humble-ros2cli-common-extensions 0.1.1-4jammy.20250429.212449
+ros-humble-ros2component 0.18.12-1jammy.20250429.203440
+ros-humble-ros2doctor 0.18.12-1jammy.20250429.185823
+ros-humble-ros2interface 0.18.12-1jammy.20250429.191516
+ros-humble-ros2launch 0.19.9-1jammy.20250429.191815
+ros-humble-ros2lifecycle 0.18.12-1jammy.20250429.212122
+ros-humble-ros2multicast 0.18.12-1jammy.20250429.191517
+ros-humble-ros2node 0.18.12-1jammy.20250429.185835
+ros-humble-ros2param 0.18.12-1jammy.20250429.200619
+ros-humble-ros2pkg 0.18.12-1jammy.20250429.191518
+ros-humble-ros2run 0.18.12-1jammy.20250429.191822
+ros-humble-ros2service 0.18.12-1jammy.20250429.191951
+ros-humble-ros2topic 0.18.12-1jammy.20250429.185900
+ros-humble-rosbag2 0.15.14-1jammy.20250429.225309
+ros-humble-rosbag2-compression 0.15.14-1jammy.20250429.221528
+ros-humble-rosbag2-compression-zstd 0.15.14-1jammy.20250429.221925
+ros-humble-rosbag2-cpp 0.15.14-1jammy.20250429.215803
+ros-humble-rosbag2-interfaces 0.15.14-1jammy.20250326.153942
+ros-humble-rosbag2-py 0.15.14-1jammy.20250429.224131
+ros-humble-rosbag2-storage 0.15.14-1jammy.20250429.214829
+ros-humble-rosbag2-storage-default-plugins 0.15.14-1jammy.20250429.215506
+ros-humble-rosbag2-transport 0.15.14-1jammy.20250429.222153
+ros-humble-rosgraph-msgs 1.2.1-1jammy.20250325.182718
+ros-humble-rosidl-adapter 3.1.6-1jammy.20250325.172328
+ros-humble-rosidl-cli 3.1.6-1jammy.20250325.170901
+ros-humble-rosidl-cmake 3.1.6-1jammy.20250325.172843
+ros-humble-rosidl-default-generators 1.2.0-2jammy.20250325.181531
+ros-humble-rosidl-default-runtime 1.2.0-2jammy.20250325.182122
+ros-humble-rosidl-generator-c 3.1.6-1jammy.20250325.174043
+ros-humble-rosidl-generator-cpp 3.1.6-1jammy.20250325.175203
+ros-humble-rosidl-generator-py 0.14.4-1jammy.20250325.181026
+ros-humble-rosidl-parser 3.1.6-1jammy.20250325.172504
+ros-humble-rosidl-runtime-c 3.1.6-1jammy.20250325.173545
+ros-humble-rosidl-runtime-cpp 3.1.6-1jammy.20250325.174056
+ros-humble-rosidl-runtime-py 0.9.3-1jammy.20250325.192012
+ros-humble-rosidl-typesupport-c 2.0.2-1jammy.20250325.174519
+ros-humble-rosidl-typesupport-cpp 2.0.2-1jammy.20250325.174942
+ros-humble-rosidl-typesupport-fastrtps-c 2.2.2-2jammy.20250325.180513
+ros-humble-rosidl-typesupport-fastrtps-cpp 2.2.2-2jammy.20250325.180132
+ros-humble-rosidl-typesupport-interface 3.1.6-1jammy.20250325.172141
+ros-humble-rosidl-typesupport-introspection-c 3.1.6-1jammy.20250325.174043
+ros-humble-rosidl-typesupport-introspection-cpp 3.1.6-1jammy.20250325.174623
+ros-humble-rpyutils 0.2.1-2jammy.20250325.170902
+ros-humble-rqt-action 2.0.1-3jammy.20250429.192332
+ros-humble-rqt-bag 1.1.5-1jammy.20250429.224526
+ros-humble-rqt-bag-plugins 1.1.5-1jammy.20250513.011409
+ros-humble-rqt-common-plugins 1.2.0-1jammy.20250513.011540
+ros-humble-rqt-console 2.0.3-1jammy.20250429.192200
+ros-humble-rqt-graph 1.3.1-1jammy.20250429.192257
+ros-humble-rqt-gui 1.1.7-1jammy.20250429.185656
+ros-humble-rqt-gui-cpp 1.1.7-1jammy.20250429.203252
+ros-humble-rqt-gui-py 1.1.7-1jammy.20250429.191731
+ros-humble-rqt-image-view 1.2.0-2jammy.20250429.204916
+ros-humble-rqt-msg 1.2.0-1jammy.20250429.192305
+ros-humble-rqt-plot 1.1.5-1jammy.20250513.003209
+ros-humble-rqt-publisher 1.5.0-1jammy.20250429.192308
+ros-humble-rqt-py-common 1.1.7-1jammy.20250429.185657
+ros-humble-rqt-py-console 1.0.2-3jammy.20250429.192224
+ros-humble-rqt-reconfigure 1.1.2-1jammy.20250429.192312
+ros-humble-rqt-service-caller 1.0.5-3jammy.20250429.192311
+ros-humble-rqt-shell 1.0.2-3jammy.20250429.192310
+ros-humble-rqt-srv 1.0.3-3jammy.20250429.192333
+ros-humble-rqt-topic 1.5.0-1jammy.20250429.192314
+ros-humble-rttest 0.13.0-2jammy.20250325.172153
+ros-humble-rviz-assimp-vendor 11.2.17-1jammy.20250514.140105
+ros-humble-rviz-common 11.2.17-1jammy.20250514.151851
+ros-humble-rviz-default-plugins 11.2.17-1jammy.20250514.154621
+ros-humble-rviz-ogre-vendor 11.2.17-1jammy.20250514.140039
+ros-humble-rviz-rendering 11.2.17-1jammy.20250514.143107
+ros-humble-rviz2 11.2.17-1jammy.20250514.171113
+ros-humble-sdl2-vendor 3.3.0-1jammy.20241125.234615
+ros-humble-sensor-msgs 4.8.0-1jammy.20250325.185014
+ros-humble-sensor-msgs-py 4.8.0-1jammy.20250325.185829
+ros-humble-shape-msgs 4.8.0-1jammy.20250325.185609
+ros-humble-shared-queues-vendor 0.15.14-1jammy.20250326.153956
+ros-humble-spdlog-vendor 1.3.1-1jammy.20250325.172202
+ros-humble-sqlite3-vendor 0.15.14-1jammy.20250326.153946
+ros-humble-sros2 0.10.6-1jammy.20250429.191718
+ros-humble-sros2-cmake 0.10.6-1jammy.20250429.191856
+ros-humble-statistics-msgs 1.2.1-1jammy.20250325.182724
+ros-humble-std-msgs 4.8.0-1jammy.20250325.183237
+ros-humble-std-srvs 4.8.0-1jammy.20250325.182425
+ros-humble-stereo-msgs 4.8.0-1jammy.20250325.190403
+ros-humble-tango-icons-vendor 0.1.1-3jammy.20250325.172205
+ros-humble-teleop-twist-joy 2.4.7-1jammy.20250429.204728
+ros-humble-teleop-twist-keyboard 2.4.0-1jammy.20250429.185740
+ros-humble-tf2 0.25.12-1jammy.20250325.185332
+ros-humble-tf2-bullet 0.25.12-1jammy.20250429.215828
+ros-humble-tf2-eigen 0.25.12-1jammy.20250429.215827
+ros-humble-tf2-eigen-kdl 0.25.12-1jammy.20250325.185715
+ros-humble-tf2-geometry-msgs 0.25.12-1jammy.20250429.205329
+ros-humble-tf2-kdl 0.25.12-1jammy.20250429.205342
+ros-humble-tf2-msgs 0.25.12-1jammy.20250325.185419
+ros-humble-tf2-py 0.25.12-1jammy.20250429.185759
+ros-humble-tf2-ros 0.25.12-1jammy.20250429.204439
+ros-humble-tf2-ros-py 0.25.12-1jammy.20250429.185953
+ros-humble-tf2-sensor-msgs 0.25.12-1jammy.20250429.205350
+ros-humble-tf2-tools 0.25.12-1jammy.20250429.190518
+ros-humble-tinyxml-vendor 0.8.3-2jammy.20241125.234743
+ros-humble-tinyxml2-vendor 0.7.6-1jammy.20241125.234735
+ros-humble-tlsf 0.7.0-2jammy.20250325.172229
+ros-humble-tlsf-cpp 0.13.0-2jammy.20250429.212042
+ros-humble-topic-monitor 0.20.5-1jammy.20250429.185636
+ros-humble-tracetools 4.1.1-1jammy.20250325.172658
+ros-humble-trajectory-msgs 4.8.0-1jammy.20250325.185716
+ros-humble-turtlesim 1.4.2-1jammy.20250429.211545
+ros-humble-uncrustify-vendor 2.0.2-2jammy.20241125.234826
+ros-humble-unique-identifier-msgs 2.2.1-3jammy.20250325.182948
+ros-humble-urdf 2.6.1-1jammy.20250325.180144
+ros-humble-urdf-parser-plugin 2.6.1-1jammy.20250325.172443
+ros-humble-urdfdom 3.0.2-2jammy.20250325.172711
+ros-humble-urdfdom-headers 1.0.6-2jammy.20241126.001157
+ros-humble-visualization-msgs 4.8.0-1jammy.20250325.190547
+ros-humble-xacro 2.0.13-1jammy.20250325.170907
+ros-humble-yaml-cpp-vendor 8.0.2-1jammy.20241125.234852
+ros-humble-zstd-vendor 0.15.14-1jammy.20250326.153953
+
+================ SYSTEM MULTIMEDIA =================
+ffmpeg 7:4.4.2-0ubuntu0.22.04.1
+libavahi-client3:amd64 0.8-5ubuntu5.4
+libavahi-common-data:amd64 0.8-5ubuntu5.4
+libavahi-common3:amd64 0.8-5ubuntu5.4
+libavahi-core7:amd64 0.8-5ubuntu5.4
+libavahi-glib1:amd64 0.8-5ubuntu5.4
+libavahi-ui-gtk3-0:amd64 0.8-5ubuntu5.4
+libavc1394-0:amd64 0.5.4-5build2
+libavcodec-dev:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavcodec58:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavdevice-dev:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavdevice58:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavfilter-dev:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavfilter7:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavformat-dev:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavformat58:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavutil-dev:amd64 7:4.4.2-0ubuntu0.22.04.1
+libavutil56:amd64 7:4.4.2-0ubuntu0.22.04.1
+libopus-dev:amd64 1.3.1-0.1build2
+libopus0:amd64 1.3.1-0.1build2
+ros-humble-ffmpeg-encoder-decoder 2.0.0-1jammy.20250429.202420
+	libavcodec.so.58 (libc6,x86-64) => /lib/x86_64-linux-gnu/libavcodec.so.58
+	libavcodec.so (libc6,x86-64) => /lib/x86_64-linux-gnu/libavcodec.so
+	libavformat.so.58 (libc6,x86-64) => /lib/x86_64-linux-gnu/libavformat.so.58
+	libavformat.so (libc6,x86-64) => /lib/x86_64-linux-gnu/libavformat.so
+	libswscale.so.5 (libc6,x86-64) => /lib/x86_64-linux-gnu/libswscale.so.5
+	libswscale.so (libc6,x86-64) => /lib/x86_64-linux-gnu/libswscale.so
+
+================ PYTHON CORE =================
+/usr/bin/python3
+Python 3.10.12
+/usr/bin/pip
+pip 22.0.2 from /usr/lib/python3/dist-packages/pip (python 3.10)
+
+================ PYTHON PATH =================
+Executable: /usr/bin/python3
+sys.path:
+   
+   /home/elghali/ros2_swarm/build/swarm_marvelmind
+   /home/elghali/ros2_swarm/install/swarm_marvelmind/lib/python3.10/site-packages
+   /home/elghali/ros2_swarm/install/swarm_magnet/lib/python3.10/site-packages
+   /home/elghali/ros2_swarm/install/swarm_kalman_filter/lib/python3.10/site-packages
+   /home/elghali/ros2_swarm/build/swarm_controller
+   /home/elghali/ros2_swarm/install/swarm_controller/lib/python3.10/site-packages
+   /home/elghali/ros2_swarm/install/swarm_interfaces/local/lib/python3.10/dist-packages
+   /home/elghali/ros2_swarm/build/swarm_filter
+   /home/elghali/ros2_swarm/install/swarm_filter/lib/python3.10/site-packages
+   /home/elghali/ros2_swarm/install/swarm_aruco/lib/python3.10/site-packages
+   /home/elghali/ros2_marvelmind/install/marvelmind_ros2_msgs/local/lib/python3.10/dist-packages
+   /home/elghali/ros2_training/install/actions_py/lib/python3.10/site-packages
+   /home/elghali/ros2_training/install/my_robot_interfaces/local/lib/python3.10/dist-packages
+   /home/elghali/ros2_robomaster/install/robomaster_ros/lib/python3.10/site-packages
+   /home/elghali/ros2_robomaster/install/robomaster_msgs/local/lib/python3.10/dist-packages
+   /home/elghali/ros2_robomaster/install/ffmpeg_image_transport_msgs/local/lib/python3.10/dist-packages
+   /opt/ros/humble/lib/python3.10/site-packages
+   /opt/ros/humble/local/lib/python3.10/dist-packages
+   /usr/lib/python310.zip
+   /usr/lib/python3.10
+   /usr/lib/python3.10/lib-dynload
+   /home/elghali/.local/lib/python3.10/site-packages
+   /usr/local/lib/python3.10/dist-packages
+   /usr/lib/python3/dist-packages
+
+================ PIP LIST =================
+Package                              Version          Editable project location
+------------------------------------ ---------------- -----------------------------------------------
+action-msgs                          1.2.1
+action-tutorials-interfaces          0.20.5
+action-tutorials-py                  0.20.5
+actionlib-msgs                       4.8.0
+actions-py                           0.0.0
+ament-clang-format                   0.12.12
+ament-cmake-test                     1.3.11
+ament-copyright                      0.12.12
+ament-cppcheck                       0.12.12
+ament-cpplint                        0.12.12
+ament-flake8                         0.12.12
+ament-index-python                   1.4.0
+ament-lint                           0.12.12
+ament-lint-cmake                     0.12.12
+ament-package                        0.14.0
+ament-pep257                         0.12.12
+ament-uncrustify                     0.12.12
+ament-xmllint                        0.12.12
+angles                               1.15.0
+appdirs                              1.4.4
+apturl                               0.5.2
+arabic-reshaper                      3.0.0
+argcomplete                          1.8.1
+attrs                                21.2.0
+av                                   14.3.0
+bcrypt                               3.2.0
+beautifulsoup4                       4.10.0
+beniget                              0.4.1
+blinker                              1.4
+bloom                                0.12.0
+breezy                               3.2.1
+Brlapi                               0.8.3
+Brotli                               1.0.9
+builtin-interfaces                   1.2.1
+catkin-pkg                           1.0.0
+catkin-pkg-modules                   1.0.0
+certifi                              2020.6.20
+chardet                              4.0.0
+click                                8.0.3
+colcon-argcomplete                   0.3.3
+colcon-bash                          0.5.0
+colcon-cd                            0.2.1
+colcon-cmake                         0.2.29
+colcon-common-extensions             0.3.0
+colcon-core                          0.19.0
+colcon-defaults                      0.2.9
+colcon-devtools                      0.3.0
+colcon-installed-package-information 0.2.1
+colcon-library-path                  0.2.1
+colcon-metadata                      0.2.5
+colcon-mixin                         0.2.3
+colcon-notification                  0.3.0
+colcon-output                        0.2.13
+colcon-override-check                0.0.1
+colcon-package-information           0.4.0
+colcon-package-selection             0.2.10
+colcon-parallel-executor             0.3.0
+colcon-pkg-config                    0.1.0
+colcon-powershell                    0.4.0
+colcon-python-setup-py               0.2.9
+colcon-recursive-crawl               0.2.3
+colcon-ros                           0.5.0
+colcon-test-result                   0.3.8
+colcon-zsh                           0.5.0
+colorama                             0.4.4
+command-not-found                    0.3
+composition-interfaces               1.2.1
+configobj                            5.0.6
+cov-core                             1.15.0
+coverage                             6.2
+cryptography                         3.4.8
+cupshelpers                          1.0
+cv-bridge                            3.2.1
+cycler                               0.11.0
+dbus-python                          1.2.18
+decorator                            4.4.2
+defer                                1.0.6
+demo-nodes-py                        0.20.5
+Deprecated                           1.2.13
+descartes                            1.1.0
+diagnostic-msgs                      4.8.0
+distlib                              0.3.4
+distro                               1.7.0
+distro-info                          1.1+ubuntu0.2
+docutils                             0.17.1
+domain-coordinator                   0.10.0
+dulwich                              0.20.31
+duplicity                            0.8.21
+empy                                 3.3.4
+example-interfaces                   0.9.3
+examples-rclpy-executors             0.15.3
+examples-rclpy-minimal-action-client 0.15.3
+examples-rclpy-minimal-action-server 0.15.3
+examples-rclpy-minimal-client        0.15.3
+examples-rclpy-minimal-publisher     0.15.3
+examples-rclpy-minimal-service       0.15.3
+examples-rclpy-minimal-subscriber    0.15.3
+fastbencode                          0.0.5
+fasteners                            0.14.1
+fastimport                           0.9.14
+ffmpeg-image-transport-msgs          1.0.1
+filterpy                             1.4.5
+flake8                               4.0.1
+flake8-blind-except                  0.2.0
+flake8-builtins                      1.5.3
+flake8-class-newline                 1.6.0
+flake8-comprehensions                3.8.0
+flake8-deprecated                    1.3
+flake8-docstrings                    1.6.0
+flake8-import-order                  0.18.1
+flake8-quotes                        3.3.1
+fonttools                            4.29.1
+fs                                   2.4.12
+future                               0.18.2
+gast                                 0.5.2
+geometry-msgs                        4.8.0
+gpg                                  1.16.0
+html5lib                             1.1
+httplib2                             0.20.2
+idna                                 3.3
+image-geometry                       3.2.1
+imageio                              2.37.0
+importlib-metadata                   4.6.4
+iniconfig                            1.1.1
+interactive-markers                  2.3.2
+jeepney                              0.7.1
+joint-state-publisher                2.4.0
+joint-state-publisher-gui            2.4.0
+keyring                              23.5.0
+kiwisolver                           1.3.2
+language-selector                    0.1
+lark                                 1.1.1
+laser-geometry                       2.4.0
+launch                               1.0.8
+launch-ros                           0.19.9
+launch-testing                       1.0.8
+launch-testing-ros                   0.19.9
+launch-xml                           1.0.8
+launch-yaml                          1.0.8
+launchpadlib                         1.10.16
+lazr.restfulclient                   0.14.4
+lazr.uri                             1.0.6
+libmedia-codec                       0.0.1
+lifecycle-msgs                       1.2.1
+llvmlite                             0.44.0
+lockfile                             0.12.2
+logging-demo                         0.20.5
+louis                                3.20.0
+lxml                                 4.8.0
+lz4                                  3.1.3+dfsg
+macaroonbakery                       1.3.1
+Mako                                 1.1.3
+map-msgs                             2.1.0
+MarkupSafe                           2.0.1
+marvelmind-ros2-msgs                 1.0.2
+matplotlib                           3.5.1
+mccabe                               0.6.1
+mercurial                            6.1.1
+message-filters                      4.3.7
+monotonic                            1.6
+more-itertools                       8.10.0
+mpi4py                               3.1.3
+mpmath                               0.0.0
+my-robot-interfaces                  0.0.0
+mypy                                 0.942
+mypy-extensions                      0.4.3
+MyQR                                 2.3.1
+nav-msgs                             4.8.0
+netaddr                              1.3.0
+netifaces                            0.11.0
+nose                                 1.3.7
+nose2                                0.9.2
+notify2                              0.3
+numba                                0.61.0
+numpy                                1.26.4
+numpy-quaternion                     2024.0.7
+oauthlib                             3.2.0
+olefile                              0.46
+opencv-python                        4.11.0.86
+osrf-pycommon                        2.1.6
+packaging                            21.3
+paramiko                             2.9.3
+patiencediff                         0.2.1
+pcl-msgs                             1.0.0
+pendulum-msgs                        0.20.5
+pexpect                              4.8.0
+pillow                               11.1.0
+pip                                  22.0.2
+pluggy                               0.13.0
+ply                                  3.11
+protobuf                             3.12.4
+psutil                               5.9.0
+ptyprocess                           0.7.0
+py                                   1.10.0
+pycairo                              1.20.1
+pycodestyle                          2.8.0
+pycups                               2.0.1
+pydocstyle                           6.1.1
+pydot                                1.4.2
+pyflakes                             2.4.0
+PyGithub                             1.55
+Pygments                             2.11.2
+PyGObject                            3.42.1
+pygraphviz                           1.7
+PyJWT                                2.3.0
+pymacaroons                          0.13.0
+PyNaCl                               1.5.0
+pyparsing                            2.4.7
+PyQt5                                5.15.6
+PyQt5-sip                            12.9.1
+pyRFC3339                            1.1
+pyserial                             3.5
+pytest                               6.2.5
+pytest-cov                           3.0.0
+pytest-mock                          3.6.1
+pytest-repeat                        0.9.1
+pytest-rerunfailures                 10.2
+pytest-timeout                       2.1.0
+python-apt                           2.4.0+ubuntu4.1
+python-bidi                          0.6.6
+python-dateutil                      2.8.1
+python-debian                        0.1.43+ubuntu1.1
+python-gitlab                        2.10.1
+python-qt-binding                    1.1.2
+pythran                              0.10.0
+pytz                                 2022.1
+pyxdg                                0.27
+PyYAML                               6.0.2
+qrcode                               8.0
+qt-dotgraph                          2.2.4
+qt-gui                               2.2.4
+qt-gui-cpp                           2.2.4
+qt-gui-py-common                     2.2.4
+quality-of-service-demo-py           0.20.5
+rcl-interfaces                       1.2.1
+rclpy                                3.3.16
+rcutils                              5.1.6
+reportlab                            3.6.8
+requests                             2.25.1
+requests-toolbelt                    0.9.1
+resource-retriever                   3.1.3
+rmw-dds-common                       1.6.0
+robomaster                           0.1.1.65
+robomaster-msgs                      0.2.0
+robomaster-ros                       0.0.0
+roman                                3.3
+ros2action                           0.18.12
+ros2bag                              0.15.14
+ros2cli                              0.18.12
+ros2component                        0.18.12
+ros2doctor                           0.18.12
+ros2interface                        0.18.12
+ros2launch                           0.19.9
+ros2lifecycle                        0.18.12
+ros2multicast                        0.18.12
+ros2node                             0.18.12
+ros2param                            0.18.12
+ros2pkg                              0.18.12
+ros2run                              0.18.12
+ros2service                          0.18.12
+ros2topic                            0.18.12
+rosbag2-interfaces                   0.15.14
+rosbag2-py                           0.15.14
+rosdep                               0.25.1
+rosdep-modules                       0.25.1
+rosdistro                            1.0.1
+rosdistro-modules                    1.0.1
+rosgraph-msgs                        1.2.1
+rosidl-adapter                       3.1.6
+rosidl-cli                           3.1.6
+rosidl-cmake                         3.1.6
+rosidl-generator-c                   3.1.6
+rosidl-generator-cpp                 3.1.6
+rosidl-generator-py                  0.14.4
+rosidl-parser                        3.1.6
+rosidl-runtime-py                    0.9.3
+rosidl-typesupport-c                 2.0.2
+rosidl-typesupport-cpp               2.0.2
+rosidl-typesupport-fastrtps-c        2.2.2
+rosidl-typesupport-fastrtps-cpp      2.2.2
+rosidl-typesupport-introspection-c   3.1.6
+rosidl-typesupport-introspection-cpp 3.1.6
+rospkg                               1.6.0
+rospkg-modules                       1.6.0
+RPi.GPIO                             0.7.1
+rpyutils                             0.2.1
+rqt-action                           2.0.1
+rqt-bag                              1.1.5
+rqt-bag-plugins                      1.1.5
+rqt-console                          2.0.3
+rqt-graph                            1.3.1
+rqt-gui                              1.1.7
+rqt-gui-py                           1.1.7
+rqt-msg                              1.2.0
+rqt-plot                             1.1.5
+rqt-publisher                        1.5.0
+rqt-py-common                        1.1.7
+rqt-py-console                       1.0.2
+rqt-reconfigure                      1.1.2
+rqt-service-caller                   1.0.5
+rqt-shell                            1.0.2
+rqt-srv                              1.0.3
+rqt-topic                            1.5.0
+scipy                                1.8.0
+SecretStorage                        3.3.1
+sensor-msgs                          4.8.0
+sensor-msgs-py                       4.8.0
+setuptools                           59.6.0
+shape-msgs                           4.8.0
+shapely                              2.1.1
+six                                  1.16.0
+snowballstemmer                      2.2.0
+soupsieve                            2.3.1
+sros2                                0.10.6
+statistics-msgs                      1.2.1
+std-msgs                             4.8.0
+std-srvs                             4.8.0
+stereo-msgs                          4.8.0
+swarm-aruco                          0.0.0
+swarm-controller                     0.0.0            /home/elghali/ros2_swarm/build/swarm_controller
+swarm-filter                         0.0.0            /home/elghali/ros2_swarm/build/swarm_filter
+swarm-interfaces                     0.0.0
+swarm-kalman-filter                  0.0.0
+swarm-magnet                         0.0.0
+swarm-marvelmind                     0.0.0            /home/elghali/ros2_swarm/build/swarm_marvelmind
+sympy                                1.9
+systemd-python                       234
+teleop-twist-keyboard                2.4.0
+terminator                           2.1.1
+tf2-geometry-msgs                    0.25.12
+tf2-kdl                              0.25.12
+tf2-msgs                             0.25.12
+tf2-py                               0.25.12
+tf2-ros-py                           0.25.12
+tf2-tools                            0.25.12
+toml                                 0.10.2
+tomli                                1.2.2
+topic-monitor                        0.20.5
+trajectory-msgs                      4.8.0
+transforms3d                         0.4.2
+turtlesim                            1.4.2
+typed-ast                            1.4.3
+typing-extensions                    3.10.0.2
+ubuntu-drivers-common                0.0.0
+ubuntu-pro-client                    8001
+ufoLib2                              0.13.1
+ufw                                  0.36.1
+unattended-upgrades                  0.1
+unicodedata2                         14.0.0
+unique-identifier-msgs               2.2.1
+urllib3                              1.26.5
+usb-creator                          0.3.7
+vcstool                              0.3.0
+vcstools                             0.1.42
+visualization-msgs                   4.8.0
+wadllib                              1.3.6
+webencodings                         0.5.1
+wheel                                0.37.1
+wrapt                                1.13.3
+xacro                                2.0.13
+xdg                                  5
+xkit                                 0.0.0
+zipp                                 1.0.0
+
+================ ROBO MASTER =================
+Name: robomaster
+Version: 0.1.1.65
+Summary: RoboMaster Python SDK
+Home-page: http://www.robomaster.com
+Author: EDU SDK TEAM
+Author-email: 
+License: Apache License, Version 2.0
+Location: /home/elghali/.local/lib/python3.10/site-packages
+Requires: myqr, netaddr, netifaces, numpy, opencv-python
+Required-by: robomaster-ros
+robomaster imported OK
+libmedia_codec imported OK
+libmedia_codec location: /home/elghali/.local/lib/python3.10/site-packages/libmedia_codec.cpython-310-x86_64-linux-gnu.so
+
+================ SHARED LIB DEPENDENCIES (codec) =================
+Codec path: /home/elghali/.local/lib/python3.10/site-packages/libmedia_codec.cpython-310-x86_64-linux-gnu.so
+	linux-vdso.so.1 (0x00007fff7b7aa000)
+	libavcodec.so.58 => /lib/x86_64-linux-gnu/libavcodec.so.58 (0x0000792f61400000)
+	libswscale.so.5 => /lib/x86_64-linux-gnu/libswscale.so.5 (0x0000792f61362000)
+	libavutil.so.56 => /lib/x86_64-linux-gnu/libavutil.so.56 (0x0000792f61000000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x0000792f60c00000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x0000792f6282b000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x0000792f60800000)
+	libswresample.so.3 => /lib/x86_64-linux-gnu/libswresample.so.3 (0x0000792f62809000)
+	libvpx.so.7 => /lib/x86_64-linux-gnu/libvpx.so.7 (0x0000792f60400000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x0000792f60f19000)
+	libwebpmux.so.3 => /lib/x86_64-linux-gnu/libwebpmux.so.3 (0x0000792f61355000)
+	libwebp.so.7 => /lib/x86_64-linux-gnu/libwebp.so.7 (0x0000792f612e6000)
+	liblzma.so.5 => /lib/x86_64-linux-gnu/liblzma.so.5 (0x0000792f612bb000)
+	libdav1d.so.5 => /lib/x86_64-linux-gnu/libdav1d.so.5 (0x0000792f60a7a000)
+	librsvg-2.so.2 => /lib/x86_64-linux-gnu/librsvg-2.so.2 (0x0000792f5f800000)
+	libgobject-2.0.so.0 => /lib/x86_64-linux-gnu/libgobject-2.0.so.0 (0x0000792f60eb9000)
+	libglib-2.0.so.0 => /lib/x86_64-linux-gnu/libglib-2.0.so.0 (0x0000792f602c5000)
+	libcairo.so.2 => /lib/x86_64-linux-gnu/libcairo.so.2 (0x0000792f5f6d8000)
+	libzvbi.so.0 => /lib/x86_64-linux-gnu/libzvbi.so.0 (0x0000792f60771000)
+	libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x0000792f60e9d000)
+	libsnappy.so.1 => /lib/x86_64-linux-gnu/libsnappy.so.1 (0x0000792f60e93000)
+	libaom.so.3 => /lib/x86_64-linux-gnu/libaom.so.3 (0x0000792f5f000000)
+	libcodec2.so.1.0 => /lib/x86_64-linux-gnu/libcodec2.so.1.0 (0x0000792f5e000000)
+	libgsm.so.1 => /lib/x86_64-linux-gnu/libgsm.so.1 (0x0000792f60e82000)
+	libmp3lame.so.0 => /lib/x86_64-linux-gnu/libmp3lame.so.0 (0x0000792f5f663000)
+	libopenjp2.so.7 => /lib/x86_64-linux-gnu/libopenjp2.so.7 (0x0000792f60719000)
+	libopus.so.0 => /lib/x86_64-linux-gnu/libopus.so.0 (0x0000792f5f605000)
+	libshine.so.3 => /lib/x86_64-linux-gnu/libshine.so.3 (0x0000792f5dc00000)
+	libspeex.so.1 => /lib/x86_64-linux-gnu/libspeex.so.1 (0x0000792f60e64000)
+	libtheoraenc.so.1 => /lib/x86_64-linux-gnu/libtheoraenc.so.1 (0x0000792f60a42000)
+	libtheoradec.so.1 => /lib/x86_64-linux-gnu/libtheoradec.so.1 (0x0000792f60e44000)
+	libtwolame.so.0 => /lib/x86_64-linux-gnu/libtwolame.so.0 (0x0000792f602a0000)
+	libvorbis.so.0 => /lib/x86_64-linux-gnu/libvorbis.so.0 (0x0000792f60273000)
+	libvorbisenc.so.2 => /lib/x86_64-linux-gnu/libvorbisenc.so.2 (0x0000792f5ef55000)
+	libx264.so.163 => /lib/x86_64-linux-gnu/libx264.so.163 (0x0000792f5d800000)
+	libx265.so.199 => /lib/x86_64-linux-gnu/libx265.so.199 (0x0000792f5c800000)
+	libxvidcore.so.4 => /lib/x86_64-linux-gnu/libxvidcore.so.4 (0x0000792f5deed000)
+	libva.so.2 => /lib/x86_64-linux-gnu/libva.so.2 (0x0000792f5f5d4000)
+	libmfx.so.1 => /lib/x86_64-linux-gnu/libmfx.so.1 (0x0000792f60e34000)
+	libva-drm.so.2 => /lib/x86_64-linux-gnu/libva-drm.so.2 (0x0000792f60e2f000)
+	libva-x11.so.2 => /lib/x86_64-linux-gnu/libva-x11.so.2 (0x0000792f60a3a000)
+	libvdpau.so.1 => /lib/x86_64-linux-gnu/libvdpau.so.1 (0x0000792f60a34000)
+	libX11.so.6 => /lib/x86_64-linux-gnu/libX11.so.6 (0x0000792f5c6c0000)
+	libdrm.so.2 => /lib/x86_64-linux-gnu/libdrm.so.2 (0x0000792f5f5be000)
+	libOpenCL.so.1 => /lib/x86_64-linux-gnu/libOpenCL.so.1 (0x0000792f5f5ac000)
+	/lib64/ld-linux-x86-64.so.2 (0x0000792f62892000)
+	libsoxr.so.0 => /lib/x86_64-linux-gnu/libsoxr.so.0 (0x0000792f5eeee000)
+	libcairo-gobject.so.2 => /lib/x86_64-linux-gnu/libcairo-gobject.so.2 (0x0000792f5f5a0000)
+	libgdk_pixbuf-2.0.so.0 => /lib/x86_64-linux-gnu/libgdk_pixbuf-2.0.so.0 (0x0000792f5eebe000)
+	libgio-2.0.so.0 => /lib/x86_64-linux-gnu/libgio-2.0.so.0 (0x0000792f5c4e5000)
+	libxml2.so.2 => /lib/x86_64-linux-gnu/libxml2.so.2 (0x0000792f5c303000)
+	libpangocairo-1.0.so.0 => /lib/x86_64-linux-gnu/libpangocairo-1.0.so.0 (0x0000792f5f58e000)
+	libpango-1.0.so.0 => /lib/x86_64-linux-gnu/libpango-1.0.so.0 (0x0000792f5de86000)
+	libffi.so.8 => /lib/x86_64-linux-gnu/libffi.so.8 (0x0000792f5f581000)
+	libpcre.so.3 => /lib/x86_64-linux-gnu/libpcre.so.3 (0x0000792f5de10000)
+	libpixman-1.so.0 => /lib/x86_64-linux-gnu/libpixman-1.so.0 (0x0000792f5db55000)
+	libfontconfig.so.1 => /lib/x86_64-linux-gnu/libfontconfig.so.1 (0x0000792f5db0b000)
+	libfreetype.so.6 => /lib/x86_64-linux-gnu/libfreetype.so.6 (0x0000792f5c23b000)
+	libpng16.so.16 => /lib/x86_64-linux-gnu/libpng16.so.16 (0x0000792f5dad0000)
+	libxcb-shm.so.0 => /lib/x86_64-linux-gnu/libxcb-shm.so.0 (0x0000792f60a29000)
+	libxcb.so.1 => /lib/x86_64-linux-gnu/libxcb.so.1 (0x0000792f5d7d6000)
+	libxcb-render.so.0 => /lib/x86_64-linux-gnu/libxcb-render.so.0 (0x0000792f5f572000)
+	libXrender.so.1 => /lib/x86_64-linux-gnu/libXrender.so.1 (0x0000792f5eeb1000)
+	libXext.so.6 => /lib/x86_64-linux-gnu/libXext.so.6 (0x0000792f5d7c1000)
+	libogg.so.0 => /lib/x86_64-linux-gnu/libogg.so.0 (0x0000792f60268000)
+	libnuma.so.1 => /lib/x86_64-linux-gnu/libnuma.so.1 (0x0000792f5dac3000)
+	libpthread.so.0 => /lib/x86_64-linux-gnu/libpthread.so.0 (0x0000792f60712000)
+	libXfixes.so.3 => /lib/x86_64-linux-gnu/libXfixes.so.3 (0x0000792f5eea9000)
+	libgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x0000792f5d777000)
+	libgmodule-2.0.so.0 => /lib/x86_64-linux-gnu/libgmodule-2.0.so.0 (0x0000792f5d770000)
+	libjpeg.so.8 => /lib/x86_64-linux-gnu/libjpeg.so.8 (0x0000792f5c1ba000)
+	libmount.so.1 => /lib/x86_64-linux-gnu/libmount.so.1 (0x0000792f5c176000)
+	libselinux.so.1 => /lib/x86_64-linux-gnu/libselinux.so.1 (0x0000792f5c14a000)
+	libicuuc.so.70 => /lib/x86_64-linux-gnu/libicuuc.so.70 (0x0000792f5bf4f000)
+	libpangoft2-1.0.so.0 => /lib/x86_64-linux-gnu/libpangoft2-1.0.so.0 (0x0000792f5bf34000)
+	libharfbuzz.so.0 => /lib/x86_64-linux-gnu/libharfbuzz.so.0 (0x0000792f5be65000)
+	libfribidi.so.0 => /lib/x86_64-linux-gnu/libfribidi.so.0 (0x0000792f5be49000)
+	libthai.so.0 => /lib/x86_64-linux-gnu/libthai.so.0 (0x0000792f5d765000)
+	libexpat.so.1 => /lib/x86_64-linux-gnu/libexpat.so.1 (0x0000792f5be18000)
+	libuuid.so.1 => /lib/x86_64-linux-gnu/libuuid.so.1 (0x0000792f5be0f000)
+	libbrotlidec.so.1 => /lib/x86_64-linux-gnu/libbrotlidec.so.1 (0x0000792f5be01000)
+	libXau.so.6 => /lib/x86_64-linux-gnu/libXau.so.6 (0x0000792f5bdfb000)
+	libXdmcp.so.6 => /lib/x86_64-linux-gnu/libXdmcp.so.6 (0x0000792f5bdf3000)
+	libblkid.so.1 => /lib/x86_64-linux-gnu/libblkid.so.1 (0x0000792f5bdbc000)
+	libpcre2-8.so.0 => /lib/x86_64-linux-gnu/libpcre2-8.so.0 (0x0000792f5bd25000)
+	libicudata.so.70 => /lib/x86_64-linux-gnu/libicudata.so.70 (0x0000792f5a000000)
+	libgraphite2.so.3 => /lib/x86_64-linux-gnu/libgraphite2.so.3 (0x0000792f5bcfe000)
+	libdatrie.so.1 => /lib/x86_64-linux-gnu/libdatrie.so.1 (0x0000792f5bcf5000)
+	libbrotlicommon.so.1 => /lib/x86_64-linux-gnu/libbrotlicommon.so.1 (0x0000792f5bcd2000)
+	libbsd.so.0 => /lib/x86_64-linux-gnu/libbsd.so.0 (0x0000792f5bcba000)
+	libmd.so.0 => /lib/x86_64-linux-gnu/libmd.so.0 (0x0000792f5bcad000)
+
+================ WORKSPACE STRUCTURE =================
+/home/elghali/ros2_swarm
+swarm_aruco	src/swarm_aruco	(ros.ament_python)
+swarm_bringup	src/swarm_bringup	(ros.ament_cmake)
+swarm_controller	src/swarm_controller	(ros.ament_python)
+swarm_filter	src/swarm_filter	(ros.ament_python)
+swarm_interfaces	src/swarm_interfaces	(ros.ament_cmake)
+swarm_kalman_filter	src/swarm_kalman_filter	(ros.ament_python)
+swarm_magnet	src/swarm_magnet	(ros.ament_python)
+swarm_marvelmind	src/swarm_marvelmind	(ros.ament_python)

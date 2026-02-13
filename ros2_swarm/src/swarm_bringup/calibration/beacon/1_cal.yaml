@@ -1,0 +1,7 @@
+%YAML:1.0
+---
+gyro_cal: !!opencv-matrix
+   rows: 2
+   cols: 1
+   dt: d
+   data: [ -19.118008079552517, -3.1260829129802739 ]
