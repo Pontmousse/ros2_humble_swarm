@@ -36,16 +36,7 @@ COPY swarm_docker_img/python_arm64_env.tar.gz /tmp/
 RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
     rm /tmp/python_arm64_env.tar.gz
 
-ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
-
-# ================================
-# rosdep
-# ================================
-RUN rosdep init 2>/dev/null || true && \
-    apt-get update && \
-    rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y && \
-    rm -rf /var/lib/apt/lists/*
+ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages
 
 # ================================
 # Workspace
@@ -56,6 +47,15 @@ RUN mkdir -p src
 COPY ros2_marvelmind/src/ src/
 COPY ros2_robomaster/src/ src/
 COPY ros2_swarm/src/ src/
+
+# ================================
+# rosdep
+# ================================
+RUN rosdep init 2>/dev/null || true && \
+    apt-get update && \
+    rosdep update && \
+    rosdep install --from-paths src --ignore-src -r -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # ================================
 # Build
