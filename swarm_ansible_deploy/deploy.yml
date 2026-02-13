@@ -1,0 +1,88 @@
+---
+- name: Deploy RoboMaster Swarm Node
+  hosts: pi5
+  become: yes
+
+  tasks:
+
+    - name: Update apt
+      apt:
+        update_cache: yes
+
+    - name: Install required packages
+      apt:
+        name:
+          - docker.io
+          - python3-pip
+          - git
+          - libopus-dev
+        state: present
+
+    - name: Ensure docker is running
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Add user to docker group
+      user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: yes
+
+    - name: Ensure gpio group exists
+      group:
+        name: gpio
+        state: present
+
+    - name: Add user to gpio group
+      user:
+        name: "{{ ansible_user }}"
+        groups: gpio
+        append: yes
+
+    - name: Add user to dialout group
+      user:
+        name: "{{ ansible_user }}"
+        groups: dialout
+        append: yes
+
+    - name: Install GPIO package
+      apt:
+        name: python3-rpi.gpio
+        state: present
+
+    - name: Create GPIO udev rules
+      copy:
+        dest: /etc/udev/rules.d/99-gpio.rules
+        content: |
+          SUBSYSTEM=="gpio*", GROUP="gpio", MODE="770"
+          SUBSYSTEM=="pwm*", GROUP="gpio", MODE="770"
+          KERNEL=="spidev*", GROUP="gpio", MODE="660"
+          KERNEL=="i2c-[0-9]*", GROUP="gpio", MODE="660"
+          KERNEL=="ttyAMA[0-9]*", GROUP="gpio", MODE="660"
+          KERNEL=="gpiomem", GROUP="gpio", MODE="660"
+
+    - name: Reload udev rules
+      command: udevadm control --reload-rules
+
+    - name: Trigger udev
+      command: udevadm trigger
+
+    - name: Pull swarm image
+      community.docker.docker_image:
+        name: yourdockerhubuser/swarm_image
+        source: pull
+
+    - name: Run swarm container
+      community.docker.docker_container:
+        name: swarm
+        image: yourdockerhubuser/swarm_image
+        state: started
+        restart_policy: always
+        privileged: yes
+        devices:
+          - /dev/gpiomem
+          - /dev/ttyUSB0
+          - /dev/ttyAMA0
+        network_mode: host
