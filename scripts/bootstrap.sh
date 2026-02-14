@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-echo "=== RoboMaster Pi bootstrap starting ==="
+echo "=== RoboMaster Pi bootstrap (host-only, no Python) ==="
 
 # -----------------------------
 # 1. Update apt (safe to repeat)
@@ -9,7 +9,7 @@ echo "=== RoboMaster Pi bootstrap starting ==="
 sudo apt update
 
 # -----------------------------
-# 2. Install packages IF missing
+# 2. Install system packages IF missing
 # -----------------------------
 install_if_missing() {
   if ! dpkg -s "$1" >/dev/null 2>&1; then
@@ -21,8 +21,6 @@ install_if_missing() {
 }
 
 install_if_missing docker.io
-install_if_missing python3-pip
-install_if_missing python3-rpi.gpio
 install_if_missing git
 install_if_missing libopus-dev
 
@@ -33,17 +31,7 @@ sudo systemctl enable docker
 sudo systemctl start docker
 
 # -----------------------------
-# 4. Install Docker Python module
-# -----------------------------
-if ! python3 -c "import docker" >/dev/null 2>&1; then
-  echo "Installing python docker module"
-  sudo pip3 install docker
-else
-  echo "Python docker module already installed"
-fi
-
-# -----------------------------
-# 5. Groups (safe if repeated)
+# 4. Groups (safe if repeated)
 # -----------------------------
 sudo groupadd -f gpio
 sudo groupadd -f dialout
@@ -53,7 +41,7 @@ sudo usermod -aG gpio "$USER"
 sudo usermod -aG dialout "$USER"
 
 # -----------------------------
-# 6. Udev rules (overwrite-safe)
+# 5. Udev rules (overwrite-safe)
 # -----------------------------
 UDEV_FILE="/etc/udev/rules.d/99-gpio.rules"
 
@@ -75,7 +63,7 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 
 # -----------------------------
-# 7. Pull Docker image IF missing
+# 6. Pull Docker image IF missing
 # -----------------------------
 IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v1"
 
@@ -87,7 +75,7 @@ else
 fi
 
 # -----------------------------
-# 8. Run container IF not running
+# 7. Run container IF not running
 # -----------------------------
 CONTAINER="swarm"
 
@@ -108,4 +96,4 @@ else
 fi
 
 echo "=== Bootstrap complete ==="
-echo "Reboot recommended to apply group permissions"
+echo "Reboot REQUIRED to apply group permissions"
