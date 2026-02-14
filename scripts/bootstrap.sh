@@ -82,6 +82,8 @@ CONTAINER="swarm"
 if ! sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   echo "Starting swarm container"
   sudo docker run -d \
+    -e LAUNCH_FILE=launch_magnet.py \
+    -e ROBOT_IDX=4 \
     --name "$CONTAINER" \
     --restart always \
     --privileged \
