@@ -1,4 +1,5 @@
 git clone https://github.com/Pontmousse/ros2_humble_swarm.git
 cd ros2_humble_swarm
+chmod +x scripts/bootstrap.sh
 ./scripts/bootstrap.sh
 sudo reboot
