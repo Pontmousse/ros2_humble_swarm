@@ -32,7 +32,21 @@ def load_swarm_config():
     # Selection indices (1-based indexing)
     # e.g., selecting RM1 and RM2
     # Here order doesn't matter, selecting [1, 2] or [2, 1] is exactly the same
-    idx = [3]  
+    # idx = [3]  
+
+
+    ###############################################################################
+    # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
+    env_idx = os.getenv('ROBOT_IDX')
+
+    if env_idx is None:
+        raise RuntimeError("ROBOT_IDX environment variable must be set.")
+
+    idx = [int(i.strip()) for i in env_idx.split(',') if i.strip().isdigit()]
+
+    if not idx:
+        raise ValueError("ROBOT_IDX is set but contains no valid indices.")
+
 
 
     ################################################################################################

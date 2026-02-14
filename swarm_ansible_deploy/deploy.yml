@@ -1,39 +1,49 @@
 ---
 - name: Deploy RoboMaster Swarm Node
-  hosts: pi5
+  hosts: robots
   become: yes
 
   tasks:
 
-    - name: Update apt
+    - name: Update apt cache
       apt:
         update_cache: yes
 
-    - name: Install required packages
+    - name: Install required system packages
       apt:
         name:
           - docker.io
           - python3-pip
+          - python3-rpi.gpio
           - git
           - libopus-dev
         state: present
 
-    - name: Ensure docker is running
+    - name: Ensure docker service is running
       systemd:
         name: docker
         enabled: yes
         state: started
+
+    - name: Install docker Python module for Ansible
+      pip:
+        name: docker
+
+    - name: Ensure gpio group exists
+      group:
+        name: gpio
+        state: present
+
+    - name: Ensure dialout group exists
+      group:
+        name: dialout
+        state: present
 
     - name: Add user to docker group
       user:
         name: "{{ ansible_user }}"
         groups: docker
         append: yes
-
-    - name: Ensure gpio group exists
-      group:
-        name: gpio
-        state: present
 
     - name: Add user to gpio group
       user:
@@ -46,11 +56,6 @@
         name: "{{ ansible_user }}"
         groups: dialout
         append: yes
-
-    - name: Install GPIO package
-      apt:
-        name: python3-rpi.gpio
-        state: present
 
     - name: Create GPIO udev rules
       copy:
@@ -69,20 +74,25 @@
     - name: Trigger udev
       command: udevadm trigger
 
-    - name: Pull swarm image
+    - name: Pull swarm Docker image
       community.docker.docker_image:
-        name: yourdockerhubuser/swarm_image
+        name: elghaliasri/ros2-humble-swarm:robot-arm64-v1
         source: pull
 
     - name: Run swarm container
       community.docker.docker_container:
-        name: swarm
-        image: yourdockerhubuser/swarm_image
+        name: "{{ inventory_hostname }}"
+        image: elghaliasri/ros2-humble-swarm:robot-arm64-v1
         state: started
         restart_policy: always
         privileged: yes
+        network_mode: host
         devices:
           - /dev/gpiomem
           - /dev/ttyUSB0
+          - /dev/ttyUSB1
           - /dev/ttyAMA0
-        network_mode: host
+
+    - name: Reboot robot to apply group changes
+      reboot:
+        reboot_timeout: 300

@@ -25,12 +25,12 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 90.0, 0.0] 
+    # init_orientations = [90.0, 0.0, 90.0, 0.0] 
 
 
     # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # Select ONLY one here for this launch file
-    idx = [1]
+    # idx = [1]
 
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
