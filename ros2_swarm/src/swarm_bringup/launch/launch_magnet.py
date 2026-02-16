@@ -105,27 +105,28 @@ def load_swarm_config():
 
 
 def generate_launch_description():
-    init_period = 2.0 # in seconds
+    gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 
     beacon_addresses, robot_names, robot_serial_numbers, init_orientations = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
 
-    ##############################################################################
-    ##############################################################################
     for i in range(N):
         robot_name = robot_names[i]
 
-        pointing_planner = Node(
+        magnet_node = Node(
             package="swarm_magnet",
             executable="gpio_control_node",
             name="magnet_node",
             namespace=robot_name,
             output="screen",
             emulate_tty=True,
-            )
-        ld.add_action(pointing_planner)
+            parameters=[
+                {"gpio_line": gpio_line}
+            ],
+        )
 
+        ld.add_action(magnet_node)
 
     return ld

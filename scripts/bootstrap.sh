@@ -92,6 +92,7 @@ if ! sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
   sudo docker run -d \
     -e LAUNCH_FILE=launch_magnet.py \
     -e ROBOT_IDX=4 \
+    -e GPIO_LINE=4 \
     --name "$CONTAINER" \
     --restart always \
     --privileged \

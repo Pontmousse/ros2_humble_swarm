@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-joy-linux \
     ros-humble-ffmpeg-encoder-decoder \
     gpiod \
-    python3-gpiod \
+    libgpiod-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # ================================
@@ -38,7 +38,9 @@ COPY swarm_docker_img/python_arm64_env.tar.gz /tmp/
 RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
     rm /tmp/python_arm64_env.tar.gz
 
-ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages
+ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
+
+RUN python3 -m pip install --no-cache-dir gpiod
 
 # ================================
 # Workspace
