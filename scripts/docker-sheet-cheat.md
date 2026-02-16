@@ -1,4 +1,4 @@
-Here’s a **clean, concise Markdown version** you can drop straight into a `README.md`.
+Here’s the **same concise Markdown**, extended with **removal / cleanup commands**, still minimal and README-ready.
 
 ---
 
@@ -84,4 +84,64 @@ Follow logs live (useful for ROS launch output).
 
 ---
 
-That’s the **minimal daily-use set** — nothing extra, nothing missing.
+## 🧹 Remove / Cleanup
+
+### Remove a container
+
+```bash
+sudo docker stop swarm
+sudo docker rm swarm
+```
+
+Stops and removes the container.
+
+---
+
+### Remove a Docker image
+
+```bash
+sudo docker rmi elghaliasri/ros2-humble-swarm:robot-arm64-v1
+```
+
+Removes the image (must not be used by any container).
+
+---
+
+### Remove all stopped containers
+
+```bash
+sudo docker container prune
+```
+
+Deletes **stopped** containers only.
+
+---
+
+### Remove unused images
+
+```bash
+sudo docker image prune
+```
+
+Deletes dangling (unused) images.
+
+---
+
+### Full cleanup (use with care)
+
+```bash
+sudo docker system prune
+```
+
+Removes:
+
+* stopped containers
+* unused images
+* unused networks
+* build cache
+
+⚠️ **Do not run casually**.
+
+---
+
+That’s the **complete, minimal operational set** for Docker on your swarm robots.
