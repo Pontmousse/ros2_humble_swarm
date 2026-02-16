@@ -68,12 +68,19 @@ sudo udevadm trigger
 # -----------------------------
 IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v3"
 
+if docker ps -a --format '{{.Names}}' | grep -q '^swarm$'; then
+  echo "Removing existing swarm container"
+  docker rm swarm
+fi
+
 if ! sudo docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Pulling Docker image"
   sudo docker pull "$IMAGE"
 else
   echo "Docker image already present"
 fi
+
+docker image prune -f
 
 # -----------------------------
 # 7. Run container IF not running
