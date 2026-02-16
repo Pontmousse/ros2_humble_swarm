@@ -33,6 +33,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-joy-linux \
     ros-humble-ffmpeg-encoder-decoder \
     ros-humble-ament-cmake-clang-format \
+    gpiod \
+    python3-gpiod \
     && rm -rf /var/lib/apt/lists/*
 
 # ==========================================

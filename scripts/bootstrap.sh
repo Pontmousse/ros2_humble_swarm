@@ -23,6 +23,7 @@ install_if_missing() {
 install_if_missing docker.io
 install_if_missing git
 install_if_missing libopus-dev
+install_if_missing gpiod
 
 # -----------------------------
 # 3. Enable Docker
@@ -65,7 +66,7 @@ sudo udevadm trigger
 # -----------------------------
 # 6. Pull Docker image IF missing
 # -----------------------------
-IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v2"
+IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v3"
 
 if ! sudo docker image inspect "$IMAGE" >/dev/null 2>&1; then
   echo "Pulling Docker image"
@@ -89,6 +90,8 @@ if ! sudo docker ps --format '{{.Names}}' | grep -q "^${CONTAINER}$"; then
     --privileged \
     --network host \
     --device /dev/gpiomem \
+    --device /dev/gpiochip0 \
+    --device /dev/gpiochip4 \
     --device /dev/ttyUSB0 \
     --device /dev/ttyUSB1 \
     --device /dev/ttyAMA0 \
