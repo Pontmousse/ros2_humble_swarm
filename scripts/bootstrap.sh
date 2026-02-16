@@ -66,7 +66,7 @@ sudo udevadm trigger
 # -----------------------------
 # 6. Pull Docker image IF missing
 # -----------------------------
-IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v3"
+IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v4"
 
 if docker ps -a --format '{{.Names}}' | grep -q '^swarm$'; then
   echo "Removing existing swarm container"
