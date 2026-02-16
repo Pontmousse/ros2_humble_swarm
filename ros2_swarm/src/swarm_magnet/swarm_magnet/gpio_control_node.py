@@ -11,79 +11,49 @@ class GPIOControlNode(Node):
     def __init__(self):
         super().__init__('gpio_control_node')
 
-        # ----------------------------
-        # Parameters
-        # ----------------------------
+        # ROS parameter (kernel line number!)
         self.declare_parameter('gpio_line', 4)
-        self.gpio_line = (
-            self.get_parameter('gpio_line')
-            .get_parameter_value()
-            .integer_value
-        )
+        self.gpio_line = self.get_parameter('gpio_line').value
 
-        # ----------------------------
-        # Select gpiochip (highest index)
-        # ----------------------------
+        # Select gpiochip (highest index = RP1 on Pi 5)
         chips = glob.glob("/dev/gpiochip*")
-        if not chips:
-            raise RuntimeError("No gpiochip devices found")
+        chip_path = max(chips, key=lambda p: int(p.replace("/dev/gpiochip", "")))
 
-        chip_path = max(
-            chips, key=lambda p: int(p.replace("/dev/gpiochip", ""))
-        )
         self.get_logger().info(f"Using GPIO chip: {chip_path}")
         self.get_logger().info(f"Using GPIO line: {self.gpio_line}")
 
         self.chip = gpiod.Chip(chip_path)
+        self.line = self.chip.get_line(self.gpio_line)
 
-        # ----------------------------
-        # Request GPIO line (libgpiod v2)
-        # ----------------------------
-        self.lines = self.chip.request_lines(
+        self.line.request(
             consumer="ros2_gpio_control",
-            config={
-                self.gpio_line: gpiod.LineSettings(
-                    direction=gpiod.LineDirection.OUTPUT,
-                    output_value=gpiod.LineValue.INACTIVE,
-                )
-            },
+            type=gpiod.LINE_REQ_DIR_OUT,
+            default_vals=[0],
         )
 
-        self.get_logger().info(
-            f"GPIO Control Node started (line {self.gpio_line})"
-        )
-
-        # ----------------------------
-        # Service
-        # ----------------------------
         self.srv = self.create_service(
             SetBool,
             'toggle_magnet',
             self.handle_toggle
         )
 
-    def handle_toggle(self, request, response):
-        value = (
-            gpiod.LineValue.ACTIVE
-            if request.data
-            else gpiod.LineValue.INACTIVE
-        )
+        self.get_logger().info("GPIO Control Node started")
 
-        self.lines.set_values({self.gpio_line: value})
+    def handle_toggle(self, request, response):
+        value = 1 if request.data else 0
+        self.line.set_value(value)
 
         state = "ON" if request.data else "OFF"
-        self.get_logger().info(
-            f"GPIO {self.gpio_line} set {state}"
-        )
+        self.get_logger().info(f"GPIO {self.gpio_line} set {state}")
 
         response.success = True
         response.message = f"Magnet {state}"
         return response
 
     def destroy_node(self):
-        self.get_logger().info("Releasing GPIO line")
         try:
-            self.lines.release()
+            self.line.set_value(0)
+            self.line.release()
             self.chip.close()
         except Exception as e:
             self.get_logger().warn(f"GPIO cleanup error: {e}")
