@@ -40,8 +40,6 @@ RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
 
 ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
 
-RUN python3 -m pip install --no-cache-dir gpiod
-
 # ================================
 # Workspace
 # ================================
