@@ -70,11 +70,15 @@ IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v6"
 
 # Stop only if running
 if docker ps --format '{{.Names}}' | grep -q '^swarm$'; then
+  echo ""
+  echo "Stopping existing swarm container"
   docker stop swarm
 fi
 
 # Remove if exists
 if docker ps -a --format '{{.Names}}' | grep -q '^swarm$'; then
+  echo "Removing existing swarm container"
+  echo ""
   docker rm swarm
 fi
 
