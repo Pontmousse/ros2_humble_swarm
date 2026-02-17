@@ -11,5 +11,5 @@ docker buildx build   --platform linux/arm64   -f swarm_docker_img/Dockerfile.ta
 docker buildx build \
   --platform linux/arm64 \
   -f swarm_docker_img/Dockerfile.tar.arm64 \
-  -t elghaliasri/ros2-humble-swarm:robot-arm64-v6 \
+  -t elghaliasri/ros2-humble-swarm:robot-arm64-v7 \
   --push .

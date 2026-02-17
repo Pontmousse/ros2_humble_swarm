@@ -11,24 +11,35 @@ class GPIOControlNode(Node):
     def __init__(self):
         super().__init__('gpio_control_node')
 
-        # ROS parameter (kernel line number!)
+        # ROS parameter: kernel GPIO line number
         self.declare_parameter('gpio_line', 4)
-        self.gpio_line = self.get_parameter('gpio_line').value
+        self.gpio_line = int(self.get_parameter('gpio_line').value)
 
-        # Select gpiochip (highest index = RP1 on Pi 5)
+        # Detect gpiochip (highest index = RP1 on Pi 5)
         chips = glob.glob("/dev/gpiochip*")
-        chip_path = max(chips, key=lambda p: int(p.replace("/dev/gpiochip", "")))
+        if not chips:
+            raise RuntimeError(
+                "No /dev/gpiochip* devices found. "
+                "This node must run on GPIO-capable hardware."
+            )
 
-        self.get_logger().info(f"Using GPIO chip: {chip_path}")
+        self.chip_path = max(
+            chips, key=lambda p: int(p.replace("/dev/gpiochip", ""))
+        )
+
+        self.get_logger().info(f"Using GPIO chip: {self.chip_path}")
         self.get_logger().info(f"Using GPIO line: {self.gpio_line}")
 
-        self.chip = gpiod.Chip(chip_path)
-        self.line = self.chip.get_line(self.gpio_line)
-
-        self.line.request(
+        # Request GPIO line using libgpiod v2.4+ API
+        self.request = gpiod.request_lines(
+            self.chip_path,
             consumer="ros2_gpio_control",
-            type=gpiod.LINE_REQ_DIR_OUT,
-            default_vals=[0],
+            config={
+                self.gpio_line: gpiod.LineSettings(
+                    direction=gpiod.line.Direction.OUTPUT,
+                    output_value=gpiod.line.Value.INACTIVE,
+                )
+            },
         )
 
         self.srv = self.create_service(
@@ -37,11 +48,18 @@ class GPIOControlNode(Node):
             self.handle_toggle
         )
 
-        self.get_logger().info("GPIO Control Node started")
+        self.get_logger().info(
+            "GPIO Control Node started (libgpiod v2.4+)"
+        )
 
     def handle_toggle(self, request, response):
-        value = 1 if request.data else 0
-        self.line.set_value(value)
+        value = (
+            gpiod.line.Value.ACTIVE
+            if request.data
+            else gpiod.line.Value.INACTIVE
+        )
+
+        self.request.set_values({self.gpio_line: value})
 
         state = "ON" if request.data else "OFF"
         self.get_logger().info(f"GPIO {self.gpio_line} set {state}")
@@ -52,17 +70,21 @@ class GPIOControlNode(Node):
 
     def destroy_node(self):
         try:
-            self.line.set_value(0)
-            self.line.release()
-            self.chip.close()
+            # Ensure magnet is off on shutdown
+            self.request.set_values(
+                {self.gpio_line: gpiod.line.Value.INACTIVE}
+            )
+            self.request.release()
         except Exception as e:
             self.get_logger().warn(f"GPIO cleanup error: {e}")
+
         super().destroy_node()
 
 
 def main(args=None):
     rclpy.init(args=args)
     node = GPIOControlNode()
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
