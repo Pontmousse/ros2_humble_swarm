@@ -67,7 +67,7 @@ sudo udevadm trigger
 # -----------------------------
 # 6. Pull Docker image IF missing
 # -----------------------------
-IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v7"
+IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v8"
 
 # Stop only if running
 if docker ps --format '{{.Names}}' | grep -q '^swarm$'; then
