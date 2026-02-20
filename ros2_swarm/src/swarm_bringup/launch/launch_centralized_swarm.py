@@ -10,8 +10,8 @@ import os
 from launch.substitutions import LaunchConfiguration
 
 
-import os
 
+gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 
 def load_swarm_config():
 
@@ -528,6 +528,25 @@ def generate_launch_description():
 
         ld.add_action(cp_control)
 
+
+    ##############################################################################
+    ############################ - Magnet node - #################################
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        magnet_node = Node(
+            package="swarm_magnet",
+            executable="gpio_control_node",
+            name="magnet_node",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {"gpio_line": gpio_line}
+            ],
+        )
+
+        ld.add_action(magnet_node)
 
 
     # ##############################################################################

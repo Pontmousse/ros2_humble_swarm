@@ -1,43 +1,4 @@
 
-
-###########################################################################################
-###########################################################################################
-# def _split_env(name, cast=str):
-#     val = os.getenv(name)
-#     if val is None:
-#         raise RuntimeError(f"Missing required environment variable: {name}")
-#     return [cast(x.strip()) for x in val.split(",") if x.strip()]
-
-# def load_swarm_config():
-#     """
-#     Load swarm configuration from resolved environment variables.
-#     Supports 1 or more robots via comma-separated ENV vars.
-#     """
-
-#     robot_names = _split_env("ROBOT_NAME", str)
-#     beacon_addresses = _split_env("BEACON_ADDR", int)
-#     robot_serial_numbers = _split_env("ROBOT_SERIAL", str)
-#     init_orientations = _split_env("INITIAL_ORIENT", float)
-
-#     n = len(robot_names)
-
-#     if not (
-#         len(beacon_addresses) ==
-#         len(robot_serial_numbers) ==
-#         len(init_orientations) ==
-#         n
-#     ):
-#         raise ValueError("ENV var lists must all have the same length")
-
-#     return (
-#         beacon_addresses,
-#         robot_names,
-#         robot_serial_numbers,
-#         init_orientations,
-#     )
-
-
-
 ###########################################################################################
 ###########################################################################################
 
