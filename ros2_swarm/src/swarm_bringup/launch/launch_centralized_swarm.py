@@ -9,6 +9,10 @@ from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 import os
 from launch.substitutions import LaunchConfiguration
 
+
+import os
+
+
 def load_swarm_config():
 
     # Original configuration (order matters!)
@@ -25,7 +29,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 90.0, 0.0] 
+    init_orientations = [90.0, 90.0, 90.0, 90.0] 
 
 
 

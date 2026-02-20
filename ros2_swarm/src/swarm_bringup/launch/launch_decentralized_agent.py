@@ -9,79 +9,39 @@ from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 import os
 from launch.substitutions import LaunchConfiguration
 
+import os
+
 def load_swarm_config():
+    """
+    Load resolved robot configuration from environment variables.
+    All swarm selection and YAML parsing is done on the host.
+    """
 
-    # Original configuration (order matters!)
-    beacon_addresses = [1, 2, 3, 4]
-
-    robot_names = ["RM1", "RM2", "RM3", "RM4"]
-
-    robot_serial_numbers = [
-        "159CKC50070ECX",
-        "159CKC50070E5N",
-        "159CG9J0050797",
-        "159CG9V0050HED"
+    required_envs = [
+        "ROBOT_NAME",
+        "BEACON_ADDR",
+        "ROBOT_SERIAL",
+        "INITIAL_ORIENT",
     ]
 
-    # initial angles for orientation propagation. should be in degree,
-    # although it will be converted to radians
-    # init_orientations = [90.0, 0.0, 90.0, 0.0] 
+    missing = [e for e in required_envs if e not in os.environ]
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}"
+        )
 
+    beacon_addresses = [int(os.environ["BEACON_ADDR"])]
+    robot_names = [os.environ["ROBOT_NAME"]]
+    robot_serial_numbers = [os.environ["ROBOT_SERIAL"]]
+    init_orientations = [float(os.environ["INITIAL_ORIENT"])]
 
-    # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # Select ONLY one here for this launch file
-    # idx = [1]
+    return (
+        beacon_addresses,
+        robot_names,
+        robot_serial_numbers,
+        init_orientations,
+    )
 
-    ###############################################################################
-    # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
-    env_idx = os.getenv('ROBOT_IDX')
-
-    if env_idx is None:
-        raise RuntimeError("ROBOT_IDX environment variable must be set.")
-
-    idx = [int(env_idx)]
-
-    if not idx:
-        raise ValueError("ROBOT_IDX is set but contains no valid indices.")
-
-
-    ################################################################################################
-    ################################################################################################
-    ################################################################################################
-    ################################################################################################
-    # --- Validations ---
-
-    # Check that all lists are the same length
-    n = len(robot_names)
-    if not (len(beacon_addresses) == len(robot_names) == len(robot_serial_numbers) == len(init_orientations)):
-        raise ValueError("All configuration lists must be of equal length.")
-
-    # Check for uniqueness in configuration
-    if len(set(beacon_addresses)) != n:
-        raise ValueError("Duplicate values found in beacon_addresses.")
-    if len(set(robot_names)) != n:
-        raise ValueError("Duplicate values found in robot_names.")
-    if len(set(robot_serial_numbers)) != n:
-        raise ValueError("Duplicate values found in robot_serial_numbers.")
-
-    # Check selection validity
-    if len(set(idx)) != len(idx):
-        raise ValueError("Duplicate indices found in selection.")
-    if any(i < 1 or i > n for i in idx):
-        raise IndexError("Selected index out of range.")
-    if len(idx) > n:
-        raise ValueError("More robots selected than available.")
-
-    # Convert 1-based to 0-based indexing
-    idx_zero_based = [i - 1 for i in idx]
-
-    # Apply selection
-    beacon_addresses = [beacon_addresses[i] for i in idx_zero_based]
-    robot_names = [robot_names[i] for i in idx_zero_based]
-    robot_serial_numbers = [robot_serial_numbers[i] for i in idx_zero_based]
-    init_orientations = [init_orientations[i] for i in idx_zero_based]
-
-    return beacon_addresses, robot_names, robot_serial_numbers, init_orientations
 
 
 ##########################################################################################################################################################
