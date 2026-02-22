@@ -8,6 +8,14 @@ fi
 
 COMMIT_MSG="$*"
 
+echo "=== Staging all changes ==="
 git add .
+echo ""
+
+echo "=== Committing with message: $COMMIT_MSG ==="
 git commit -m "$COMMIT_MSG"
+echo ""
+
+echo "=== Pushing to remote ==="
 git push
+echo ""
