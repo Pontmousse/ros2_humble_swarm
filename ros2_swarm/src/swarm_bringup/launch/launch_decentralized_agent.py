@@ -416,7 +416,7 @@ def generate_launch_description():
                 ]
             )
 
-        # ld.add_action(ep_control)
+        ld.add_action(ep_control)
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################

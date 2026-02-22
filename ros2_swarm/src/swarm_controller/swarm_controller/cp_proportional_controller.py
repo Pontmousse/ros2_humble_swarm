@@ -81,7 +81,7 @@ class ControllerNode(Node):
         self.wheel_client = self.create_client(SetBool, 'engage_wheels')
 
         self.magnet_client = self.create_client(SetBool, 'toggle_magnet')
-        self.call_service(self.magnet_client, True, "Toggle Magnet")
+        # self.call_service(self.magnet_client, True, "Toggle Magnet")
         
         
 
