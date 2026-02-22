@@ -226,6 +226,8 @@ echo ""
 : "${LAUNCH_FILE:=launch_magnet.py}"
 export LAUNCH_FILE
 
+echo "Using launch file: $LAUNCH_FILE"
+echo ""
 
 CONTAINER="swarm"
 
