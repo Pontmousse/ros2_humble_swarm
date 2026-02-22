@@ -1,6 +1,12 @@
 ==> 1
 git clone https://github.com/Pontmousse/ros2_humble_swarm.git
 
+or
+
+cd ros2_humble_swarm
+git fetch
+git pull
+
 
 ==> 2
 export ROBOT_IDX=4
@@ -8,9 +14,9 @@ printenv ROBOT_IDX
 
 export LAUNCH_FILE=launch_magnet.py
 export LAUNCH_FILE=launch_decentralized_agent.py
+printenv LAUNCH_FILE
 
 ==> 3
-cd ros2_humble_swarm
 ./scripts/bootstrap.sh
 
 

@@ -94,10 +94,87 @@ fi
 docker image prune -f
 
 
+# -----------------------------
+# 7. Headless Wi-Fi fixes (safe to repeat)
+# -----------------------------
+echo "[BOOTSTRAP] Ensuring headless Wi-Fi reliability..."
+
+### 1️⃣ Disable Wi-Fi power saving (NetworkManager)
+NM_WIFI_CONF="/etc/NetworkManager/conf.d/wifi-powersave.conf"
+
+if [ ! -f "$NM_WIFI_CONF" ]; then
+  echo "[BOOTSTRAP] Disabling Wi-Fi power saving"
+  sudo tee "$NM_WIFI_CONF" > /dev/null <<EOF
+[connection]
+wifi.powersave = 2
+EOF
+else
+  echo "[BOOTSTRAP] Wi-Fi power saving already configured"
+fi
+
+
+### 2️⃣ Set Wi-Fi regulatory domain (safe on Pi 4 + Pi 5)
+# Change US to your country code
+WIFI_COUNTRY="US"
+
+if command -v iw >/dev/null 2>&1; then
+  CURRENT_REG=$(iw reg get | grep country | awk '{print $2}' | tr -d ':')
+  if [ "$CURRENT_REG" != "$WIFI_COUNTRY" ]; then
+    echo "[BOOTSTRAP] Setting Wi-Fi regulatory domain to $WIFI_COUNTRY"
+    sudo iw reg set "$WIFI_COUNTRY" || true
+  fi
+fi
+
+# Persist it
+CRDA_FILE="/etc/default/crda"
+if [ -f "$CRDA_FILE" ]; then
+  sudo sed -i "s/^REGDOMAIN=.*/REGDOMAIN=$WIFI_COUNTRY/" "$CRDA_FILE"
+fi
+
+
+### 3️⃣ Install a Wi-Fi kick service (only if NetworkManager is present)
+if systemctl is-enabled NetworkManager >/dev/null 2>&1; then
+  WIFI_KICK_SERVICE="/etc/systemd/system/wifi-kick.service"
+
+  if [ ! -f "$WIFI_KICK_SERVICE" ]; then
+    echo "[BOOTSTRAP] Installing Wi-Fi kick service"
+
+    sudo tee "$WIFI_KICK_SERVICE" > /dev/null <<EOF
+[Unit]
+Description=Force Wi-Fi reconnect after boot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/nmcli networking off
+ExecStart=/bin/sleep 2
+ExecStart=/usr/bin/nmcli networking on
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    sudo systemctl daemon-reexec
+    sudo systemctl daemon-reload
+    sudo systemctl enable wifi-kick.service
+  else
+    echo "[BOOTSTRAP] Wi-Fi kick service already installed"
+  fi
+fi
+
+
+### 4️⃣ Restart NetworkManager (safe)
+if systemctl is-active NetworkManager >/dev/null 2>&1; then
+  echo "[BOOTSTRAP] Restarting NetworkManager"
+  sudo systemctl restart NetworkManager
+fi
+
+echo "[BOOTSTRAP] Headless Wi-Fi fixes applied"
 
 
 # -----------------------------
-# 7 Load swarm config (host-side)
+# 8. Load swarm config (host-side)
 # -----------------------------
 if [ -z "$ROBOT_IDX" ]; then
   echo "ERROR: ROBOT_IDX not set."
@@ -144,7 +221,7 @@ echo ""
 
 
 # -----------------------------
-# 8. Run container IF not running
+# 9. Run container IF not running
 # -----------------------------
 : "${LAUNCH_FILE:=launch_magnet.py}"
 export LAUNCH_FILE
