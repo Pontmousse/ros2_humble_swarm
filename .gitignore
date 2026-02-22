@@ -12,6 +12,7 @@ __pycache__/
 .vscode/
 
 # Do not push amd64 snapshot
+# do not put *.tar.gz as the arm64 snapshot is also a tar.gz and need to be committed/tracked as a LFS file 
 swarm_docker_img/python_user_env.tar.gz
 
 # Calibration images
