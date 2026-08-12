@@ -36,7 +36,7 @@ def load_swarm_config():
     # Selection indices (1-based indexing)
     # e.g., selecting RM1 and RM2
     # Here order doesn't matter, selecting [1, 2] or [2, 1] is exactly the same
-    # idx = [1, 3]  
+    idx = [1, 2]  
     # idx = [2, 3]
     # idx = [3]
     # idx = [1, 2, 3, 4]  # Select all robots

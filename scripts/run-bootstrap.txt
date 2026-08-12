@@ -9,10 +9,10 @@ git pull
 
 
 ==> 2
-export ROBOT_IDX=4
+export ROBOT_IDX=3
 printenv ROBOT_IDX
 
-export LAUNCH_FILE=launch_magnet.py
+# export LAUNCH_FILE=launch_magnet.py
 export LAUNCH_FILE=launch_decentralized_agent.py
 printenv LAUNCH_FILE
 

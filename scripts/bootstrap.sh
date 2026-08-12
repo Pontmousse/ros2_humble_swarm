@@ -12,12 +12,34 @@ sudo apt update
 # 2. Install system packages IF missing
 # -----------------------------
 install_if_missing() {
-  if ! dpkg -s "$1" >/dev/null 2>&1; then
-    echo "Installing $1"
-    sudo apt install -y "$1"
-  else
-    echo "$1 already installed"
+  local pkg="$1"
+  local snap_name="${2:-$pkg}"
+
+  # Already installed via apt?
+  if dpkg -s "$pkg" >/dev/null 2>&1; then
+    echo "$pkg already installed (apt)"
+    return
   fi
+
+  # Already installed via snap?
+  if command -v snap >/dev/null 2>&1 && snap list "$snap_name" >/dev/null 2>&1; then
+    echo "$pkg already installed (snap)"
+    return
+  fi
+
+  # Prefer apt if the package actually exists there
+  if apt-cache show "$pkg" >/dev/null 2>&1; then
+    echo "Installing $pkg via apt"
+    sudo apt install -y "$pkg"
+    return
+  fi
+
+  # Fall back to snap (covers packages like yq that Ubuntu dropped from apt)
+  echo "$pkg not available via apt, installing via snap ($snap_name)"
+  if ! command -v snap >/dev/null 2>&1; then
+    sudo apt install -y snapd
+  fi
+  sudo snap install "$snap_name"
 }
 
 install_if_missing docker.io
@@ -196,7 +218,7 @@ if [ ! -f "$CONFIG_YAML" ]; then
   echo "ERROR: swarm config not found: $CONFIG_YAML"
   exit 1
 fi
-
+ 
 # Extract robot-specific values (1-based → 0-based)
 IDX0=$((ROBOT_IDX - 1))
 
