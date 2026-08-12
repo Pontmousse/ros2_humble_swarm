@@ -92,17 +92,17 @@ sudo udevadm trigger
 IMAGE="elghaliasri/ros2-humble-swarm:robot-arm64-v8"
 
 # Stop only if running
-if docker ps --format '{{.Names}}' | grep -q '^swarm$'; then
+if sudo docker ps --format '{{.Names}}' | grep -q '^swarm$'; then
   echo ""
   echo "Stopping existing swarm container"
-  docker stop swarm
+  sudo docker stop swarm
 fi
 
 # Remove if exists
-if docker ps -a --format '{{.Names}}' | grep -q '^swarm$'; then
+if sudo docker ps -a --format '{{.Names}}' | grep -q '^swarm$'; then
   echo ""
   echo "Removing existing swarm container"
-  docker rm swarm
+  sudo docker rm swarm
 fi
 
 
@@ -113,7 +113,7 @@ else
   echo "Docker image already present"
 fi
 
-docker image prune -f
+sudo docker image prune -f
 
 
 # -----------------------------
