@@ -16,7 +16,7 @@ class MarvelmindNode(Node):
 
         self.declare_parameter("robot_names", ["RM1"])
         self.declare_parameter("beacon_addresses", [1])
-        self.declare_parameter("port_address", "/dev/ttyACM0")
+        self.declare_parameter("port_address", "/dev/ttyACM1")
 
         self.robot_names = self.get_parameter("robot_names").get_parameter_value().string_array_value
         self.beacon_addresses = self.get_parameter("beacon_addresses").get_parameter_value().integer_array_value
@@ -62,7 +62,7 @@ class MarvelmindNode(Node):
 
         #####################
 
-        self.time_period = 0.001
+        self.time_period = 0.001 
 
         self.get_logger().info("Publishing indoor GPS data.")
         self.pos_pub = self.create_publisher(HedgePositionAddressed, "/mm_all_pos" ,self.qos_profile)

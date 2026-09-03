@@ -17,7 +17,8 @@ class GuidanceNode(Node):
         self.init_duration = self.get_parameter("init_period").value
         self.init_start_time = self.get_clock().now()
 
-        self.target = 0.0
+        # Target orientation
+        self.target = 100.0
 
         # Publishers
         self.pub = self.create_publisher(Float64, 'target_orientation', 10)

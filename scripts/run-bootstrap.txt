@@ -9,7 +9,7 @@ git pull
 
 
 ==> 2
-export ROBOT_IDX=3
+export ROBOT_IDX="2,3"
 printenv ROBOT_IDX
 
 # export LAUNCH_FILE=launch_magnet.py

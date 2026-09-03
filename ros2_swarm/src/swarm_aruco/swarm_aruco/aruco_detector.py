@@ -66,7 +66,7 @@ class ArucoDetectorNode(Node):
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
 
-        # For timer
+        # For timer 
         self.declare_parameter("timer_frequency", 0.01)
         self.timer_frequency = self.get_parameter("timer_frequency").value
 
@@ -89,7 +89,7 @@ class ArucoDetectorNode(Node):
         self.image_count = 0     
         if self.calibrate:
             self.get_logger().warn(f"Calibration started. Be ready to place (9x6) chessboard for taking photos.")
-        else:
+        else: 
             self.aruco.load_calibration()
             self.get_logger().info(f"Calibration files loaded.")
 

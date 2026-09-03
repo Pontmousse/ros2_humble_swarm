@@ -95,9 +95,10 @@ class GuidanceNode(Node):
         angle_rad = np.arctan2(avg_normal[1], avg_normal[0])
         self.target_lcd = np.degrees(angle_rad)    #  + 360) % 360  # Ensure positive angle
 
-        # Optional: limit angle to [-180, 180] for torque computation
-        self.trq_cmd = (self.target_lcd + 180) % 360 - 180
 
+        ####################### for logging only
+        # Optional: limit angle to [-180, 180] for torque computation
+        # self.trq_cmd = (self.target_lcd + 180) % 360 - 180
         # self.get_logger().warn(f"Averaged normal: {avg_normal}, Target orientation: {self.target_lcd:.2f}°, Torque cmd: {self.trq_cmd:.2f}°")
 
 

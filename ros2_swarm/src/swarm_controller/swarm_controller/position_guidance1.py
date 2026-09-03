@@ -15,7 +15,7 @@ class GuidanceNode(Node):
         self.declare_parameter("init_period", 1.0)
         self.init_duration = self.get_parameter("init_period").value
 
-        self.target = np.array([2.0, 1.0])
+        self.target = np.array([3.0, -1.5])
         self.init_start_time = self.get_clock().now()
 
         # Publishers
@@ -31,12 +31,12 @@ class GuidanceNode(Node):
         ############################################################
 
         x = random.uniform(1.5,3.5)
-        y = random.uniform(1.0,2.5)
+        y = random.uniform(-1.0,-2.0)
 
-        self.target = np.array([1.3, 5.7]) # custom position
+        # self.target = np.array([1.3, 5.7]) # custom position
         # self.target = np.array([3.5, 1.9]) # Keele 0151 chair position
 
-        # self.target = np.array([x, y]) # random position
+        self.target = np.array([x, y]) # random position
         
         self.get_logger().warn(f"switched position target to: {self.target}\n")
 

@@ -56,7 +56,7 @@ class GuidanceNode(Node):
         self.target = np.array([None, None])      # target position
 
         # Control gains
-        self.Rflk = 0.4
+        self.Rflk = 0.3
         self.gain = 0.2
         self.eps = 1e-4
         self.step = 1.0
@@ -98,39 +98,46 @@ class GuidanceNode(Node):
         # Calculate force direction and amplitude
         self.vel = self.attractive_potential(self.landmarks)
 
+        self.get_logger().warn("Velocity potential gradient vector: " + str(self.vel) + "\n")
+
+        # Apply velocity limits
+        for i in range(2):
+            self.vel[i] = bound(self.vel[i], 0.2)
+
         # Calculate next waypoint position target
         self.target = self.pose[:2] + self.step * self.vel
         # self.get_logger().warn(f"switched position target to: {self.target}\n")
 
 
     def attractive_potential(self, landmarks):
-        Fx, Fy = 0.0, 0.0
+        Vx, Vy = 0.0, 0.0
+        x = self.pose[0]
+        y = self.pose[1]
+        r = np.array([x, y])
+
         for i in range(len(landmarks)):
             xp = landmarks[i,0]
             yp = landmarks[i,1]
-
-            x = self.pose[0]
-            y = self.pose[1]
+           
             ##############################
 
             rp = np.array([xp, yp])
-            r = np.array([x, y])
             Nr = np.linalg.norm(r - rp)
 
             # X direction
             Xd = (x**2)/(x + self.eps) - (xp**2)/(xp + self.eps)
             numer_x = abs(x - xp) * (self.Rflk - Nr) * (x - xp + Xd)
             denom_x = Nr * np.sqrt((x - xp) * Xd + self.eps)
-            Fx += (self.gain / 2.0) * (numer_x / (denom_x + self.eps))
+            Vx += (self.gain / 2.0) * (numer_x / (denom_x + self.eps))
 
             # Y direction
             Yd = (y**2)/(y + self.eps) - (yp**2)/(yp + self.eps)
             numer_y = abs(y - yp) * (self.Rflk - Nr) * (y - yp + Yd)
             denom_y = Nr * np.sqrt((y - yp) * Yd + self.eps)
-            Fy += (self.gain / 2.0) * (numer_y / (denom_y + self.eps))
+            Vy += (self.gain / 2.0) * (numer_y / (denom_y + self.eps))
             
-        force = np.array([Fx, Fy])
-        return force
+        vel = np.array([Vx, Vy])
+        return vel
 
 
     def publish_target_position(self):
@@ -158,6 +165,17 @@ def make_array(landmarks):
         arr[i, 1] = landmarks[i].y
     return arr
 
+
+# ====================================================================
+# Bound value
+# ====================================================================
+
+def bound(value, limit):
+
+    return max(
+        min(value, limit),
+        -limit
+    )
 
 
 def main(args=None):

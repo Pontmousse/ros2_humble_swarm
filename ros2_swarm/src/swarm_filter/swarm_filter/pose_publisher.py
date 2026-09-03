@@ -58,13 +58,13 @@ class PosePublisherNode(Node):
             history=HistoryPolicy.KEEP_LAST if qos_history == 'KEEP_LAST' else HistoryPolicy.KEEP_ALL
         )
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
-
+ 
         
         # For initial pose initialization using GPS / Odometry readings
         self.declare_parameter("init_period", 1.0)
         self.gps_initializing = True
         self.odom_initializing = True
-        self.init_duration = self.get_parameter("init_period").value
+        self.init_period = self.get_parameter("init_period").value
         self.init_start_time = self.get_clock().now()
         self.pos_buffer = []
         self.angle_buffer = []
@@ -96,7 +96,7 @@ class PosePublisherNode(Node):
             ])
             self.pos_buffer.append(pos)
 
-            if elapsed >= self.init_duration:
+            if elapsed >= self.init_period:
                 self.init_pos = np.mean(self.pos_buffer, axis=0)
                 self.x[:2] = self.init_pos
                 self.gps_initializing = False
@@ -121,7 +121,7 @@ class PosePublisherNode(Node):
             yaw = rpy[2]
             self.angle_buffer.append(yaw)
 
-            if elapsed >= self.init_duration:
+            if elapsed >= self.init_period:
                 self.init_angle = np.mean(self.angle_buffer, axis=0) - self.x[2]
                 self.odom_initializing = False
                 self.get_logger().info("Yaw angle initialization complete.")

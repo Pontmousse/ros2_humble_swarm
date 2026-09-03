@@ -29,14 +29,14 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 90.0, 90.0, 90.0] 
+    init_orientations = [90.0, 0.0, 0.0, 90.0] 
 
 
 
     # Selection indices (1-based indexing)
     # e.g., selecting RM1 and RM2
     # Here order doesn't matter, selecting [1, 2] or [2, 1] is exactly the same
-    idx = [1, 2]  
+    # idx = [1, 2]  
     # idx = [2, 3]
     # idx = [3]
     # idx = [1, 2, 3, 4]  # Select all robots
@@ -127,10 +127,10 @@ def qos_parameters(depth=5, reliability='BEST_EFFORT', history='KEEP_LAST'):
 
 def generate_launch_description():
     init_period = 2.0 # in seconds
-    alpha = 1.0 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
+    alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
-    timer_frequency = 0.1 # in seconds
+    timer_frequency = 0.01 # in seconds
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
@@ -141,13 +141,13 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
-    # plot_juggler = Node(
-    #     package="plotjuggler",
-    #     executable="plotjuggler",
-    #     name="plot_juggler"
-    # )
+    plot_juggler = Node(
+        package="plotjuggler",
+        executable="plotjuggler",
+        name="plot_juggler"
+    )
 
-    # ld.add_action(plot_juggler)
+    ld.add_action(plot_juggler)
 
     ##############################################################################
     ##############################################################################
@@ -223,7 +223,7 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
-
+ 
     mm = Node(
     package="swarm_marvelmind",
     executable="marvelmind_obs",
@@ -236,7 +236,7 @@ def generate_launch_description():
                 "beacon_addresses": beacon_addresses,
                 "port_address": "/dev/ttyACM0",
                 **qos_parameters(depth=1, reliability='BEST_EFFORT')
-            }
+                        }
         ]
     )
 
@@ -487,10 +487,10 @@ def generate_launch_description():
         ###################################
         ##### - Encapsulation Phase - #####
 
-        ep_motion_planner = Node(
+        ep_translation_planner = Node(
             package="swarm_controller",
             executable="position_guidance3",
-            name="motion_planner",
+            name="translation_planner",
             namespace=robot_name,
             output="screen",
             emulate_tty=True,
@@ -502,7 +502,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        ld.add_action(ep_motion_planner)
+        ld.add_action(ep_translation_planner)
 
 
     ##############################################################################

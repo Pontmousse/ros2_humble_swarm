@@ -63,7 +63,7 @@ class GuidanceNode(Node):
         # Publishers
         self.pub = self.create_publisher(Float64, 'target_orientation', self.qos_profile)
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_orientation)
-
+ 
 
     def pose_callback(self, msg: State):
         self.pose = np.array([msg.x, msg.y, msg.theta])

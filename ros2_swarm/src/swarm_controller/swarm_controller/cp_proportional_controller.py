@@ -64,7 +64,7 @@ class ControllerNode(Node):
         # Velocity commands
         self.trq_cmd = None
         self.frc_cmd = np.array([None,None])
-
+ 
         # Subscribers
         self.create_subscription(Markers, 'targets', self.target_callback, self.qos_profile)
         
@@ -104,7 +104,7 @@ class ControllerNode(Node):
             )
 
         self.closest_target_index = np.argmin(target_distances)
-
+ 
         ######################################################
         # Calculating force command - approaching the target
         ######################################################

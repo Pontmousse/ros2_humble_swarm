@@ -11,7 +11,7 @@ class SafetyStopNode(Node):
         self.stop_all_robots()
 
     def stop_all_robots(self):
-        for i in range(1, 11):
+        for i in range(1, 9):
             robot_name = f'RM{i}'
             service_name = f'/{robot_name}/engage_wheels'
             if self.service_exists(service_name):
