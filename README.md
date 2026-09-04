@@ -6,6 +6,10 @@ Lightweight workspace to develop and run ROS 2 Humble-based swarm software and r
 
 This repository collects multiple related ROS 2 packages and utilities used for building and experimenting with robot swarms. It includes local ROS packages under several subfolders, Docker container files, and an Ansible playbook for deployment.
 
+## Architecture notes
+
+- [Nav2 feasibility and architecture for the RoboMaster swarm](docs/nav2_feasibility.md) — repository-specific analysis of incremental Nav2 adoption, localization/TF requirements, command ownership, multi-robot options, and a staged validation plan.
+
 ## Repository layout
 
 - `ros2_marvelmind/` — Marvelmind integration packages and messages.
