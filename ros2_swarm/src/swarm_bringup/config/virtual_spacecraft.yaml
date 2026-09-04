@@ -1,0 +1,22 @@
+/**/virtual_spacecraft:
+  ros__parameters:
+    # Virtual vehicle properties; these need not match the RoboMaster hardware.
+    mass: 5.0
+    yaw_inertia: 0.25
+    update_rate: 100.0
+
+    # Outer-loop gains. Start low and identify the real velocity-loop bandwidth.
+    position_gain: 0.8
+    yaw_gain: 1.5
+
+    # Conservative RoboMaster motion-rendering limits.
+    maximum_speed: 0.4
+    maximum_yaw_rate: 0.8
+    maximum_force: 1.0
+    maximum_torque: 0.2
+
+    # Stop on stale localization and stop accelerating on a stale wrench.
+    odometry_timeout: 0.25
+    wrench_timeout: 0.25
+    maximum_time_step: 0.05
+    wrench_in_body_frame: true

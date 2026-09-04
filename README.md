@@ -13,6 +13,7 @@ This repository collects multiple related ROS 2 packages and utilities used for 
 - `ros2_swarm/` — Swarm packages (bringup, controllers, filters, aruco, kalman, magnet, marvelmind integrations, interfaces).
 - `swarm_docker_img/` — Dockerfiles and scripts used to build swarm runtime images.
 - `swarm_ansible_deploy/` — Ansible playbook and inventory for remote deployment.
+- `docs/virtual_spacecraft_hil.md` — Virtual free-floating spacecraft HIL mode.
 - `docker-compose.yml` — Example compose file to bring up services in containers.
 
 Each of the top-level folders is a ROS 2 workspace (contains `src/`, `build/`, `install/`, `log/`). Builds are performed with `colcon`.
