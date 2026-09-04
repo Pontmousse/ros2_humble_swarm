@@ -12,6 +12,7 @@
   <depend>rclcpp</depend>
   <exec_depend>swarm_marvelmind</exec_depend>
   <exec_depend>swarm_kalman_filter</exec_depend>
+  <exec_depend>swarm_spacecraft</exec_depend>
   <exec_depend>robomaster_ros</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
