@@ -10,10 +10,21 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <exec_depend>swarm_controller</exec_depend>
+  <exec_depend>swarm_filter</exec_depend>
   <exec_depend>swarm_marvelmind</exec_depend>
+  <exec_depend>swarm_nav2_controller</exec_depend>
+  <exec_depend>swarm_dwb_critics</exec_depend>
   <exec_depend>swarm_kalman_filter</exec_depend>
   <exec_depend>swarm_spacecraft</exec_depend>
   <exec_depend>robomaster_ros</exec_depend>
+  <exec_depend>dwb_core</exec_depend>
+  <exec_depend>dwb_critics</exec_depend>
+  <exec_depend>dwb_plugins</exec_depend>
+  <exec_depend>nav2_common</exec_depend>
+  <exec_depend>nav2_controller</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
+  <exec_depend>nav2_velocity_smoother</exec_depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

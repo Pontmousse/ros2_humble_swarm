@@ -314,6 +314,10 @@ def generate_launch_description():
                     "init_period": init_period,
                     "timer_frequency": timer_frequency,
                     "init_orientation": init_orientation,
+                    "global_frame_id": "swarm_map",
+                    "gps_timeout": 0.25,
+                    "odometry_timeout": 0.25,
+                    "gps_position_variance": 0.01,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]

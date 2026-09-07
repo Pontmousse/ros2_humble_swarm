@@ -1,0 +1,10 @@
+<library path="swarm_dwb_critics">
+  <class
+    name="swarm_dwb_critics::VirtualVelocityCritic"
+    type="swarm_dwb_critics::VirtualVelocityCritic"
+    base_class_type="dwb_core::TrajectoryCritic">
+    <description>
+      Scores DWB commands against virtual feedforward and measured velocity error.
+    </description>
+  </class>
+</library>

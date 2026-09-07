@@ -2,17 +2,17 @@
 
 import math
 
-from geometry_msgs.msg import Twist, Wrench
+from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from std_srvs.srv import SetBool, Trigger
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_srvs.srv import Trigger
 
 from .dynamics import PlanarState
 from .dynamics import integrate_constant_wrench
 from .dynamics import rotate_body_to_inertial
 from .dynamics import rotate_inertial_to_body
-from .dynamics import tracking_command
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -27,35 +27,78 @@ def quaternion_from_yaw(yaw: float):
     return math.sin(0.5 * yaw), math.cos(0.5 * yaw)
 
 
+def qos_profile_from_parameters(node: Node) -> QoSProfile:
+    """Build the repository-standard configurable QoS profile."""
+    qos_depth = int(node.get_parameter("qos_depth").value)
+    qos_reliability = str(node.get_parameter("qos_reliability").value)
+    qos_history = str(node.get_parameter("qos_history").value)
+    if qos_depth <= 0:
+        raise ValueError("qos_depth must be positive")
+    if qos_reliability not in ("RELIABLE", "BEST_EFFORT"):
+        raise ValueError(f"Invalid qos_reliability: {qos_reliability}")
+    if qos_history not in ("KEEP_LAST", "KEEP_ALL"):
+        raise ValueError(f"Invalid qos_history: {qos_history}")
+    return QoSProfile(
+        depth=qos_depth,
+        reliability=(
+            ReliabilityPolicy.RELIABLE
+            if qos_reliability == "RELIABLE"
+            else ReliabilityPolicy.BEST_EFFORT
+        ),
+        history=(
+            HistoryPolicy.KEEP_LAST
+            if qos_history == "KEEP_LAST"
+            else HistoryPolicy.KEEP_ALL
+        ),
+    )
+
+
+def namespaced_virtual_frame(namespace: str) -> str:
+    """Return a virtual-spacecraft frame unique to the robot namespace."""
+    robot_namespace = namespace.strip("/")
+    if robot_namespace:
+        return f"{robot_namespace}/virtual_spacecraft"
+    return "virtual_spacecraft"
+
+
+def timestamp_is_fresh(
+    now_nanoseconds: int,
+    update_nanoseconds,
+    timeout: float,
+) -> bool:
+    """Return whether a timestamp exists and is within its timeout."""
+    if update_nanoseconds is None:
+        return False
+    age = (now_nanoseconds - update_nanoseconds) * 1.0e-9
+    return 0.0 <= age <= timeout
+
+
 class VirtualSpacecraftNode(Node):
-    """Integrate an ideal spacecraft and make the robot shadow its state."""
+    """Integrate and publish the state of an ideal planar spacecraft."""
 
     def __init__(self):
         super().__init__("virtual_spacecraft")
         self.declare_parameter("mass", 5.0)
         self.declare_parameter("yaw_inertia", 0.25)
-        self.declare_parameter("update_rate", 100.0)
-        self.declare_parameter("position_gain", 1.0)
-        self.declare_parameter("yaw_gain", 2.0)
-        self.declare_parameter("maximum_speed", 0.5)
-        self.declare_parameter("maximum_yaw_rate", 1.0)
+        self.declare_parameter("timer_frequency", 0.01)
         self.declare_parameter("maximum_force", 2.0)
         self.declare_parameter("maximum_torque", 0.5)
         self.declare_parameter("odometry_timeout", 0.25)
         self.declare_parameter("wrench_timeout", 0.25)
         self.declare_parameter("maximum_time_step", 0.05)
         self.declare_parameter("wrench_in_body_frame", True)
+        self.declare_parameter("qos_depth", 10)
+        self.declare_parameter("qos_reliability", "RELIABLE")
+        self.declare_parameter("qos_history", "KEEP_LAST")
 
         self.mass = float(self.get_parameter("mass").value)
         self.inertia = float(self.get_parameter("yaw_inertia").value)
-        update_rate = float(self.get_parameter("update_rate").value)
-        self.position_gain = float(self.get_parameter("position_gain").value)
-        self.yaw_gain = float(self.get_parameter("yaw_gain").value)
-        self.maximum_speed = float(self.get_parameter("maximum_speed").value)
-        self.maximum_yaw_rate = float(self.get_parameter("maximum_yaw_rate").value)
+        timer_frequency = float(self.get_parameter("timer_frequency").value)
         self.maximum_force = float(self.get_parameter("maximum_force").value)
         self.maximum_torque = float(self.get_parameter("maximum_torque").value)
-        self.odometry_timeout = float(self.get_parameter("odometry_timeout").value)
+        self.odometry_timeout = float(
+            self.get_parameter("odometry_timeout").value
+        )
         self.wrench_timeout = float(self.get_parameter("wrench_timeout").value)
         self.maximum_time_step = float(self.get_parameter("maximum_time_step").value)
         self.wrench_in_body_frame = bool(
@@ -64,9 +107,7 @@ class VirtualSpacecraftNode(Node):
         positive_values = (
             self.mass,
             self.inertia,
-            update_rate,
-            self.maximum_speed,
-            self.maximum_yaw_rate,
+            timer_frequency,
             self.maximum_force,
             self.maximum_torque,
             self.odometry_timeout,
@@ -77,35 +118,38 @@ class VirtualSpacecraftNode(Node):
             raise ValueError(
                 "physical, rate, timeout, and limit parameters must be positive"
             )
-        if not math.isfinite(self.position_gain) or self.position_gain < 0.0:
-            raise ValueError("position_gain must be finite and non-negative")
-        if not math.isfinite(self.yaw_gain) or self.yaw_gain < 0.0:
-            raise ValueError("yaw_gain must be finite and non-negative")
-
         self.reference = PlanarState()
         self.measured = PlanarState()
+        self.measured_frame_id = ""
+        self.reference_frame_id = ""
+        self.virtual_frame_id = namespaced_virtual_frame(self.get_namespace())
         self.force_x = 0.0
         self.force_y = 0.0
         self.torque = 0.0
         self.initialized = False
-        self.enabled = False
         self.last_odometry_time = None
         self.last_wrench_time = None
         self.last_update_time = self.get_clock().now()
-        self.saturation_count = 0
 
-        self.create_subscription(Odometry, "odom", self.odometry_callback, 10)
-        self.create_subscription(Wrench, "spacecraft_wrench", self.wrench_callback, 10)
-        self.command_publisher = self.create_publisher(Twist, "cmd_vel", 10)
+        qos_profile = qos_profile_from_parameters(self)
+        self.create_subscription(
+            Odometry,
+            "localization/odom",
+            self.odometry_callback,
+            qos_profile,
+        )
+        self.create_subscription(
+            Wrench,
+            "spacecraft_wrench",
+            self.wrench_callback,
+            qos_profile,
+        )
         self.reference_publisher = self.create_publisher(
-            Odometry, "virtual_spacecraft/odom", 10
+            Odometry, "virtual_spacecraft/odom", qos_profile
         )
-        self.create_service(SetBool, "virtual_spacecraft/enable", self.enable_callback)
         self.create_service(Trigger, "virtual_spacecraft/reset", self.reset_callback)
-        self.create_timer(1.0 / update_rate, self.update)
-        self.get_logger().info(
-            "Virtual spacecraft ready; reset from odometry, then enable explicitly."
-        )
+        self.create_timer(timer_frequency, self.update)
+        self.get_logger().info("Virtual spacecraft simulator ready")
 
     def odometry_callback(self, message: Odometry) -> None:
         """Store the latest physical chassis state."""
@@ -113,12 +157,10 @@ class VirtualSpacecraftNode(Node):
             x=message.pose.pose.position.x,
             y=message.pose.pose.position.y,
             yaw=yaw_from_quaternion(message.pose.pose.orientation),
-            vx=message.twist.twist.linear.x,
-            vy=message.twist.twist.linear.y,
-            yaw_rate=message.twist.twist.angular.z,
         )
-        self.last_odometry_time = self.get_clock().now()
-        if not self.initialized:
+        self.measured_frame_id = message.header.frame_id.lstrip("/")
+        self.last_odometry_time = self.get_clock().now().nanoseconds
+        if not self.initialized and self.measured_frame_id:
             self.reset_reference()
 
     def wrench_callback(self, message: Wrench) -> None:
@@ -142,25 +184,16 @@ class VirtualSpacecraftNode(Node):
         )
         self.last_wrench_time = self.get_clock().now()
 
-    def enable_callback(self, request, response):
-        """Enable or safely pause physical motion rendering."""
-        if request.data and not self.initialized:
-            response.success = False
-            response.message = "Cannot enable before receiving odometry"
-            return response
-        self.enabled = request.data
-        if not self.enabled:
-            self.publish_stop()
-        response.success = True
-        response.message = "enabled" if self.enabled else "paused"
-        return response
-
     def reset_callback(self, request, response):
         """Reset the virtual state to the latest physical pose at rest."""
         del request
-        if self.last_odometry_time is None:
+        if not self.localization_is_fresh():
             response.success = False
-            response.message = "No odometry received"
+            response.message = "No fresh localization odometry received"
+            return response
+        if not self.measured_frame_id:
+            response.success = False
+            response.message = "Localization odometry frame_id is empty"
             return response
         self.reset_reference()
         response.success = True
@@ -174,17 +207,26 @@ class VirtualSpacecraftNode(Node):
             y=self.measured.y,
             yaw=self.measured.yaw,
         )
+        self.reference_frame_id = self.measured_frame_id
         self.initialized = True
-        self.enabled = False
         self.last_update_time = self.get_clock().now()
 
+    def localization_is_fresh(self) -> bool:
+        """Return whether physical localization is recent enough to reset."""
+        if self.last_odometry_time is None:
+            return False
+        return timestamp_is_fresh(
+            self.get_clock().now().nanoseconds,
+            self.last_odometry_time,
+            self.odometry_timeout,
+        )
+
     def update(self) -> None:
-        """Advance virtual dynamics and publish reference and safe commands."""
+        """Advance the virtual dynamics and publish the reference state."""
         now = self.get_clock().now()
         dt = (now - self.last_update_time).nanoseconds * 1.0e-9
         self.last_update_time = now
         if not self.initialized:
-            self.publish_stop()
             return
 
         dt = max(0.0, min(dt, self.maximum_time_step))
@@ -212,34 +254,12 @@ class VirtualSpacecraftNode(Node):
         )
         self.publish_reference(now)
 
-        odometry_age = (now - self.last_odometry_time).nanoseconds * 1.0e-9
-        if not self.enabled or odometry_age > self.odometry_timeout:
-            self.publish_stop()
-            return
-        body_x, body_y, yaw_rate, saturated = tracking_command(
-            self.reference,
-            self.measured,
-            self.position_gain,
-            self.yaw_gain,
-            self.maximum_speed,
-            self.maximum_yaw_rate,
-        )
-        command = Twist()
-        command.linear.x = body_x
-        command.linear.y = body_y
-        command.angular.z = yaw_rate
-        self.command_publisher.publish(command)
-        if saturated:
-            self.saturation_count += 1
-            if self.saturation_count % 100 == 1:
-                self.get_logger().warn("Physical velocity command is saturated")
-
     def publish_reference(self, stamp) -> None:
         """Publish the observable virtual reference as odometry."""
         message = Odometry()
         message.header.stamp = stamp.to_msg()
-        message.header.frame_id = "map"
-        message.child_frame_id = "virtual_spacecraft"
+        message.header.frame_id = self.reference_frame_id
+        message.child_frame_id = self.virtual_frame_id
         message.pose.pose.position.x = self.reference.x
         message.pose.pose.position.y = self.reference.y
         z, w = quaternion_from_yaw(self.reference.yaw)
@@ -253,10 +273,6 @@ class VirtualSpacecraftNode(Node):
         message.twist.twist.angular.z = self.reference.yaw_rate
         self.reference_publisher.publish(message)
 
-    def publish_stop(self) -> None:
-        """Publish a zero velocity command."""
-        self.command_publisher.publish(Twist())
-
 
 def main(args=None):
     """Run the virtual spacecraft node."""
@@ -265,7 +281,6 @@ def main(args=None):
     try:
         rclpy.spin(node)
     finally:
-        node.publish_stop()
         node.destroy_node()
         rclpy.shutdown()
 

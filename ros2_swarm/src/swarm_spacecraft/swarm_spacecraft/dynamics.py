@@ -65,39 +65,3 @@ def integrate_constant_wrench(
         vy=state.vy + dt * ay,
         yaw_rate=state.yaw_rate + dt * angular_acceleration,
     )
-
-
-def limit_vector(x: float, y: float, maximum: float) -> Tuple[float, float, bool]:
-    """Apply direction-preserving magnitude saturation to a planar vector."""
-    if maximum < 0.0:
-        raise ValueError("maximum must be non-negative")
-    magnitude = math.hypot(x, y)
-    if magnitude <= maximum or magnitude == 0.0:
-        return x, y, False
-    scale = maximum / magnitude
-    return scale * x, scale * y, True
-
-
-def tracking_command(
-    reference: PlanarState,
-    measured: PlanarState,
-    position_gain: float,
-    yaw_gain: float,
-    maximum_speed: float,
-    maximum_yaw_rate: float,
-) -> Tuple[float, float, float, bool]:
-    """Calculate a saturated body-frame velocity tracking command."""
-    inertial_x = reference.vx + position_gain * (reference.x - measured.x)
-    inertial_y = reference.vy + position_gain * (reference.y - measured.y)
-    body_x, body_y = rotate_inertial_to_body(inertial_x, inertial_y, measured.yaw)
-    body_x, body_y, linear_saturated = limit_vector(body_x, body_y, maximum_speed)
-    yaw_command = reference.yaw_rate + yaw_gain * wrap_angle(
-        reference.yaw - measured.yaw
-    )
-    limited_yaw = max(-maximum_yaw_rate, min(maximum_yaw_rate, yaw_command))
-    return (
-        body_x,
-        body_y,
-        limited_yaw,
-        linear_saturated or limited_yaw != yaw_command,
-    )
