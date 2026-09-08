@@ -27,7 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-joy-linux \
     ros-humble-ffmpeg-encoder-decoder \
     gpiod \
-    python3-gpiod \
+    python3-libgpiod \
     libgpiod-dev \
     && rm -rf /var/lib/apt/lists/*
 

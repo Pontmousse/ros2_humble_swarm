@@ -16,20 +16,25 @@ gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 def load_swarm_config():
 
     # Original configuration (order matters!)
-    beacon_addresses = [1, 2, 3, 4]
+    beacon_addresses = [1, 2, 3, 4, 5]
 
-    robot_names = ["RM1", "RM2", "RM3", "RM4"]
+    robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5"]
 
     robot_serial_numbers = [
         "159CKC50070ECX",
         "159CKC50070E5N",
         "159CG9J0050797",
-        "159CG9V0050HED"
+        "159CG9V0050HED",
+        "159CKCH0070F8S"
     ]
+
+    # Pinned robot IPs, same order as robot_names. Empty string = use SN discovery.
+    # Only RM2 is known (192.168.1.8, MAC 48:1c:b9:62:22:d2).
+    robot_ips = ["", "192.168.1.8", "", "", ""]
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 0.0, 90.0] 
+    init_orientations = [90.0, 0.0, 0.0, 90.0, 0.0] 
 
 
 
@@ -64,7 +69,8 @@ def load_swarm_config():
 
     # Check that all lists are the same length
     n = len(robot_names)
-    if not (len(beacon_addresses) == len(robot_names) == len(robot_serial_numbers) == len(init_orientations)):
+    if not (len(beacon_addresses) == len(robot_names) == len(robot_serial_numbers)
+            == len(init_orientations) == len(robot_ips)):
         raise ValueError("All configuration lists must be of equal length.")
 
     # Check for uniqueness in configuration
@@ -91,8 +97,9 @@ def load_swarm_config():
     robot_names = [robot_names[i] for i in idx_zero_based]
     robot_serial_numbers = [robot_serial_numbers[i] for i in idx_zero_based]
     init_orientations = [init_orientations[i] for i in idx_zero_based]
+    robot_ips = [robot_ips[i] for i in idx_zero_based]
 
-    return beacon_addresses, robot_names, robot_serial_numbers, init_orientations
+    return beacon_addresses, robot_names, robot_serial_numbers, init_orientations, robot_ips
 
 
 ##########################################################################################################################################################
@@ -134,7 +141,7 @@ def generate_launch_description():
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
-    beacon_addresses, robot_names, robot_serial_numbers, init_orientations = load_swarm_config()
+    beacon_addresses, robot_names, robot_serial_numbers, init_orientations, robot_ips = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
@@ -157,9 +164,11 @@ def generate_launch_description():
     for i in range(N):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
+        robot_ip = robot_ips[i]
 
         name_arg = DeclareLaunchArgument(f'name_{i}', default_value=robot_name)
         serial_arg = DeclareLaunchArgument(f'serial_number_{i}', default_value=serial_number)
+        robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ip)
         enable_led_arg = DeclareLaunchArgument(f'enable_led_{i}', default_value='true')
         enable_speaker_arg = DeclareLaunchArgument(f'enable_speaker_{i}', default_value='true')
         enable_chassis_arg = DeclareLaunchArgument(f'enable_chassis_{i}', default_value='true')
@@ -176,6 +185,7 @@ def generate_launch_description():
             launch_arguments={
                 'name': LaunchConfiguration(f'name_{i}'),
                 'serial_number': LaunchConfiguration(f'serial_number_{i}'),
+                'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
                 'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
                 'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
                 'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
@@ -185,6 +195,7 @@ def generate_launch_description():
 
         ld.add_action(name_arg)
         ld.add_action(serial_arg)
+        ld.add_action(robot_ip_arg)
         ld.add_action(enable_led_arg)
         ld.add_action(enable_speaker_arg)
         ld.add_action(enable_chassis_arg)
@@ -404,7 +415,7 @@ def generate_launch_description():
                     "aruco_type": "DICT_5X5_100",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
-                    "calibrate_camera": 0,
+                    "calibrate_camera": 1,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]

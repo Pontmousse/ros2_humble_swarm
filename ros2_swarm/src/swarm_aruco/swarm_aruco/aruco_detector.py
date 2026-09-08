@@ -169,9 +169,14 @@ class ArucoDetectorNode(Node):
                 except av.error.InvalidDataError as decode_err:
                     self.get_logger().warn(f"Invalid data during decode: {decode_err}")
                     continue
+                except Exception as e:
+                    self.get_logger().error(f"Unexpected decode error: {e}")
+                    continue
 
-        except av.AVError as parse_err:
+        except av.FFmpegError as parse_err:
             self.get_logger().warn(f"Error parsing packet: {parse_err}")
+        except Exception as e:
+            self.get_logger().error(f"Unexpected error in h264 callback: {e}")
 
 
     ########################################################################################
