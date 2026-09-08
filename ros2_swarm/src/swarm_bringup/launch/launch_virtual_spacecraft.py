@@ -40,13 +40,13 @@ def generate_launch_description():
     )
     guidance_mode_argument = DeclareLaunchArgument(
         "guidance_mode",
-        default_value="none",
+        default_value="bounding_box",
         choices=["none", "bounding_box"],
         description="Select the virtual-spacecraft wrench guidance",
     )
     visualization_argument = DeclareLaunchArgument(
         "enable_guidance_visualization",
-        default_value="false",
+        default_value="true",
         choices=["true", "false"],
         description="Enable guidance and motion-rendering RViz markers",
     )
@@ -110,8 +110,8 @@ def generate_launch_description():
         actions.append(
             Node(
                 package="swarm_nav2_controller",
-                executable="nav2_pff",
-                name="nav2_pff",
+                executable="nav2_pidff",
+                name="nav2_pidff",
                 namespace=robot_name,
                 output="screen",
                 parameters=[configured_parameters],

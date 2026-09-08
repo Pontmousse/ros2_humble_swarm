@@ -17,12 +17,12 @@
   ros__parameters:
     # Virtual vehicle properties; these need not match the RoboMaster hardware.
     mass: 5.0
-    yaw_inertia: 0.25
+    yaw_inertia: 1.0
     timer_frequency: 0.01
 
     # Bounds on the virtual inputs.
     maximum_force: 1.0
-    maximum_torque: 0.2
+    maximum_torque: 0.1
 
     # Stop accelerating on a stale wrench and clamp long scheduler gaps.
     odometry_timeout: 0.25
@@ -39,7 +39,7 @@
     timer_frequency: 0.01
 
     # Outer-loop gains. Start low and identify the real velocity-loop bandwidth.
-    position_gain: 0.8
+    position_gain: 2.0
     yaw_gain: 1.5
 
     # Conservative RoboMaster motion-rendering limits.
@@ -54,6 +54,35 @@
     qos_reliability: "RELIABLE"
     qos_history: "KEEP_LAST"
 
+
+/**/nav2_pidff:
+  ros__parameters:
+    timer_frequency: 0.01
+
+    enable_pid: true
+
+    # Translation: PID + velocity feedforward
+    position_gain: 1.5
+    position_integral_gain: 0.15
+    velocity_error_gain: 0.30
+
+    # Yaw: PID + angular-rate feedforward
+    yaw_gain: 1.5
+    yaw_integral_gain: 0.08
+    yaw_rate_error_gain: 0.25
+
+    # Give feedback controller some recovery authority
+    maximum_speed: 0.50
+    maximum_yaw_rate: 1.0
+
+    odometry_timeout: 0.25
+    reference_timeout: 0.25
+
+    qos_depth: 10
+    qos_reliability: "RELIABLE"
+    qos_history: "KEEP_LAST"
+
+
 /**/bounding_box_search:
   ros__parameters:
     timer_frequency: 0.02
@@ -62,7 +91,7 @@
 
     # Box geometry comes from the shared /** block above.
     # Braking runway inside each wall; must stay below half the shortest side.
-    boundary_margin: 0.25
+    boundary_margin: 0.01
 
     # Finite firings; limits match the virtual dynamics configuration.
     boundary_force: 1.0
@@ -72,7 +101,13 @@
     initial_burn_duration: 1.0
     initial_force_x: 0.8
     initial_force_y: 0.4
-    initial_torque: 0.1
+    initial_torque: 0.3
+
+    # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
+    # drawn once per bounce. Breaks the degenerate straight-line rebound.
+    # Set random_seed non-zero to replay an identical run.
+    lateral_kick_fraction: 0.15
+    random_seed: 0
 
     qos_depth: 10
     qos_reliability: "RELIABLE"
@@ -263,11 +298,14 @@
     smoothing_frequency: 50.0
     scale_velocities: true
     feedback: "OPEN_LOOP"
-    max_velocity: [0.4, 0.4, 0.8]
-    min_velocity: [-0.4, -0.4, -0.8]
-    max_accel: [0.3, 0.3, 0.8]
-    max_decel: [-0.5, -0.5, -1.2]
+    max_velocity: [0.5, 0.5, 1.0]
+    min_velocity: [-0.5, -0.5, -1.0]
+    max_accel: [0.5, 0.5, 1.2]
+    max_decel: [-0.7, -0.7, -1.5]
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 0.25
     odom_topic: "localization/odom"
     odom_duration: 0.1
+
+
+    

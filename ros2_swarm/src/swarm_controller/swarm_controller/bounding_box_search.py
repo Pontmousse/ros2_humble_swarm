@@ -1,6 +1,7 @@
 """Generate intermittent wrench commands for a bounded free-drift search."""
 
 import math
+import random
 
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
@@ -128,6 +129,8 @@ class BoundingBoxSearchNode(Node):
         self.declare_parameter("initial_force_x", 0.8)
         self.declare_parameter("initial_force_y", 0.4)
         self.declare_parameter("initial_torque", 0.1)
+        self.declare_parameter("lateral_kick_fraction", 0.15)
+        self.declare_parameter("random_seed", 0)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -160,8 +163,16 @@ class BoundingBoxSearchNode(Node):
             self.get_parameter("initial_force_y").value
         )
         self.initial_torque = float(self.get_parameter("initial_torque").value)
+        self.lateral_kick_fraction = float(
+            self.get_parameter("lateral_kick_fraction").value
+        )
+        seed = int(self.get_parameter("random_seed").value)
         self.validate_parameters()
 
+        # Seed 0 means a fresh sequence each run; any other value is reproducible.
+        self.generator = random.Random(seed or None)
+        self.lateral_sign = 1.0
+        self.was_near_boundary = False
         self.latest_reference = None
         self.last_reference_time = None
         self.initial_burn_start = None
@@ -197,9 +208,12 @@ class BoundingBoxSearchNode(Node):
             self.initial_force_x,
             self.initial_force_y,
             self.initial_torque,
+            self.lateral_kick_fraction,
         )
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Bounding-box parameters must be finite")
+        if not 0.0 <= self.lateral_kick_fraction < 1.0:
+            raise ValueError("lateral_kick_fraction must be within [0, 1)")
         if self.x_min >= self.x_max or self.y_min >= self.y_max:
             raise ValueError("Bounding-box minimums must be below maximums")
         if not 0.0 < self.boundary_margin < 0.5 * min(
@@ -267,6 +281,22 @@ class BoundingBoxSearchNode(Node):
             min(self.boundary_force, self.maximum_force),
             self.rebound_speed,
         )
+
+        # Resample once per bounce, not per tick, or the kick averages away.
+        if near_boundary and not self.was_near_boundary:
+            self.lateral_sign = self.generator.choice((-1.0, 1.0))
+        self.was_near_boundary = near_boundary
+
+        # Kick along the free axis so bounces do not collapse into one line.
+        kick = (
+            self.lateral_sign
+            * self.lateral_kick_fraction
+            * min(self.boundary_force, self.maximum_force)
+        )
+        if global_force_x != 0.0 and global_force_y == 0.0:
+            global_force_y = kick
+        elif global_force_y != 0.0 and global_force_x == 0.0:
+            global_force_x = kick
 
         torque = 0.0
         elapsed = (now - self.initial_burn_start).nanoseconds * 1.0e-9
