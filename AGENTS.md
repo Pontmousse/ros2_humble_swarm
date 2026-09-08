@@ -12,10 +12,10 @@
 
 ## Working Conventions
 
-- This machine does not have ROS 2 installed. Do not run builds, source ROS
+<!-- - This machine does not have ROS 2 installed. Do not run builds, source ROS
   setup files, or invoke ROS/colcon commands on this machine. Limit local
   verification to non-ROS static checks unless the user explicitly provides a
-  ROS-capable environment.
+  ROS-capable environment. -->
 
 - Prefer concise, compact code when it remains clear and readable.
 - Do not expand simple logic across many lines purely for aesthetics or formatting.
@@ -25,6 +25,11 @@
 - Prefer the simplest readable implementation over a more verbose or "clean-looking" version.
 - Match the compactness of the surrounding codebase rather than reformatting existing code into a more expanded style.
 - When both versions are equally readable, prefer the version with fewer lines.
+
+- The bounding box in `virtual_spacecraft.yaml` is a guidance target, not a hard
+  constraint: rebound firings are force-limited, so the virtual spacecraft is
+  expected to overshoot past a wall during a bounce before reversing. Define the
+  box once in the top-level `/**` block so guidance and visualization stay in sync.
 
 ###############################################################################
 

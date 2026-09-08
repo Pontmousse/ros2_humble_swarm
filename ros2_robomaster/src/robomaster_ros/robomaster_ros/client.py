@@ -15,6 +15,7 @@ import robomaster.robot
 import robomaster.protocol
 import robomaster.conn
 import robomaster.client
+import robomaster.config
 
 
 from robomaster_ros.modules import modules
@@ -97,6 +98,15 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
         robomaster.logger.setLevel(lib_log_level)
         conn_type: str = self.declare_parameter("conn_type", "sta").value[:]
         self.reconnect: bool = self.declare_parameter("reconnect", True).value
+        self.connection_attempts: int = self.declare_parameter("connection_attempts", 5).value
+        self.connection_retry_delay: float = self.declare_parameter(
+            "connection_retry_delay", 2.0).value
+        robot_ip: str = self.declare_parameter("robot_ip", "").value
+        local_ip: str = self.declare_parameter("local_ip", "").value
+        if robot_ip:
+            robomaster.config.ROBOT_IP_STR = robot_ip
+        if local_ip:
+            robomaster.config.LOCAL_IP_STR = local_ip
         sn: Optional[str] = self.declare_parameter("serial_number", "").value
         if sn:
             if len(sn) != SERIAL_NUMBER_LENGTH:
@@ -107,20 +117,15 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
         else:
             sn = None
         self.connected = False
-        if conn_type == 'sta':
+        if conn_type == 'sta' and not robomaster.config.ROBOT_IP_STR:
             self.get_logger().info("Waiting for a robot")
             wait_for_robot(sn)
             self.get_logger().info("Found a robot")
         robomaster.conn.FtpConnection = FtpConnection
         # robomaster.conn.FtpConnection = FakeFtpConnection
-        self.ep_robot = robomaster.robot.Robot()
         self.disconnection = rclpy.task.Future(executor=executor or rclpy.get_global_executor())
         # For now, to handle simulations without FTP
-        self.get_logger().info(f"Try to connect via {conn_type} to robot with sn {sn}")
-        try:
-            self.ep_robot.initialize(conn_type=conn_type, sn=sn)
-        except (AttributeError, TypeError):
-            self.get_logger().error("Could not connect")
+        if not self._connect_with_retries(conn_type, sn):
             self.disconnection.set_result(False)
             return
         self.get_logger().info("Connected")
@@ -146,6 +151,31 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
         module_string = ', '.join(type(module).__name__ for module in self.modules)
         self.get_logger().info(f"Enabled modules: {module_string}")
         self.connected_pub.publish(std_msgs.msg.Bool(data=True))
+
+    def _connect_with_retries(self, conn_type: str, sn: Optional[str]) -> bool:
+        # conn.switch_remote_route sends the handshake as a single datagram with no
+        # retry, so one lost packet on a marginal link fails the whole connection.
+        attempts = max(1, self.connection_attempts)
+        for attempt in range(1, attempts + 1):
+            self.get_logger().info(
+                f"Try to connect via {conn_type} to robot with sn {sn} "
+                f"({attempt}/{attempts})")
+            self.ep_robot = robomaster.robot.Robot()
+            try:
+                self.ep_robot.initialize(conn_type=conn_type, sn=sn)
+                return True
+            except Exception as e:
+                self.get_logger().warn(
+                    f"Connection attempt {attempt}/{attempts} failed: "
+                    f"{type(e).__name__}: {e}")
+                try:
+                    self.ep_robot.close()
+                except Exception:
+                    pass
+                if attempt < attempts:
+                    time.sleep(self.connection_retry_delay)
+        self.get_logger().error(f"Could not connect after {attempts} attempts")
+        return False
 
     def __del__(self) -> None:
         self.stop()

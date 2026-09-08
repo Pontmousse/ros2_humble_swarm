@@ -168,7 +168,7 @@ def generate_launch_description():
                 parameters=[configured_parameters],
                 remappings=[
                     ("cmd_vel", "cmd_vel_raw"),
-                    ("smoothed_cmd_vel", "cmd_vel"),
+                    ("cmd_vel_smoothed", "cmd_vel"),
                 ],
             )
         )

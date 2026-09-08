@@ -1,3 +1,18 @@
+# Laboratory search region in the swarm_map frame, shared by bounding_box_search
+# (guidance) and bounding_box_visualizer (markers) so the enforced region and the
+# drawn region cannot drift apart. Nodes that do not declare these ignore them.
+#
+# The box is a guidance target, not a hard constraint: rebound firings are
+# bounded by maximum_force, so a spacecraft arriving with enough momentum will
+# travel past a wall before reversing. Overshoot during a bounce is expected
+# behavior. Size the physical safe area with clearance beyond these limits.
+/**:
+  ros__parameters:
+    x_min: 2.5
+    x_max: 3.5
+    y_min: -1.5
+    y_max: -0.5
+
 /**/virtual_spacecraft:
   ros__parameters:
     # Virtual vehicle properties; these need not match the RoboMaster hardware.
@@ -45,11 +60,8 @@
     reference_timeout: 0.25
     global_frame_id: "swarm_map"
 
-    # Laboratory search region in the swarm_map frame.
-    x_min: -1.0
-    x_max: 1.0
-    y_min: -1.0
-    y_max: 1.0
+    # Box geometry comes from the shared /** block above.
+    # Braking runway inside each wall; must stay below half the shortest side.
     boundary_margin: 0.25
 
     # Finite firings; limits match the virtual dynamics configuration.
@@ -71,10 +83,6 @@
     timer_frequency: 0.05
     source_timeout: 0.25
     global_frame_id: "swarm_map"
-    x_min: -1.0
-    x_max: 1.0
-    y_min: -1.0
-    y_max: 1.0
     triangle_size: 0.12
     maximum_force: 1.0
     maximum_torque: 0.2

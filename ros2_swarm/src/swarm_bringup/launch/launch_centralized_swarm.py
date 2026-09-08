@@ -16,20 +16,21 @@ gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 def load_swarm_config():
 
     # Original configuration (order matters!)
-    beacon_addresses = [1, 2, 3, 4]
+    beacon_addresses = [1, 2, 3, 4, 5]
 
-    robot_names = ["RM1", "RM2", "RM3", "RM4"]
+    robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5"]
 
     robot_serial_numbers = [
         "159CKC50070ECX",
         "159CKC50070E5N",
         "159CG9J0050797",
-        "159CG9V0050HED"
+        "159CG9V0050HED",
+        "159CKCH0070F8S"
     ]
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 0.0, 90.0] 
+    init_orientations = [90.0, 0.0, 0.0, 90.0, 0.0] 
 
 
 
@@ -464,7 +465,7 @@ def generate_launch_description():
                 ]
             )
 
-        ld.add_action(ep_control)
+        # ld.add_action(ep_control)
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################
@@ -486,7 +487,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        ld.add_action(ep_pointing_planner)
+        # ld.add_action(ep_pointing_planner)
 
         ###################################
         ##### - Encapsulation Phase - #####
@@ -506,7 +507,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        ld.add_action(ep_translation_planner)
+        # ld.add_action(ep_translation_planner)
 
 
     ##############################################################################
@@ -530,7 +531,7 @@ def generate_launch_description():
                 ]
             )
 
-        ld.add_action(cp_control)
+        # ld.add_action(cp_control)
 
 
     ##############################################################################
@@ -550,7 +551,7 @@ def generate_launch_description():
             ],
         )
 
-        ld.add_action(magnet_node)
+        # ld.add_action(magnet_node)
 
 
     # ##############################################################################

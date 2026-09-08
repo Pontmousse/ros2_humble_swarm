@@ -110,6 +110,25 @@ Only one bounding-box guidance publisher should run in each robot namespace.
 The configured box coordinates must be adjusted to the safe laboratory region
 before operating hardware.
 
+`x_min`, `x_max`, `y_min` and `y_max` are defined once in the top-level `/**`
+block of `virtual_spacecraft.yaml` and are shared by `bounding_box_search` and
+`bounding_box_visualizer`. Edit them in that one place; the enforced region and
+the region drawn in RViz then cannot disagree. `boundary_margin` stays under
+`bounding_box_search` because only the guidance node uses it.
+
+### The box is a guidance target, not a hard limit
+
+Rebound firings are bounded by `maximum_force`, and the boundary force is only
+applied once the spacecraft is already inside `boundary_margin` of a wall. A
+spacecraft arriving with enough momentum therefore crosses the wall and travels
+some distance beyond it before the firing reverses its velocity. **Overshoot
+during a bounce is expected behavior, not a fault.**
+
+Overshoot distance grows with approach speed and shrinks with `boundary_margin`
+and `boundary_force`. Size the physical safe area with clearance beyond the
+configured box rather than treating the box edge as the limit of motion, and
+expect the RViz rectangle to be crossed on every bounce.
+
 In RViz, set the fixed frame to `swarm_map` and add a `MarkerArray` display for
 the robot's `bounding_box_search/markers` topic.
 

@@ -9,6 +9,10 @@
   <arg name="conn_type" default="sta" description="The type of connection: sta, ap, or rndis"/>
   <arg name="lib_log_level" default="ERROR" description="Robomaster SDK logging level"/>
   <arg name="reconnect" default="true" description="Wait for reconnections"/>
+  <arg name="robot_ip" default="" description="Pin the robot IP to skip SN broadcast discovery. Leave empty to discover."/>
+  <arg name="local_ip" default="" description="Pin the host-side IP used for the SDK sockets. Leave empty to autodetect."/>
+  <arg name="connection_attempts" default="5" description="How many times to retry the initial connection handshake"/>
+  <arg name="connection_retry_delay" default="2.0" description="Seconds to wait between connection attempts"/>
 
   <arg name="arm" default="$(eval '\'$(var model)\' == \'ep\'')" description="Enable the arm module. Should not be enabled together with the servo module"/>
   <arg name="left_motor_zero" default="1024" description="The arm left servo zero value"/>
@@ -131,6 +135,10 @@
     <param name="tf_prefix" value="$(var name)"/>
     <param name="serial_number" value="$(var serial_number)"/>
     <param name="conn_type" value="$(var conn_type)"/>
+    <param name="robot_ip" value="$(var robot_ip)"/>
+    <param name="local_ip" value="$(var local_ip)"/>
+    <param name="connection_attempts" value="$(var connection_attempts)"/>
+    <param name="connection_retry_delay" value="$(var connection_retry_delay)"/>
     <param name="lib_log_level" value="$(var lib_log_level)"/>
     <param name="mode" value="$(var gimbal_mode)"/>
     <param name="arm">
