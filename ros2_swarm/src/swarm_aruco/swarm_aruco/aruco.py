@@ -132,7 +132,7 @@ class ArucoMarker():
 
                 objpoints.append(objp)
                 corners2 = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
-                imgpoints.append(corners)
+                imgpoints.append(corners2)
 
                 # Draw and display the corners
                 cv2.drawChessboardCorners(img, chessboardSize, corners2, ret)
@@ -142,6 +142,10 @@ class ArucoMarker():
         cv2.destroyAllWindows()
 
     ############## CALIBRATION #######################################################
+        if len(imgpoints) < 6:
+            print(f"Calibration failed: only {len(imgpoints)} valid frames (need ≥6). Check chessboard visibility and patternSize.")
+            return
+
         ret, cameraMatrix, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, frameSize, None, None)
 
         filename = self.sn+'/'+self.sn + "_cam_cal.yaml"
