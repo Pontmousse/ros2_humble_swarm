@@ -1,13 +1,5 @@
-"""Publish physical localization using a Marvelmind initial anchor,
-filtered RoboMaster odometry propagation, and slow Marvelmind drift correction.
-
-The node also republishes two comparison orientations, so the chassis IMU
-and the Marvelmind beacon IMU can be evaluated against the fused yaw:
-
-    localization/imu_odom     chassis IMU yaw     (/<ns>/imu)
-    localization/mm_imu_odom  Marvelmind IMU yaw  (/<ns>/mm_imu)
-
-Both carry the fused position and twist; only the orientation differs.
+"""Publish physical localization using a Marvelmind initial anchor
+and filtered RoboMaster odometry propagation.
 """
 
 from collections import deque
@@ -16,25 +8,19 @@ import math
 from statistics import median
 from typing import Optional
 
-from geometry_msgs.msg import Quaternion, TransformStamped
+from geometry_msgs.msg import TransformStamped
 from marvelmind_ros2_msgs.msg import HedgePositionAddressed
 from nav_msgs.msg import Odometry
 import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from sensor_msgs.msg import Imu
 from swarm_interfaces.msg import StatePos as State
 from tf2_ros import TransformBroadcaster
 from transforms3d.euler import quat2euler
 
 
 UNOBSERVED_VARIANCE = 1.0e6
-
-# Below this norm a quaternion carries no orientation; the Marvelmind IMU
-# bridge leaves the field at all zeros because the beacon reports raw gyro
-# and accelerometer samples only.
-MINIMUM_QUATERNION_NORM = 1.0e-6
 
 
 # =============================================================================
@@ -52,32 +38,7 @@ def wrap_angle(angle: float) -> float:
     return math.atan2(math.sin(angle), math.cos(angle))
 
 
-def quaternion_yaw(quaternion: Quaternion) -> Optional[float]:
-    """Extract yaw, or None when the quaternion carries no orientation."""
-    norm = math.sqrt(
-        quaternion.w * quaternion.w
-        + quaternion.x * quaternion.x
-        + quaternion.y * quaternion.y
-        + quaternion.z * quaternion.z
-    )
-
-    if not math.isfinite(norm) or norm < MINIMUM_QUATERNION_NORM:
-        return None
-
-    return quat2euler(
-        [
-            quaternion.w / norm,
-            quaternion.x / norm,
-            quaternion.y / norm,
-            quaternion.z / norm,
-        ],
-        axes="sxyz",
-    )[2]
-
-
-def source_is_fresh(
-    now_nanoseconds: int, update_nanoseconds: Optional[int], timeout: float
-) -> bool:
+def source_is_fresh(now_nanoseconds: int, update_nanoseconds: Optional[int], timeout: float) -> bool:
     """Return whether a source has supplied a recent genuine update."""
     if update_nanoseconds is None:
         return False
@@ -92,9 +53,7 @@ def genuine_gps_update_time(
     previous_update_nanoseconds: Optional[int],
 ) -> Optional[int]:
     """Refresh receipt time only when the Marvelmind timestamp changes."""
-    if timestamp_ms != previous_timestamp_ms:
-        return now_nanoseconds
-    return previous_update_nanoseconds
+    return now_nanoseconds if timestamp_ms != previous_timestamp_ms else previous_update_nanoseconds
 
 
 def namespaced_base_frame(namespace: str, odometry_child_frame: str) -> str:
@@ -297,10 +256,11 @@ def make_map_to_odometry_transform(
     if not odometry_frame:
         raise ValueError("source odometry frame_id must not be empty")
 
-    odometry_yaw = quaternion_yaw(source_odometry.pose.pose.orientation)
-
-    if odometry_yaw is None:
-        raise ValueError("source odometry orientation must be a valid quaternion")
+    quaternion = source_odometry.pose.pose.orientation
+    odometry_yaw = quat2euler(
+        [quaternion.w, quaternion.x, quaternion.y, quaternion.z],
+        axes="sxyz",
+    )[2]
 
     map_to_odometry_yaw = yaw - odometry_yaw
     cosine = math.cos(map_to_odometry_yaw)
@@ -342,12 +302,6 @@ class PosePublisherNode(Node):
             -> rotate into swarm_map
             -> One Euro x/y filtering
             -> add initial Marvelmind position
-            -> add slowly applied GPS-vs-odom drift correction
-
-        Marvelmind continues running after initialization. Each genuine GPS
-        measurement is compared with the *uncorrected* odom-propagated global
-        position. Those disagreement samples are robustly averaged over a
-        calibration period and become the target map-position correction.
     """
 
     def __init__(self):
@@ -365,24 +319,6 @@ class PosePublisherNode(Node):
         self.declare_parameter("gps_timeout", 0.25)
         self.declare_parameter("odometry_timeout", 0.25)
         self.declare_parameter("gps_position_variance", 0.01)
-
-        # ---------------------------------------------------------------------
-        # Running GPS-vs-odom drift correction
-        # ---------------------------------------------------------------------
-
-        self.declare_parameter("gps_correction_enabled", True)
-        self.declare_parameter("gps_correction_period", 3.0)
-        self.declare_parameter("gps_correction_min_samples", 5)
-        self.declare_parameter("gps_correction_outlier_radius", 0.35)
-        self.declare_parameter("gps_correction_max_target_step", 0.50)
-        self.declare_parameter("gps_correction_smoothing_time", 1.0)
-
-        # ---------------------------------------------------------------------
-        # IMU orientation comparison
-        # ---------------------------------------------------------------------
-
-        self.declare_parameter("imu_comparison_enabled", True)
-        self.declare_parameter("imu_timeout", 0.25)
 
         # ---------------------------------------------------------------------
         # Marvelmind initial-position filter
@@ -442,39 +378,6 @@ class PosePublisherNode(Node):
         self.gps_position_variance = float(self.get_parameter("gps_position_variance").value)
 
         # ---------------------------------------------------------------------
-        # Running GPS-vs-odom drift correction
-        # ---------------------------------------------------------------------
-
-        self.gps_correction_enabled = bool(
-            self.get_parameter("gps_correction_enabled").value
-        )
-        self.gps_correction_period = float(
-            self.get_parameter("gps_correction_period").value
-        )
-        self.gps_correction_min_samples = int(
-            self.get_parameter("gps_correction_min_samples").value
-        )
-        self.gps_correction_outlier_radius = float(
-            self.get_parameter("gps_correction_outlier_radius").value
-        )
-        self.gps_correction_max_target_step = float(
-            self.get_parameter("gps_correction_max_target_step").value
-        )
-        self.gps_correction_smoothing_time = float(
-            self.get_parameter("gps_correction_smoothing_time").value
-        )
-
-        # ---------------------------------------------------------------------
-        # IMU comparison
-        # ---------------------------------------------------------------------
-
-        self.imu_comparison_enabled = bool(
-            self.get_parameter("imu_comparison_enabled").value
-        )
-
-        self.imu_timeout = float(self.get_parameter("imu_timeout").value)
-
-        # ---------------------------------------------------------------------
         # Initial Marvelmind filtering
         # ---------------------------------------------------------------------
 
@@ -531,11 +434,6 @@ class PosePublisherNode(Node):
             self.timer_frequency,
             self.gps_timeout,
             self.odometry_timeout,
-            self.imu_timeout,
-            self.gps_correction_period,
-            self.gps_correction_outlier_radius,
-            self.gps_correction_max_target_step,
-            self.gps_correction_smoothing_time,
         )
 
         if not all(math.isfinite(value) and value > 0.0 for value in positive_values):
@@ -543,9 +441,6 @@ class PosePublisherNode(Node):
 
         if not math.isfinite(self.gps_position_variance) or self.gps_position_variance < 0.0:
             raise ValueError("gps_position_variance must be finite and non-negative")
-
-        if self.gps_correction_min_samples < 1:
-            raise ValueError("gps_correction_min_samples must be >= 1")
 
         if not self.global_frame_id:
             raise ValueError("global_frame_id must not be empty")
@@ -680,42 +575,6 @@ class PosePublisherNode(Node):
         self.last_gps_update_nanoseconds = None
         self.last_odometry_update_nanoseconds = None
 
-        # ---------------------------------------------------------------------
-        # Running GPS-vs-odom drift correction
-        #
-        # raw_odom_global_position contains the global position obtained from
-        # RoboMaster odometry before any GPS correction is added. GPS residuals
-        # are always computed against this value so we never recursively
-        # "correct the correction."
-        # ---------------------------------------------------------------------
-
-        self.raw_odom_global_position = None
-        self.gps_disagreement_buffer = []
-        self.gps_correction_window_start_nanoseconds = None
-
-        self.target_position_correction = np.zeros(2)
-        self.position_correction = np.zeros(2)
-        self.last_position_correction_update_seconds = None
-
-        # ---------------------------------------------------------------------
-        # Comparison orientations
-        #
-        # imu_yaw is absolute and shares the driver odometry datum, so it is
-        # calibrated with init_angle exactly like the odometry yaw.
-        #
-        # mm_imu carries no orientation, only a rate, so its yaw is seeded
-        # from the fused yaw once initialization ends and integrated onwards.
-        # It therefore shows accumulated drift rather than an absolute angle.
-        # ---------------------------------------------------------------------
-
-        self.imu_yaw = None
-        self.imu_update_nanoseconds = None
-
-        self.mm_imu_yaw = None
-        self.mm_imu_update_nanoseconds = None
-
-        self.imu_orientation_warned = False
-
         self.get_logger().info(
             "Initializing global position and odometry; keep robot stationary."
         )
@@ -752,126 +611,22 @@ class PosePublisherNode(Node):
             localization_qos,
         )
 
-        self.imu_localization_pub = None
-        self.mm_imu_localization_pub = None
-
-        if self.imu_comparison_enabled:
-            self.create_subscription(
-                Imu,
-                "imu",
-                self.imu_callback,
-                self.qos_profile,
-            )
-
-            self.create_subscription(
-                Imu,
-                "mm_imu",
-                self.mm_imu_callback,
-                self.qos_profile,
-            )
-
-            self.imu_localization_pub = self.create_publisher(
-                Odometry,
-                "localization/imu_odom",
-                localization_qos,
-            )
-
-            self.mm_imu_localization_pub = self.create_publisher(
-                Odometry,
-                "localization/mm_imu_odom",
-                localization_qos,
-            )
-
         self.tf_broadcaster = TransformBroadcaster(self)
         self.create_timer(self.timer_frequency, self.publish_state)
 
         self.get_logger().info(
             f"Initial GPS filter: {self.position_filter_enabled}, "
-            f"GPS drift correction: {self.gps_correction_enabled}, "
             f"odom x/y filter: {self.odom_position_filter_enabled}, "
             f"yaw filter: {self.yaw_filter_enabled}, "
-            f"twist filter: {self.twist_filter_enabled}, "
-            f"IMU comparison: {self.imu_comparison_enabled}"
+            f"twist filter: {self.twist_filter_enabled}"
         )
 
     # =========================================================================
-    # Marvelmind initialization + running drift correction
+    # Marvelmind initialization
     # =========================================================================
-
-    def update_gps_correction_target(self, now_nanoseconds: int) -> None:
-        """Robustly estimate the absolute GPS-vs-odom translation disagreement."""
-        if self.gps_correction_window_start_nanoseconds is None:
-            self.gps_correction_window_start_nanoseconds = now_nanoseconds
-            return
-
-        elapsed = (
-            now_nanoseconds - self.gps_correction_window_start_nanoseconds
-        ) * 1.0e-9
-
-        if elapsed < self.gps_correction_period:
-            return
-
-        samples = np.asarray(self.gps_disagreement_buffer, dtype=float)
-        self.gps_disagreement_buffer.clear()
-        self.gps_correction_window_start_nanoseconds = now_nanoseconds
-
-        if len(samples) < self.gps_correction_min_samples:
-            self.get_logger().debug(
-                f"GPS correction skipped: only {len(samples)} disagreement samples."
-            )
-            return
-
-        # Median center rejects the effect of isolated Marvelmind jumps. Then
-        # average only samples close to that robust center.
-        center = np.median(samples, axis=0)
-        distances = np.linalg.norm(samples - center, axis=1)
-        inliers = samples[distances <= self.gps_correction_outlier_radius]
-
-        if len(inliers) < self.gps_correction_min_samples:
-            self.get_logger().debug(
-                f"GPS correction skipped: only {len(inliers)}/{len(samples)} inliers."
-            )
-            return
-
-        estimate = np.mean(inliers, axis=0)
-
-        # Do not let a single calibration window move the correction target by
-        # an arbitrarily large amount. Large genuine drift is still recovered
-        # over several calibration periods.
-        target_step = estimate - self.target_position_correction
-        target_step_norm = float(np.linalg.norm(target_step))
-
-        if target_step_norm > self.gps_correction_max_target_step:
-            target_step *= self.gps_correction_max_target_step / target_step_norm
-            estimate = self.target_position_correction + target_step
-
-        self.target_position_correction = estimate
-
-        self.get_logger().info(
-            "GPS drift calibration: "
-            f"samples={len(samples)}, inliers={len(inliers)}, "
-            f"target=({estimate[0]:+.3f}, {estimate[1]:+.3f}) m"
-        )
-
-    def update_position_correction(self, now_seconds: float) -> None:
-        """Smoothly slew the applied correction toward the latest GPS target."""
-        if self.last_position_correction_update_seconds is None:
-            self.last_position_correction_update_seconds = now_seconds
-            return
-
-        dt = now_seconds - self.last_position_correction_update_seconds
-        self.last_position_correction_update_seconds = now_seconds
-
-        if not math.isfinite(dt) or dt <= 0.0:
-            return
-
-        alpha = 1.0 - math.exp(-dt / self.gps_correction_smoothing_time)
-        self.position_correction += alpha * (
-            self.target_position_correction - self.position_correction
-        )
 
     def indoor_gps_callback(self, message: HedgePositionAddressed) -> None:
-        """Initialize global x/y, then use GPS to estimate slow odometry drift."""
+        """Use Marvelmind only for the initial global x/y."""
 
         now = self.get_clock().now()
         now_seconds = now.nanoseconds * 1.0e-9
@@ -890,113 +645,33 @@ class PosePublisherNode(Node):
 
         self.last_gps_timestamp_ms = message.timestamp_ms
 
+        if not self.gps_initializing:
+            return
+
         raw_x = float(message.x_m)
         raw_y = float(message.y_m)
 
-        if not math.isfinite(raw_x) or not math.isfinite(raw_y):
-            return
+        if self.position_filter_enabled:
+            median_x = self.x_median.update(raw_x)
+            median_y = self.y_median.update(raw_y)
+            candidate_x = self.x_filter.update(median_x, now_seconds)
+            candidate_y = self.y_filter.update(median_y, now_seconds)
+        else:
+            candidate_x = raw_x
+            candidate_y = raw_y
 
-        # Startup still uses the original filtered/averaged Marvelmind anchor.
-        if self.gps_initializing:
-            if self.position_filter_enabled:
-                median_x = self.x_median.update(raw_x)
-                median_y = self.y_median.update(raw_y)
-                candidate_x = self.x_filter.update(median_x, now_seconds)
-                candidate_y = self.y_filter.update(median_y, now_seconds)
-            else:
-                candidate_x = raw_x
-                candidate_y = raw_y
+        self.pos_buffer.append([candidate_x, candidate_y])
 
-            self.pos_buffer.append([candidate_x, candidate_y])
+        elapsed = (now - self.init_start_time).nanoseconds * 1.0e-9
 
-            elapsed = (now - self.init_start_time).nanoseconds * 1.0e-9
+        if elapsed >= self.init_period:
+            self.init_pos = np.mean(self.pos_buffer, axis=0)
+            self.x[0] = float(self.init_pos[0])
+            self.x[1] = float(self.init_pos[1])
+            self.gps_initializing = False
 
-            if elapsed >= self.init_period:
-                self.init_pos = np.mean(self.pos_buffer, axis=0)
-                self.x[0] = float(self.init_pos[0])
-                self.x[1] = float(self.init_pos[1])
-                self.gps_initializing = False
-
-                self.get_logger().info(
-                    "Marvelmind global-position initialization complete."
-                )
-                self.get_logger().info(
-                    f"Initial global position: {self.init_pos} meters"
-                )
-            return
-
-        if not self.gps_correction_enabled or self.odom_initializing:
-            return
-
-        if self.raw_odom_global_position is None:
-            return
-
-        # We compare the GPS sample with the latest *uncorrected* odom-global
-        # position. Because this is a position difference, the robot can move
-        # throughout the calibration window; we average disagreement, not pose.
-        if not source_is_fresh(
-            now.nanoseconds,
-            self.last_odometry_update_nanoseconds,
-            self.odometry_timeout,
-        ):
-            return
-
-        disagreement = np.array([raw_x, raw_y]) - self.raw_odom_global_position
-        self.gps_disagreement_buffer.append(disagreement)
-        self.update_gps_correction_target(now.nanoseconds)
-
-    # =========================================================================
-    # Comparison IMUs
-    # =========================================================================
-
-    def imu_callback(self, message: Imu) -> None:
-        """Track the chassis IMU yaw on the fused yaw datum."""
-
-        raw_imu_yaw = quaternion_yaw(message.orientation)
-
-        if raw_imu_yaw is None:
-            if not self.imu_orientation_warned:
-                self.imu_orientation_warned = True
-                self.get_logger().warn(
-                    "Chassis IMU reports no orientation; enable "
-                    "chassis.imu.include_orientation on the driver."
-                )
-            return
-
-        if self.odom_initializing:
-            return
-
-        self.imu_yaw = wrap_angle(raw_imu_yaw - self.init_angle)
-        self.imu_update_nanoseconds = self.get_clock().now().nanoseconds
-
-    def mm_imu_callback(self, message: Imu) -> None:
-        """Integrate the Marvelmind gyro; the bridge supplies rate only."""
-
-        if self.odom_initializing:
-            return
-
-        now_nanoseconds = self.get_clock().now().nanoseconds
-        yaw_rate = float(message.angular_velocity.z)
-
-        if not math.isfinite(yaw_rate):
-            return
-
-        if self.mm_imu_yaw is None or self.mm_imu_update_nanoseconds is None:
-            self.mm_imu_yaw = float(self.x[2])
-            self.mm_imu_update_nanoseconds = now_nanoseconds
-            self.get_logger().info(
-                f"Marvelmind IMU yaw seeded at {degrees(self.mm_imu_yaw)} degrees"
-            )
-            return
-
-        step = (now_nanoseconds - self.mm_imu_update_nanoseconds) * 1.0e-9
-
-        # A gap longer than the timeout means samples were lost; integrating
-        # across it would inject a spurious rotation.
-        if 0.0 < step <= self.imu_timeout:
-            self.mm_imu_yaw = wrap_angle(self.mm_imu_yaw + yaw_rate * step)
-
-        self.mm_imu_update_nanoseconds = now_nanoseconds
+            self.get_logger().info("Marvelmind global-position initialization complete.")
+            self.get_logger().info(f"Initial global position: {self.init_pos} meters")
 
     # =========================================================================
     # RoboMaster odometry
@@ -1014,10 +689,12 @@ class PosePublisherNode(Node):
         raw_odom_x = float(message.pose.pose.position.x)
         raw_odom_y = float(message.pose.pose.position.y)
 
-        raw_yaw = quaternion_yaw(message.pose.pose.orientation)
+        quaternion = message.pose.pose.orientation
 
-        if raw_yaw is None:
-            return
+        raw_yaw = quat2euler(
+            [quaternion.w, quaternion.x, quaternion.y, quaternion.z],
+            axes="sxyz",
+        )[2]
 
         raw_vx = float(message.twist.twist.linear.x)
         raw_vy = float(message.twist.twist.linear.y)
@@ -1057,11 +734,6 @@ class PosePublisherNode(Node):
 
                 if self.yaw_filter_enabled:
                     self.yaw_filter.reset(float(self.x[2]), now_seconds)
-
-                if not self.gps_initializing:
-                    self.raw_odom_global_position = self.init_pos.copy()
-
-                self.last_position_correction_update_seconds = now_seconds
 
                 self.get_logger().info("RoboMaster odometry initialization complete.")
                 self.get_logger().info(
@@ -1109,36 +781,23 @@ class PosePublisherNode(Node):
         cosine = math.cos(map_from_odom_angle)
         sine = math.sin(map_from_odom_angle)
 
-        raw_delta_map_x = cosine * delta_odom_x - sine * delta_odom_y
-        raw_delta_map_y = sine * delta_odom_x + cosine * delta_odom_y
-
-        # Keep a separate uncorrected odom-global trajectory for GPS residuals.
-        # This deliberately bypasses the running x/y One Euro filter so normal
-        # filter lag while the robot is moving is not mistaken for odom drift.
-        self.raw_odom_global_position = self.init_pos + np.array(
-            [raw_delta_map_x, raw_delta_map_y]
-        )
+        delta_map_x = cosine * delta_odom_x - sine * delta_odom_y
+        delta_map_y = sine * delta_odom_x + cosine * delta_odom_y
 
         # ---------------------------------------------------------------------
         # One Euro filtering of running x/y displacement
         # ---------------------------------------------------------------------
-
-        delta_map_x = raw_delta_map_x
-        delta_map_y = raw_delta_map_y
 
         if self.odom_position_filter_enabled:
             delta_map_x = self.odom_delta_x_filter.update(delta_map_x, now_seconds)
             delta_map_y = self.odom_delta_y_filter.update(delta_map_y, now_seconds)
 
         # ---------------------------------------------------------------------
-        # Global localization position + smooth GPS drift correction
+        # Global localization position
         # ---------------------------------------------------------------------
 
-        if self.gps_correction_enabled:
-            self.update_position_correction(now_seconds)
-
-        self.x[0] = self.init_pos[0] + delta_map_x + self.position_correction[0]
-        self.x[1] = self.init_pos[1] + delta_map_y + self.position_correction[1]
+        self.x[0] = self.init_pos[0] + delta_map_x
+        self.x[1] = self.init_pos[1] + delta_map_y
 
     # =========================================================================
     # Readiness
@@ -1162,41 +821,6 @@ class PosePublisherNode(Node):
     # Publish
     # =========================================================================
 
-    def publish_comparison_odometry(self, stamp, now_nanoseconds: int) -> None:
-        """Republish the fused pose once per comparison orientation."""
-
-        comparisons = (
-            (self.imu_localization_pub, self.imu_yaw, self.imu_update_nanoseconds),
-            (
-                self.mm_imu_localization_pub,
-                self.mm_imu_yaw,
-                self.mm_imu_update_nanoseconds,
-            ),
-        )
-
-        for publisher, yaw, update_nanoseconds in comparisons:
-            if publisher is None or yaw is None:
-                continue
-
-            if not source_is_fresh(now_nanoseconds, update_nanoseconds, self.imu_timeout):
-                continue
-
-            publisher.publish(
-                make_localization_odometry(
-                    x=float(self.x[0]),
-                    y=float(self.x[1]),
-                    yaw=float(yaw),
-                    body_vx=float(self.body_vx),
-                    body_vy=float(self.body_vy),
-                    yaw_rate=float(self.yaw_rate),
-                    source_odometry=self.latest_odometry,
-                    stamp=stamp,
-                    global_frame_id=self.global_frame_id,
-                    namespace=self.get_namespace(),
-                    gps_position_variance=self.gps_position_variance,
-                )
-            )
-
     def publish_state(self) -> None:
         """Publish pose and localization odometry."""
 
@@ -1212,8 +836,6 @@ class PosePublisherNode(Node):
         if not self.localization_is_ready(now.nanoseconds):
             return
 
-        stamp = now.to_msg()
-
         message = make_localization_odometry(
             x=float(self.x[0]),
             y=float(self.x[1]),
@@ -1222,7 +844,7 @@ class PosePublisherNode(Node):
             body_vy=float(self.body_vy),
             yaw_rate=float(self.yaw_rate),
             source_odometry=self.latest_odometry,
-            stamp=stamp,
+            stamp=now.to_msg(),
             global_frame_id=self.global_frame_id,
             namespace=self.get_namespace(),
             gps_position_variance=self.gps_position_variance,
@@ -1230,15 +852,13 @@ class PosePublisherNode(Node):
 
         self.localization_pub.publish(message)
 
-        self.publish_comparison_odometry(stamp, now.nanoseconds)
-
         if self.latest_odometry.header.frame_id.lstrip("/"):
             transform = make_map_to_odometry_transform(
                 x=float(self.x[0]),
                 y=float(self.x[1]),
                 yaw=float(self.x[2]),
                 source_odometry=self.latest_odometry,
-                stamp=stamp,
+                stamp=now.to_msg(),
                 global_frame_id=self.global_frame_id,
             )
 

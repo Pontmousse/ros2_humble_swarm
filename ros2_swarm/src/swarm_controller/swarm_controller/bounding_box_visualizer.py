@@ -3,13 +3,13 @@
 import math
 
 from geometry_msgs.msg import Point, Wrench
+from marvelmind_ros2_msgs.msg import HedgePositionAddressed
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
 from visualization_msgs.msg import Marker, MarkerArray
 
 from .bounding_box_search import qos_profile_from_parameters
-from .bounding_box_search import rotate_body_to_global
 from .bounding_box_search import yaw_from_quaternion
 
 
@@ -22,6 +22,9 @@ class BoundingBoxVisualizerNode(Node):
     FORCE_ID = 3
     TORQUE_ARC_ID = 4
     TORQUE_HEAD_ID = 5
+    INDOOR_GPS_ID = 6
+    IMU_HEADING_ID = 7
+    MM_IMU_HEADING_ID = 8
 
     def __init__(self):
         super().__init__("bounding_box_visualizer")
@@ -38,6 +41,13 @@ class BoundingBoxVisualizerNode(Node):
         self.declare_parameter("force_arrow_max_length", 1.0)
         self.declare_parameter("torque_arrow_max_radius", 0.25)
         self.declare_parameter("show_physical_robot", True)
+        self.declare_parameter("show_indoor_gps", True)
+        self.declare_parameter("indoor_gps_timeout", 1.0)
+        self.declare_parameter("indoor_gps_marker_size", 0.08)
+        self.declare_parameter("show_imu_orientations", True)
+        self.declare_parameter("imu_orientation_timeout", 0.5)
+        self.declare_parameter("imu_arrow_length", 0.20)
+        self.declare_parameter("mm_imu_arrow_length", 0.28)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -63,10 +73,33 @@ class BoundingBoxVisualizerNode(Node):
         self.show_physical_robot = bool(
             self.get_parameter("show_physical_robot").value
         )
+        self.show_indoor_gps = bool(self.get_parameter("show_indoor_gps").value)
+        self.indoor_gps_timeout = float(
+            self.get_parameter("indoor_gps_timeout").value
+        )
+        self.indoor_gps_marker_size = float(
+            self.get_parameter("indoor_gps_marker_size").value
+        )
+        self.show_imu_orientations = bool(
+            self.get_parameter("show_imu_orientations").value
+        )
+        self.imu_orientation_timeout = float(
+            self.get_parameter("imu_orientation_timeout").value
+        )
+        self.imu_arrow_length = float(self.get_parameter("imu_arrow_length").value)
+        self.mm_imu_arrow_length = float(
+            self.get_parameter("mm_imu_arrow_length").value
+        )
         self.validate_parameters()
 
         self.virtual_odometry = None
         self.physical_odometry = None
+        self.indoor_gps_position = None
+        self.indoor_gps_update_time = None
+        self.imu_yaw = None
+        self.imu_update_time = None
+        self.mm_imu_yaw = None
+        self.mm_imu_update_time = None
         self.wrench = Wrench()
         self.virtual_update_time = None
         self.physical_update_time = None
@@ -87,10 +120,29 @@ class BoundingBoxVisualizerNode(Node):
         )
         self.create_subscription(
             Wrench,
-            "spacecraft_wrench",
+            "virtual_spacecraft/applied_wrench",
             self.wrench_callback,
             qos_profile,
         )
+        self.create_subscription(
+            HedgePositionAddressed,
+            "mm_pos_unf",
+            self.indoor_gps_callback,
+            qos_profile,
+        )
+        if self.show_imu_orientations:
+            self.create_subscription(
+                Odometry,
+                "localization/imu_odom",
+                self.imu_orientation_callback,
+                qos_profile,
+            )
+            self.create_subscription(
+                Odometry,
+                "localization/mm_imu_odom",
+                self.mm_imu_orientation_callback,
+                qos_profile,
+            )
         self.marker_publisher = self.create_publisher(
             MarkerArray, "bounding_box_search/markers", qos_profile
         )
@@ -111,6 +163,11 @@ class BoundingBoxVisualizerNode(Node):
             self.maximum_torque,
             self.force_arrow_max_length,
             self.torque_arrow_max_radius,
+            self.indoor_gps_timeout,
+            self.indoor_gps_marker_size,
+            self.imu_orientation_timeout,
+            self.imu_arrow_length,
+            self.mm_imu_arrow_length,
         )
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Visualizer parameters must be finite")
@@ -124,6 +181,11 @@ class BoundingBoxVisualizerNode(Node):
             self.maximum_torque,
             self.force_arrow_max_length,
             self.torque_arrow_max_radius,
+            self.indoor_gps_timeout,
+            self.indoor_gps_marker_size,
+            self.imu_orientation_timeout,
+            self.imu_arrow_length,
+            self.mm_imu_arrow_length,
         )
         if not all(value > 0.0 for value in positive):
             raise ValueError("Visualizer timing, sizes, and limits must be positive")
@@ -140,24 +202,53 @@ class BoundingBoxVisualizerNode(Node):
         self.physical_odometry = message
         self.physical_update_time = self.get_clock().now().nanoseconds
 
+    def indoor_gps_callback(self, message: HedgePositionAddressed) -> None:
+        """Store the raw Marvelmind hedge position for the overlay."""
+        self.indoor_gps_position = (float(message.x_m), float(message.y_m))
+        self.indoor_gps_update_time = self.get_clock().now().nanoseconds
+
+    def orientation_yaw(self, message: Odometry):
+        """Extract a global-frame yaw from a comparison odometry source."""
+        if message.header.frame_id.lstrip("/") != self.global_frame_id:
+            return None
+        return yaw_from_quaternion(message.pose.pose.orientation)
+
+    def imu_orientation_callback(self, message: Odometry) -> None:
+        """Store the chassis IMU yaw; the position is supplied by the beacon."""
+        yaw = self.orientation_yaw(message)
+        if yaw is None:
+            return
+        self.imu_yaw = yaw
+        self.imu_update_time = self.get_clock().now().nanoseconds
+
+    def mm_imu_orientation_callback(self, message: Odometry) -> None:
+        """Store the Marvelmind IMU yaw; the position is supplied by the beacon."""
+        yaw = self.orientation_yaw(message)
+        if yaw is None:
+            return
+        self.mm_imu_yaw = yaw
+        self.mm_imu_update_time = self.get_clock().now().nanoseconds
+
     def wrench_callback(self, message: Wrench) -> None:
         """Store the most recently commanded body-frame wrench."""
         self.wrench = message
         self.wrench_update_time = self.get_clock().now().nanoseconds
 
-    def source_is_fresh(self, now_nanoseconds: int, update_time) -> bool:
+    def source_is_fresh(
+        self, now_nanoseconds: int, update_time, timeout: float = None
+    ) -> bool:
         """Return whether a source receipt timestamp is recent."""
         if update_time is None:
             return False
         age = (now_nanoseconds - update_time) * 1.0e-9
-        return 0.0 <= age <= self.source_timeout
+        return 0.0 <= age <= (self.source_timeout if timeout is None else timeout)
 
     def marker(self, marker_id: int, marker_type: int, stamp) -> Marker:
         """Create a marker with the experiment's shared identity and frame."""
         marker = Marker()
         marker.header.frame_id = self.global_frame_id
         marker.header.stamp = stamp
-        marker.ns = "bounding_box_search"
+        marker.ns = f"bounding_box_search{self.get_namespace()}"
         marker.id = marker_id
         marker.type = marker_type
         marker.action = Marker.ADD
@@ -301,6 +392,51 @@ class BoundingBoxVisualizerNode(Node):
         head.points = [tip, left, tip, right]
         return arc, head
 
+    def indoor_gps_marker(self, stamp) -> Marker:
+        """Create a position-only sphere at the raw Marvelmind fix."""
+        marker = self.marker(self.INDOOR_GPS_ID, Marker.SPHERE, stamp)
+        marker.scale.x = self.indoor_gps_marker_size
+        marker.scale.y = self.indoor_gps_marker_size
+        marker.scale.z = self.indoor_gps_marker_size
+        marker.color.r = 1.0
+        marker.color.g = 0.9
+        marker.color.b = 0.1
+        marker.color.a = 0.8
+        marker.pose.position.x = self.indoor_gps_position[0]
+        marker.pose.position.y = self.indoor_gps_position[1]
+        marker.pose.position.z = 0.02
+        return marker
+
+    def heading_arrow_marker(
+        self,
+        marker_id: int,
+        yaw: float,
+        length: float,
+        red: float,
+        green: float,
+        blue: float,
+        stamp,
+    ) -> Marker:
+        """Create a heading arrow rooted at the indoor-GPS position."""
+        marker = self.marker(marker_id, Marker.ARROW, stamp)
+        marker.scale.x = 0.02
+        marker.scale.y = 0.06
+        marker.scale.z = 0.08
+        marker.color.r = red
+        marker.color.g = green
+        marker.color.b = blue
+        marker.color.a = 1.0
+        x, y = self.indoor_gps_position
+        marker.points = [
+            self.point(x, y, 0.06),
+            self.point(
+                x + length * math.cos(yaw),
+                y + length * math.sin(yaw),
+                0.06,
+            ),
+        ]
+        return marker
+
     def delete_marker(self, marker_id: int, stamp) -> Marker:
         """Delete a previously published dynamic marker."""
         marker = self.marker(marker_id, Marker.LINE_STRIP, stamp)
@@ -312,6 +448,7 @@ class BoundingBoxVisualizerNode(Node):
         now = self.get_clock().now()
         stamp = now.to_msg()
         markers = [self.rectangle_marker(stamp)]
+
         virtual_valid = (
             self.source_is_fresh(now.nanoseconds, self.virtual_update_time)
             and self.virtual_odometry is not None
@@ -343,15 +480,11 @@ class BoundingBoxVisualizerNode(Node):
             wrench_valid = self.source_is_fresh(
                 now.nanoseconds, self.wrench_update_time
             )
-            body_force_x = self.wrench.force.x if wrench_valid else 0.0
-            body_force_y = self.wrench.force.y if wrench_valid else 0.0
+            # Already the inertial-frame sum of every contributor, so it is
+            # drawn as received rather than rotated out of the body frame.
+            force_x = self.wrench.force.x if wrench_valid else 0.0
+            force_y = self.wrench.force.y if wrench_valid else 0.0
             torque = self.wrench.torque.z if wrench_valid else 0.0
-            yaw = yaw_from_quaternion(
-                self.virtual_odometry.pose.pose.orientation
-            )
-            force_x, force_y = rotate_body_to_global(
-                body_force_x, body_force_y, yaw
-            )
             markers.append(
                 self.force_marker(
                     stamp, self.virtual_odometry, force_x, force_y
@@ -383,6 +516,56 @@ class BoundingBoxVisualizerNode(Node):
         else:
             markers.append(self.delete_marker(self.PHYSICAL_ID, stamp))
 
+        indoor_gps_valid = (
+            self.show_indoor_gps
+            and self.indoor_gps_position is not None
+            and self.source_is_fresh(
+                now.nanoseconds,
+                self.indoor_gps_update_time,
+                self.indoor_gps_timeout,
+            )
+        )
+        if indoor_gps_valid:
+            markers.append(self.indoor_gps_marker(stamp))
+        else:
+            markers.append(self.delete_marker(self.INDOOR_GPS_ID, stamp))
+
+        # Both arrows are anchored on the beacon position, so they are only
+        # meaningful while that anchor is fresh.
+        headings = (
+            (
+                self.IMU_HEADING_ID,
+                self.imu_yaw,
+                self.imu_update_time,
+                self.imu_arrow_length,
+                (1.0, 0.1, 0.9),
+            ),
+            (
+                self.MM_IMU_HEADING_ID,
+                self.mm_imu_yaw,
+                self.mm_imu_update_time,
+                self.mm_imu_arrow_length,
+                (0.3, 1.0, 0.3),
+            ),
+        )
+        for marker_id, yaw, update_time, length, color in headings:
+            heading_valid = (
+                self.show_imu_orientations
+                and indoor_gps_valid
+                and yaw is not None
+                and self.source_is_fresh(
+                    now.nanoseconds, update_time, self.imu_orientation_timeout
+                )
+            )
+            if heading_valid:
+                markers.append(
+                    self.heading_arrow_marker(
+                        marker_id, yaw, length, *color, stamp
+                    )
+                )
+            else:
+                markers.append(self.delete_marker(marker_id, stamp))
+
         message = MarkerArray()
         message.markers = markers
         self.marker_publisher.publish(message)
@@ -394,6 +577,8 @@ def main(args=None):
     node = BoundingBoxVisualizerNode()
     try:
         rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.destroy_node()
         rclpy.shutdown()

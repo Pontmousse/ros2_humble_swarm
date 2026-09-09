@@ -3,6 +3,8 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import math, numpy as np
 
+from geometry_msgs.msg import Wrench
+
 # Custom messages
 from swarm_interfaces.msg import StatePos as State 
 from swarm_interfaces.msg import CoordXY, Markers, Neighbours
@@ -76,6 +78,10 @@ class GuidanceNode(Node):
         self.vel2 = np.array([0, 0])
         self.step = 1.0
 
+        # Forces from neighborhood antiflocking (collision avoidance) for virtual spacecraft
+        self.nbh_Fx = 0.0
+        self.nbh_Fy = 0.0
+
         # Subscribers
         self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile_best_effort)
         self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile_best_effort)
@@ -83,8 +89,10 @@ class GuidanceNode(Node):
         
 
         # Publishers
+        self.wrench_nbh_pub = self.create_publisher(Wrench,"avoidance_wrench", 10)
         self.pub = self.create_publisher(CoordXY, 'target_position', self.qos_profile_reliable)
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_position)
+        
 
     def pose_callback(self, msg: State):
         self.pose = np.array([msg.x, msg.y, msg.theta])
@@ -180,6 +188,9 @@ class GuidanceNode(Node):
                 Fx += factor * (dx / distance)
                 Fy += factor * (dy / distance)
 
+        self.nbh_Fx = Fx
+        self.nbh_Fy = Fy
+
         return np.array([Fx, Fy])
 
 
@@ -205,6 +216,11 @@ class GuidanceNode(Node):
         msg.x = self.target[0]
         msg.y = self.target[1]
         self.pub.publish(msg)
+
+        wmsg = Wrench()
+        wmsg.force.x = self.nbh_Fx
+        wmsg.force.y = self.nbh_Fy
+        self.wrench_nbh_pub.publish(wmsg)
 
 def make_array(list_coord):
     # list_coord can be Landmarks or Neighbours => convert to Numpy array n both cases

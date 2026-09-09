@@ -1,7 +1,8 @@
 from launch import LaunchDescription
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
-
+from datetime import datetime
+from launch.actions import TimerAction
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, ExecuteProcess
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
@@ -507,7 +508,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        # ld.add_action(ep_translation_planner)
+        ld.add_action(ep_translation_planner)
 
 
     ##############################################################################
@@ -579,5 +580,89 @@ def generate_launch_description():
     #     )
 
     #     ld.add_action(consensus_node)
+
+
+
+
+
+
+
+
+
+
+
+
+        ##############################################################################
+        ############################ ROSBAG RECORDING ################################
+        ##############################################################################
+
+        bag_topics = [
+            '/tf',
+            '/tf_static',
+        ]
+
+        for robot_name in robot_names:
+            bag_topics.extend([
+                f'/{robot_name}/localization/odom',
+
+                # Virtual-spacecraft dynamics
+                f'/{robot_name}/virtual_spacecraft/odom',
+                f'/{robot_name}/virtual_spacecraft/applied_wrench',
+
+                # Forces going into virtual-spacecraft dynamics
+                f'/{robot_name}/spacecraft_wrench',
+                f'/{robot_name}/avoidance_wrench',
+
+                # ArUco perception
+                f'/{robot_name}/landmarks_unf',
+                f'/{robot_name}/landmarks',
+                f'/{robot_name}/targets_unf',
+                f'/{robot_name}/targets',
+
+                # Velocity commands: before and after Nav2 velocity smoother
+                f'/{robot_name}/cmd_vel_raw',
+                f'/{robot_name}/cmd_vel',
+
+                # Raw positioning / orientation comparison
+                f'/{robot_name}/mm_pos_unf',
+                f'/{robot_name}/localization/imu_odom',
+                f'/{robot_name}/localization/mm_imu_odom',
+            ])
+
+        # ~/rosbags/swarm_20260909_185500/
+        bag_root = os.path.expanduser('~/rosbags')
+        os.makedirs(bag_root, exist_ok=True)
+
+        bag_name = datetime.now().strftime(f'swarm_boundingbox_{N}{"agent" if N == 1 else "agents"}_%Y%m%d_%H%M%S')
+        bag_path = os.path.join(bag_root, bag_name)
+
+        bag_record = ExecuteProcess(
+            cmd=[
+                'ros2',
+                'bag',
+                'record',
+                '-s', 'sqlite3',
+                '-o', bag_path,
+                *bag_topics,
+            ],
+            output='screen',
+        )
+
+        # Give both launch files / robot drivers a little time to appear
+        # before starting rosbag discovery.
+        ld.add_action(
+            TimerAction(
+                period=3.0,
+                actions=[bag_record],
+            )
+        )
+
+        return ld
+
+
+
+
+
+
 
     return ld

@@ -20,15 +20,25 @@
     yaw_inertia: 1.0
     timer_frequency: 0.01
 
-    # Bounds on the virtual inputs.
-    maximum_force: 1.0
-    maximum_torque: 0.1
+    # Bounds on the summed virtual input, applied once to the total so adding a
+    # contributor cannot raise the authority the safe area was sized for.
+    maximum_force: 2.0
+    maximum_torque: 0.5
 
     # Stop accelerating on a stale wrench and clamp long scheduler gaps.
     odometry_timeout: 0.25
     wrench_timeout: 0.25
     maximum_time_step: 0.05
-    wrench_in_body_frame: true
+
+    # Wrench contributors, summed every step. Each declares its own frame:
+    # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
+    # Add a term by naming it here plus a topic/frame pair; a source that stops
+    # publishing simply drops out after wrench_timeout.
+    wrench_sources: ["bounding_box", "avoidance"]
+    wrench_sources.bounding_box.topic: "spacecraft_wrench"
+    wrench_sources.bounding_box.frame: "body"
+    wrench_sources.avoidance.topic: "avoidance_wrench"
+    wrench_sources.avoidance.frame: "inertial"
 
     qos_depth: 10
     qos_reliability: "RELIABLE"
@@ -43,8 +53,8 @@
     yaw_gain: 1.5
 
     # Conservative RoboMaster motion-rendering limits.
-    maximum_speed: 0.4
-    maximum_yaw_rate: 0.8
+    maximum_speed: 1.0
+    maximum_yaw_rate: 1.8
 
     # Stop the physical chassis when either input becomes stale.
     odometry_timeout: 0.25
@@ -94,11 +104,11 @@
     boundary_margin: 0.01
 
     # Finite firings; limits match the virtual dynamics configuration.
-    boundary_force: 1.0
+    boundary_force: 3.0
     rebound_speed: 0.15
-    maximum_force: 1.0
-    maximum_torque: 0.2
-    initial_burn_duration: 1.0
+    maximum_force: 3.0
+    maximum_torque: 0.5
+    initial_burn_duration: 5.0
     initial_force_x: 0.8
     initial_force_y: 0.4
     initial_torque: 0.3
@@ -124,7 +134,13 @@
     force_arrow_max_length: 1.0
     torque_arrow_max_radius: 0.25
     show_physical_robot: true
-
+    show_indoor_gps: false
+    indoor_gps_timeout: 1.0
+    indoor_gps_marker_size: 0.08
+    show_imu_orientations: false
+    imu_orientation_timeout: 0.5
+    imu_arrow_length: 0.20
+    mm_imu_arrow_length: 0.28
     qos_depth: 10
     qos_reliability: "RELIABLE"
     qos_history: "KEEP_LAST"
@@ -309,3 +325,59 @@
 
 
     
+/**/pose_publisher:
+  ros__parameters:
+    init_period: 2.0
+    timer_frequency: 0.01
+    init_orientation: 0.0
+
+    global_frame_id: "swarm_map"
+
+    gps_timeout: 0.25
+    odometry_timeout: 0.25
+    gps_position_variance: 0.01
+
+    # --------------------------------------------------
+    # Marvelmind x/y
+    # --------------------------------------------------
+
+    position_filter_enabled: true
+
+    # One isolated bad sample is rejected.
+    # At 100 Hz this costs roughly one sample of
+    # response at an abrupt real position change.
+    position_median_window: 3
+
+    position_min_cutoff: 2.0
+    position_beta: 2.0
+    position_derivative_cutoff: 1.0
+
+    # --------------------------------------------------
+    # RoboMaster yaw and x/y
+    # --------------------------------------------------
+
+    odom_position_filter_enabled: true
+    odom_position_min_cutoff: 2.0
+    odom_position_beta: 2.0
+    odom_position_derivative_cutoff: 1.0
+
+
+    yaw_filter_enabled: true
+    yaw_min_cutoff: 3.0
+    yaw_beta: 1.0
+    yaw_derivative_cutoff: 1.0
+
+
+    # --------------------------------------------------
+    # RoboMaster body velocity
+    # Keep relatively responsive because PID+FF uses it.
+    # --------------------------------------------------
+
+    twist_filter_enabled: true
+    twist_min_cutoff: 4.0
+    twist_beta: 0.5
+    twist_derivative_cutoff: 1.0
+
+    qos_depth: 10
+    qos_reliability: "RELIABLE"
+    qos_history: "KEEP_LAST"

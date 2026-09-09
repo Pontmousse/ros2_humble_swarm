@@ -1,9 +1,10 @@
 """ROS 2 node that renders virtual free-floating dynamics on a chassis."""
 
+from functools import partial
 import math
 
 from geometry_msgs.msg import Wrench
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry 
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -73,6 +74,11 @@ def timestamp_is_fresh(
     return 0.0 <= age <= timeout
 
 
+BODY_FRAME = "body"
+INERTIAL_FRAME = "inertial"
+WRENCH_FRAMES = (BODY_FRAME, INERTIAL_FRAME)
+
+
 class VirtualSpacecraftNode(Node):
     """Integrate and publish the state of an ideal planar spacecraft."""
 
@@ -86,7 +92,7 @@ class VirtualSpacecraftNode(Node):
         self.declare_parameter("odometry_timeout", 0.25)
         self.declare_parameter("wrench_timeout", 0.25)
         self.declare_parameter("maximum_time_step", 0.05)
-        self.declare_parameter("wrench_in_body_frame", True)
+        self.declare_parameter("wrench_sources", ["bounding_box"])
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -101,9 +107,6 @@ class VirtualSpacecraftNode(Node):
         )
         self.wrench_timeout = float(self.get_parameter("wrench_timeout").value)
         self.maximum_time_step = float(self.get_parameter("maximum_time_step").value)
-        self.wrench_in_body_frame = bool(
-            self.get_parameter("wrench_in_body_frame").value
-        )
         positive_values = (
             self.mass,
             self.inertia,
@@ -123,12 +126,8 @@ class VirtualSpacecraftNode(Node):
         self.measured_frame_id = ""
         self.reference_frame_id = ""
         self.virtual_frame_id = namespaced_virtual_frame(self.get_namespace())
-        self.force_x = 0.0
-        self.force_y = 0.0
-        self.torque = 0.0
         self.initialized = False
         self.last_odometry_time = None
-        self.last_wrench_time = None
         self.last_update_time = self.get_clock().now()
 
         qos_profile = qos_profile_from_parameters(self)
@@ -138,14 +137,13 @@ class VirtualSpacecraftNode(Node):
             self.odometry_callback,
             qos_profile,
         )
-        self.create_subscription(
-            Wrench,
-            "spacecraft_wrench",
-            self.wrench_callback,
-            qos_profile,
-        )
+        self.subscribe_wrench_sources(qos_profile)
         self.reference_publisher = self.create_publisher(
             Odometry, "virtual_spacecraft/odom", qos_profile
+        )
+        # Summed, clamped, inertial-frame wrench actually integrated this step.
+        self.applied_wrench_publisher = self.create_publisher(
+            Wrench, "virtual_spacecraft/applied_wrench", qos_profile
         )
         self.create_service(Trigger, "virtual_spacecraft/reset", self.reset_callback)
         self.create_timer(timer_frequency, self.update)
@@ -163,26 +161,89 @@ class VirtualSpacecraftNode(Node):
         if not self.initialized and self.measured_frame_id:
             self.reset_reference()
 
-    def wrench_callback(self, message: Wrench) -> None:
-        """Store a bounded virtual force and yaw torque command."""
+    def subscribe_wrench_sources(self, qos_profile) -> None:
+        """Subscribe to every configured wrench contributor.
+
+        Each source declares its own frame because contributors disagree:
+        box guidance commands thrust in the body frame, while neighbour
+        avoidance is computed from map coordinates.
+        """
+        source_names = list(self.get_parameter("wrench_sources").value)
+        if not source_names:
+            raise ValueError("wrench_sources must name at least one contributor")
+        if len(set(source_names)) != len(source_names):
+            raise ValueError("wrench_sources names must be unique")
+
+        self.wrench_frames = {}
+        self.wrench_values = {}
+        self.wrench_update_times = {}
+        for name in source_names:
+            self.declare_parameter(f"wrench_sources.{name}.topic", "")
+            self.declare_parameter(f"wrench_sources.{name}.frame", BODY_FRAME)
+            topic = str(
+                self.get_parameter(f"wrench_sources.{name}.topic").value
+            ).strip()
+            frame = str(self.get_parameter(f"wrench_sources.{name}.frame").value)
+            if not topic:
+                raise ValueError(f"wrench source '{name}' requires a topic")
+            if frame not in WRENCH_FRAMES:
+                raise ValueError(
+                    f"wrench source '{name}' frame must be one of {WRENCH_FRAMES}"
+                )
+            self.wrench_frames[name] = frame
+            self.wrench_values[name] = (0.0, 0.0, 0.0)
+            self.wrench_update_times[name] = None
+            self.create_subscription(
+                Wrench,
+                topic,
+                partial(self.wrench_callback, name),
+                qos_profile,
+            )
+            self.get_logger().info(
+                f"Wrench source '{name}' on '{topic}' in the {frame} frame"
+            )
+
+    def wrench_callback(self, name: str, message: Wrench) -> None:
+        """Store one contributor's latest wrench, unclamped."""
         force_x = message.force.x
         force_y = message.force.y
         torque = message.torque.z
         if not all(math.isfinite(value) for value in (force_x, force_y, torque)):
-            self.get_logger().error("Ignoring non-finite spacecraft wrench")
+            self.get_logger().error(
+                f"Ignoring non-finite wrench from source '{name}'"
+            )
             return
+        self.wrench_values[name] = (force_x, force_y, torque)
+        self.wrench_update_times[name] = self.get_clock().now().nanoseconds
+
+    def total_wrench(self, now_nanoseconds: int):
+        """Sum fresh contributors in the inertial frame, then clamp once."""
+        force_x = 0.0
+        force_y = 0.0
+        torque = 0.0
+        for name, frame in self.wrench_frames.items():
+            if not timestamp_is_fresh(
+                now_nanoseconds,
+                self.wrench_update_times[name],
+                self.wrench_timeout,
+            ):
+                continue
+            source_x, source_y, source_torque = self.wrench_values[name]
+            if frame == BODY_FRAME:
+                source_x, source_y = rotate_body_to_inertial(
+                    source_x, source_y, self.reference.yaw
+                )
+            force_x += source_x
+            force_y += source_y
+            torque += source_torque
+
         magnitude = math.hypot(force_x, force_y)
         if magnitude > self.maximum_force:
             scale = self.maximum_force / magnitude
             force_x *= scale
             force_y *= scale
-        self.force_x = force_x
-        self.force_y = force_y
-        self.torque = max(
-            -self.maximum_torque,
-            min(self.maximum_torque, torque),
-        )
-        self.last_wrench_time = self.get_clock().now()
+        torque = max(-self.maximum_torque, min(self.maximum_torque, torque))
+        return force_x, force_y, torque
 
     def reset_callback(self, request, response):
         """Reset the virtual state to the latest physical pose at rest."""
@@ -230,24 +291,17 @@ class VirtualSpacecraftNode(Node):
             return
 
         dt = max(0.0, min(dt, self.maximum_time_step))
-        force_x = self.force_x
-        force_y = self.force_y
-        if (
-            self.last_wrench_time is None
-            or (now - self.last_wrench_time).nanoseconds * 1.0e-9 > self.wrench_timeout
-        ):
-            force_x = 0.0
-            force_y = 0.0
-            self.torque = 0.0
-        if self.wrench_in_body_frame:
-            force_x, force_y = rotate_body_to_inertial(
-                force_x, force_y, self.reference.yaw
-            )
+        force_x, force_y, torque = self.total_wrench(now.nanoseconds)
+        applied = Wrench()
+        applied.force.x = force_x
+        applied.force.y = force_y
+        applied.torque.z = torque
+        self.applied_wrench_publisher.publish(applied)
         self.reference = integrate_constant_wrench(
             self.reference,
             force_x,
             force_y,
-            self.torque,
+            torque,
             self.mass,
             self.inertia,
             dt,
