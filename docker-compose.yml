@@ -25,3 +25,11 @@ services:
       - /dev:/dev
       - /run/udev:/run/udev:ro
       - /etc/localtime:/etc/localtime:ro
+
+      # The image is built with `colcon build --symlink-install`, so install/ and
+      # build/ symlink back into /ros2_ws/src. Mounting source over those paths
+      # makes Python and launch/config edits live without rebuilding the image.
+      # Entry-point, setup.py, msg or C++ changes still require a rebuild.
+      - ./ros2_robomaster/src/robomaster_ros:/ros2_ws/src/robomaster_ros
+      - ./ros2_swarm/src/swarm_bringup:/ros2_ws/src/swarm_bringup
+      - ./ros2_swarm/src/swarm_controller:/ros2_ws/src/swarm_controller

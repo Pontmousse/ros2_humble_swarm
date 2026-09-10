@@ -42,6 +42,31 @@ def limit_vector(x: float, y: float, maximum: float):
     return scale * x, scale * y
 
 
+def burn_ramp_scale(elapsed: float, duration: float, ramp: float) -> float:
+    """Return the raised-cosine throttle scale in [0, 1] for the initial burn.
+
+    A step in commanded force demands infinite chassis acceleration to render,
+    so the thrust rises and falls over `ramp` seconds instead. Symmetric ends
+    keep the burn centred; ramp is clamped to half the duration so the two
+    halves cannot overlap.
+    """
+    if elapsed < 0.0 or elapsed > duration:
+        return 0.0
+
+    ramp = min(ramp, 0.5 * duration)
+    if ramp <= 0.0:
+        return 1.0
+
+    if elapsed < ramp:
+        phase = elapsed / ramp
+    elif elapsed > duration - ramp:
+        phase = (duration - elapsed) / ramp
+    else:
+        return 1.0
+
+    return 0.5 * (1.0 - math.cos(math.pi * phase))
+
+
 def boundary_firing(
     x: float,
     y: float,
@@ -126,6 +151,7 @@ class BoundingBoxSearchNode(Node):
         self.declare_parameter("maximum_force", 1.0)
         self.declare_parameter("maximum_torque", 0.2)
         self.declare_parameter("initial_burn_duration", 1.0)
+        self.declare_parameter("initial_burn_ramp", 0.0)
         self.declare_parameter("initial_force_x", 0.8)
         self.declare_parameter("initial_force_y", 0.4)
         self.declare_parameter("initial_torque", 0.1)
@@ -161,6 +187,9 @@ class BoundingBoxSearchNode(Node):
         )
         self.initial_force_y = float(
             self.get_parameter("initial_force_y").value
+        )
+        self.initial_burn_ramp = float(
+            self.get_parameter("initial_burn_ramp").value
         )
         self.initial_torque = float(self.get_parameter("initial_torque").value)
         self.lateral_kick_fraction = float(
@@ -205,6 +234,7 @@ class BoundingBoxSearchNode(Node):
             self.maximum_force,
             self.maximum_torque,
             self.initial_burn_duration,
+            self.initial_burn_ramp,
             self.initial_force_x,
             self.initial_force_y,
             self.initial_torque,
@@ -214,6 +244,8 @@ class BoundingBoxSearchNode(Node):
             raise ValueError("Bounding-box parameters must be finite")
         if not 0.0 <= self.lateral_kick_fraction < 1.0:
             raise ValueError("lateral_kick_fraction must be within [0, 1)")
+        if self.initial_burn_ramp < 0.0:
+            raise ValueError("initial_burn_ramp must be non-negative")
         if self.x_min >= self.x_max or self.y_min >= self.y_max:
             raise ValueError("Bounding-box minimums must be below maximums")
         if not 0.0 < self.boundary_margin < 0.5 * min(
@@ -301,9 +333,14 @@ class BoundingBoxSearchNode(Node):
         torque = 0.0
         elapsed = (now - self.initial_burn_start).nanoseconds * 1.0e-9
         if not near_boundary and elapsed <= self.initial_burn_duration:
-            global_force_x = self.initial_force_x
-            global_force_y = self.initial_force_y
-            torque = self.initial_torque
+            throttle = burn_ramp_scale(
+                elapsed,
+                self.initial_burn_duration,
+                self.initial_burn_ramp,
+            )
+            global_force_x = throttle * self.initial_force_x
+            global_force_y = throttle * self.initial_force_y
+            torque = throttle * self.initial_torque
 
         global_force_x, global_force_y = limit_vector(
             global_force_x, global_force_y, self.maximum_force

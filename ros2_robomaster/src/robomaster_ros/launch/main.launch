@@ -13,6 +13,8 @@
   <arg name="local_ip" default="" description="Pin the host-side IP used for the SDK sockets. Leave empty to autodetect."/>
   <arg name="connection_attempts" default="5" description="How many times to retry the initial connection handshake"/>
   <arg name="connection_retry_delay" default="2.0" description="Seconds to wait between connection attempts"/>
+  <arg name="diagnostics" default="$(env RM_DIAGNOSTICS 'off')" description="SDK diagnostics reporting: off, on, or verbose"/>
+  <arg name="diagnostics_period" default="10.0" description="Seconds between diagnostics report blocks"/>
 
   <arg name="arm" default="$(eval '\'$(var model)\' == \'ep\'')" description="Enable the arm module. Should not be enabled together with the servo module"/>
   <arg name="left_motor_zero" default="1024" description="The arm left servo zero value"/>
@@ -139,6 +141,9 @@
     <param name="local_ip" value="$(var local_ip)"/>
     <param name="connection_attempts" value="$(var connection_attempts)"/>
     <param name="connection_retry_delay" value="$(var connection_retry_delay)"/>
+    <!-- type="str" because YAML reads the values on/off as booleans -->
+    <param name="diagnostics" value="$(var diagnostics)" type="str"/>
+    <param name="diagnostics_period" value="$(var diagnostics_period)"/>
     <param name="lib_log_level" value="$(var lib_log_level)"/>
     <param name="mode" value="$(var gimbal_mode)"/>
     <param name="arm">

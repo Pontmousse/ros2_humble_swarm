@@ -20,6 +20,7 @@ import robomaster.config
 
 from robomaster_ros.modules import modules
 from robomaster_ros.ftp import FtpConnection
+from robomaster_ros import diagnostics
 
 import rclpy
 import rclpy.node
@@ -45,12 +46,12 @@ def pad_serial(value: str) -> str:
 
 def add_unknown_protocol(cmdset: int, cmdid: int, hint: str = '?') -> None:
     def unpack_resp(self: Any, buf: bytes, offset: int = 0) -> None:
-        logging.debug(
+        robomaster.logger.debug(
             f'[{hint}] Received unknown response with cmd set {cmdset:#x} and id {cmdid:#x}, '
             f'with buffer {buf!r} ({len(buf)})')
 
     def unpack_req(self: Any, buf: bytes, offset: int = 0) -> None:
-        logging.debug(
+        robomaster.logger.debug(
             f'[{hint}] Received unknown request with cmd set {cmdset:#x} and id {cmdid:#x}, '
             f'with buffer {buf!r} ({len(buf)})')
 
@@ -76,20 +77,48 @@ add_unknown_protocols()
 # add_unknown_protocol(0x3f, 0xb3)
 
 
-def wait_for_robot(serial_number: Optional[str]) -> None:
+def _remote_ip(ep_robot: Any) -> Optional[str]:
+    try:
+        return ep_robot._client.remote_addr[0]
+    except Exception:
+        return robomaster.config.ROBOT_IP_STR or None
+
+
+def _explain(e: Exception) -> str:
+    # robomaster/client.py:95 does `raise print(...)`, so a client with no
+    # connection object surfaces as `raise None` instead of the real reason.
+    if isinstance(e, TypeError) and 'derive from BaseException' in str(e):
+        return (" -- the SDK never built a connection: the handshake on UDP "
+                f"{robomaster.config.ROBOT_PROXY_PORT} got no usable reply. "
+                "Look for 'RECV TimeOut' (nothing answered) or "
+                "'reject connection, service is busy' (another client holds "
+                "the robot) above.")
+    return ''
+
+
+def wait_for_robot(serial_number: Optional[str], logger: Any = None) -> None:
     found = False
+    attempts = 0
     while not found:
         try:
             found = robomaster.conn.scan_robot_ip(user_sn=serial_number)
         except OSError:
             pass
         if not found:
+            attempts += 1
+            if logger and attempts % 5 == 0:
+                logger.warn(
+                    f"No SN broadcast on UDP {robomaster.config.ROBOT_BROADCAST_PORT} "
+                    f"after {attempts} scans. The robot must be powered on, in sta mode, "
+                    f"and on a network that forwards broadcast to this host. "
+                    f"Set the robot_ip parameter to skip discovery.")
             time.sleep(random.uniform(1.0, 2.0))
 
 
 class RoboMasterROS(rclpy.node.Node):  # type: ignore
 
     initialized: bool = False
+    diagnostics: Any = None
 
     def __init__(self, executor: Optional[rclpy.executors.Executor] = None) -> None:
         super(RoboMasterROS, self).__init__("robomaster_ros", start_parameter_services=True)
@@ -116,10 +145,23 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
                     f"trasformed to {sn}")
         else:
             sn = None
+
+        # Installed before discovery so the handshake itself is instrumented.
+        diagnostics_level: str = self.declare_parameter(
+            "diagnostics", "off").value.lower()
+        diagnostics_period: float = self.declare_parameter(
+            "diagnostics_period", 10.0).value
+        self.diagnostics: Optional[diagnostics.Diagnostics] = None
+        if diagnostics_level != 'off':
+            self.diagnostics = diagnostics.Diagnostics(
+                self, diagnostics_level, diagnostics_period)
+            self.diagnostics.install()
+            self.diagnostics.startup_banner(sn, conn_type, robot_ip, local_ip)
+
         self.connected = False
         if conn_type == 'sta' and not robomaster.config.ROBOT_IP_STR:
             self.get_logger().info("Waiting for a robot")
-            wait_for_robot(sn)
+            wait_for_robot(sn, self.get_logger())
             self.get_logger().info("Found a robot")
         robomaster.conn.FtpConnection = FtpConnection
         # robomaster.conn.FtpConnection = FakeFtpConnection
@@ -143,6 +185,10 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
             ack_cb=lambda _, msg: self.got_heart_beat(msg))
 
         self.ep_robot._client.add_msg_handler(self.heartbeat_handler)
+        if self.diagnostics:
+            self.diagnostics.set_robot_addr(_remote_ip(self.ep_robot))
+            self.diagnostics_timer = self.create_timer(
+                diagnostics_period, self.diagnostics.report)
         self.joint_state_pub = self.create_publisher(
             sensor_msgs.msg.JointState, 'joint_states_p', 1)
         self.tf_broadcaster = tf2_ros.transform_broadcaster.TransformBroadcaster(self)
@@ -167,7 +213,7 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
             except Exception as e:
                 self.get_logger().warn(
                     f"Connection attempt {attempt}/{attempts} failed: "
-                    f"{type(e).__name__}: {e}")
+                    f"{type(e).__name__}: {e}{_explain(e)}")
                 try:
                     self.ep_robot.close()
                 except Exception:
@@ -187,6 +233,10 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
                 module.abort()
 
     def stop(self) -> None:
+        if self.diagnostics:
+            self.diagnostics.report()
+            self.diagnostics.uninstall()
+            self.diagnostics = None
         if self.initialized:
             self.get_logger().info("Will stop client")
             self.heartbeat_check_timer.cancel()
@@ -217,4 +267,6 @@ class RoboMasterROS(rclpy.node.Node):  # type: ignore
         self.get_logger().warn("Disconnected")
 
     def got_heart_beat(self, msg: Any) -> None:
+        if self.diagnostics:
+            self.diagnostics.note_heartbeat()
         self.heartbeat_check_timer.reset()

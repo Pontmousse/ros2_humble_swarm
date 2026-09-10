@@ -3,6 +3,8 @@ from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, ExecuteProcess
+from launch.actions import RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 
@@ -33,6 +35,11 @@ def load_swarm_config():
 
     n = len(robot_names)
 
+    # Optional. Pinning the IP skips SN broadcast discovery (UDP 40927), which
+    # is dropped on networks that filter broadcast between clients.
+    robot_ips = [x.strip() for x in os.getenv("ROBOT_IP", "").split(",")]
+    robot_ips = (robot_ips + [""] * n)[:n]
+
     if not (
         len(beacon_addresses) ==
         len(robot_serial_numbers) ==
@@ -45,6 +52,7 @@ def load_swarm_config():
         beacon_addresses,
         robot_names,
         robot_serial_numbers,
+        robot_ips,
         init_orientations,
     )
 
@@ -79,6 +87,16 @@ def qos_parameters(depth=5, reliability='BEST_EFFORT', history='KEEP_LAST'):
     
     return qos_params
 
+def rm_preflight(robot_ips, verbose=False):
+    """Network report printed before the drivers start. See rm_preflight.py."""
+    script = os.path.join(
+        get_package_share_directory('swarm_bringup'), 'launch', 'rm_preflight.py')
+    cmd = ['python3', script]
+    if verbose:
+        cmd += ['--listen', '5']
+    cmd += [ip for ip in robot_ips if ip]
+    return ExecuteProcess(cmd=cmd, output='screen')
+
 def generate_launch_description():
     init_period = 2.0 # in seconds
     alpha = 1.0 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
@@ -88,10 +106,18 @@ def generate_launch_description():
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
-    beacon_addresses, robot_names, robot_serial_numbers, init_orientations = load_swarm_config()
+    beacon_addresses, robot_names, robot_serial_numbers, robot_ips, init_orientations = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
+
+    # 'off' (default), 'on', or 'verbose'. See rm_preflight.py and
+    # robomaster_ros/diagnostics.py.
+    diagnostics = os.environ.get('RM_DIAGNOSTICS', 'off').lower()
+    preflight_action = None
+    if diagnostics != 'off':
+        preflight_action = rm_preflight(robot_ips, verbose=(diagnostics == 'verbose'))
+        ld.add_action(preflight_action)
 
     ##############################################################################
     ##############################################################################
@@ -114,6 +140,7 @@ def generate_launch_description():
 
         name_arg = DeclareLaunchArgument(f'name_{i}', default_value=robot_name)
         serial_arg = DeclareLaunchArgument(f'serial_number_{i}', default_value=serial_number)
+        robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ips[i])
         enable_led_arg = DeclareLaunchArgument(f'enable_led_{i}', default_value='true')
         enable_speaker_arg = DeclareLaunchArgument(f'enable_speaker_{i}', default_value='true')
         enable_chassis_arg = DeclareLaunchArgument(f'enable_chassis_{i}', default_value='true')
@@ -130,6 +157,8 @@ def generate_launch_description():
             launch_arguments={
                 'name': LaunchConfiguration(f'name_{i}'),
                 'serial_number': LaunchConfiguration(f'serial_number_{i}'),
+                'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
+                'diagnostics': diagnostics,
                 'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
                 'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
                 'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
@@ -139,12 +168,21 @@ def generate_launch_description():
 
         ld.add_action(name_arg)
         ld.add_action(serial_arg)
+        ld.add_action(robot_ip_arg)
         ld.add_action(enable_led_arg)
         ld.add_action(enable_speaker_arg)
         ld.add_action(enable_chassis_arg)
         ld.add_action(twist_to_wheel_speeds_arg)
 
-        ld.add_action(s1)
+        if diagnostics == 'verbose' and preflight_action is not None:
+            # verbose preflight binds UDP 40927 itself (passive SN-broadcast
+            # listen), the same port the driver's own discovery needs. Starting
+            # both at once races for the port and the driver sees a spurious
+            # "Address already in use". Delay the driver until preflight exits.
+            ld.add_action(RegisterEventHandler(
+                OnProcessExit(target_action=preflight_action, on_exit=[s1])))
+        else:
+            ld.add_action(s1)
 
         ##############################################################################
 

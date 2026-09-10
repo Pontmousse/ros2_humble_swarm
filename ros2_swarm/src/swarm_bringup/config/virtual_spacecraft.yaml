@@ -8,10 +8,10 @@
 # behavior. Size the physical safe area with clearance beyond these limits.
 /**:
   ros__parameters:
-    x_min: 2.5
-    x_max: 3.5
-    y_min: -1.5
-    y_max: -0.5
+    x_min: 1.5
+    x_max: 2.5
+    y_min: -2.0
+    y_max: -1.0
 
 /**/virtual_spacecraft:
   ros__parameters:
@@ -22,8 +22,10 @@
 
     # Bounds on the summed virtual input, applied once to the total so adding a
     # contributor cannot raise the authority the safe area was sized for.
-    maximum_force: 2.0
-    maximum_torque: 0.5
+    # 1.0 N / 0.2 Nm is the envelope measured in the 2026-09-09 run that tracked
+    # well; doubling it put the coast speed past what the chassis can render.
+    maximum_force: 1.0
+    maximum_torque: 0.2
 
     # Stop accelerating on a stale wrench and clamp long scheduler gaps.
     odometry_timeout: 0.25
@@ -53,7 +55,7 @@
     yaw_gain: 1.5
 
     # Conservative RoboMaster motion-rendering limits.
-    maximum_speed: 1.0
+    maximum_speed: 0.5
     maximum_yaw_rate: 1.8
 
     # Stop the physical chassis when either input becomes stale.
@@ -81,9 +83,11 @@
     yaw_integral_gain: 0.08
     yaw_rate_error_gain: 0.25
 
-    # Give feedback controller some recovery authority
-    maximum_speed: 0.50
-    maximum_yaw_rate: 1.0
+    # Give feedback controller some recovery authority. Keep these at or below
+    # velocity_smoother.max_velocity: the smoother is downstream and its limits
+    # are invisible to this node's anti-windup, so the tighter cap belongs here.
+    maximum_speed: 1.0
+    maximum_yaw_rate: 2.0
 
     odometry_timeout: 0.25
     reference_timeout: 0.25
@@ -103,15 +107,23 @@
     # Braking runway inside each wall; must stay below half the shortest side.
     boundary_margin: 0.01
 
-    # Finite firings; limits match the virtual dynamics configuration.
-    boundary_force: 3.0
+    # Finite firings. These must not exceed virtual_spacecraft.maximum_force /
+    # maximum_torque, or the simulator clamps the sum and the guidance law is
+    # silently solving a different problem than the one it commanded.
+    boundary_force: 1.0
     rebound_speed: 0.15
-    maximum_force: 3.0
-    maximum_torque: 0.5
+    maximum_force: 1.0
+    maximum_torque: 0.2
+
+    # Thrust rises and falls as a raised cosine over initial_burn_ramp seconds
+    # at each end of the burn. A step demands unbounded chassis acceleration to
+    # render; the ramp is still steep enough to read as a thruster firing.
+    # Clamped internally to half of initial_burn_duration.
     initial_burn_duration: 5.0
+    initial_burn_ramp: 2.0
     initial_force_x: 0.8
     initial_force_y: 0.4
-    initial_torque: 0.3
+    initial_torque: 0.2
 
     # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
     # drawn once per bounce. Breaks the degenerate straight-line rebound.
@@ -129,6 +141,7 @@
     source_timeout: 0.25
     global_frame_id: "swarm_map"
     triangle_size: 0.12
+    # Arrow scaling only; must equal the simulator ceiling or the arrow clips.
     maximum_force: 1.0
     maximum_torque: 0.2
     force_arrow_max_length: 1.0
@@ -314,10 +327,15 @@
     smoothing_frequency: 50.0
     scale_velocities: true
     feedback: "OPEN_LOOP"
-    max_velocity: [0.5, 0.5, 1.0]
-    min_velocity: [-0.5, -0.5, -1.0]
-    max_accel: [0.5, 0.5, 1.2]
-    max_decel: [-0.7, -0.7, -1.5]
+    max_velocity: [1.0, 1.0, 2.0]
+    min_velocity: [-1.0, -1.0, -2.0]
+
+    # Acceleration authority, not a comfort setting. The chassis must out-
+    # accelerate the virtual reference (a_max = maximum_force / mass) with
+    # enough left over to close position error; at 0.5 the margin over a 0.4
+    # m/s^2 reference was 20% and the burn transient dominated tracking error.
+    max_accel: [1.5, 1.5, 3.0]
+    max_decel: [-2.0, -2.0, -4.0]
     deadband_velocity: [0.0, 0.0, 0.0]
     velocity_timeout: 0.25
     odom_topic: "localization/odom"
