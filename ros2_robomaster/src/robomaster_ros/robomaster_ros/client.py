@@ -77,6 +77,35 @@ add_unknown_protocols()
 # add_unknown_protocol(0x3f, 0xb3)
 
 
+_orig_client_stop = robomaster.client.Client.stop
+
+
+def _safe_client_stop(self: Any) -> None:
+    # robomaster/client.py:132 does `if self._thread.is_alive():` with no
+    # None-guard. A Client whose start() failed/returned False before
+    # spawning the recv thread leaves _thread as None -- typically the
+    # discarded ep_robot from a failed attempt in _connect_with_retries,
+    # which stop() already closed once via the except handler there. When
+    # Python later garbage-collects that orphaned object, Robot.__del__ /
+    # Client.__del__ call stop() again, and self._thread.is_alive() raises
+    # AttributeError. Since that happens inside __del__, Python can't
+    # propagate it -- it just prints "Exception ignored in: ...__del__"
+    # and the traceback, which is harmless noise but looks alarming.
+    # Guard it so it no-ops (still closing the connection) instead.
+    if getattr(self, '_thread', None) is None:
+        conn = getattr(self, '_conn', None)
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return
+    _orig_client_stop(self)
+
+
+robomaster.client.Client.stop = _safe_client_stop
+
+
 def _remote_ip(ep_robot: Any) -> Optional[str]:
     try:
         return ep_robot._client.remote_addr[0]

@@ -20,6 +20,7 @@ TOPICS = {
     "raw":      f"/{ROBOT}/cmd_vel_raw",
     "smooth":   f"/{ROBOT}/cmd_vel",
     "odom":     f"/{ROBOT}/localization/odom",
+    # "odom":     f"/{ROBOT}/odom",
     "virtual":  f"/{ROBOT}/virtual_spacecraft/odom",
 }
 
@@ -152,6 +153,28 @@ def odom_state(samples, t0):
     )
     return t, x, y, yaw, speed
 
+def odom_velocity(samples, t0):
+    if not samples:
+        return (np.array([]),) * 4
+
+    t = np.asarray([s - t0 for s, _ in samples])
+
+    vx = np.asarray([
+        m.twist.twist.linear.x
+        for _, m in samples
+    ])
+
+    vy = np.asarray([
+        m.twist.twist.linear.y
+        for _, m in samples
+    ])
+
+    wz = np.asarray([
+        m.twist.twist.angular.z
+        for _, m in samples
+    ])
+
+    return t, vx, vy, wz
 
 def wrap_angle(a):
     """Wrap angles to [-pi, pi]."""
@@ -189,23 +212,27 @@ t0 = common_t0(raw, smooth, odom, virtual)
 
 tr, vxr, vyr, wzr = twist_components(raw, t0)
 ts, vxs, vys, wzs = twist_components(smooth, t0)
+# to, vxo, vyo, wzo = odom_velocity(odom, t0)
 
 fig, ax = plt.subplots(3, 1, sharex=True, figsize=(11, 8))
 
 ax[0].plot(tr, vxr, "--", label="raw")
 ax[0].plot(ts, vxs, label="smoothed")
+# ax[0].plot(to, vxo, label="odom")
 ax[0].set_ylabel("vx [m/s]")
 ax[0].grid()
 ax[0].legend()
 
 ax[1].plot(tr, vyr, "--", label="raw")
 ax[1].plot(ts, vys, label="smoothed")
+# ax[1].plot(to, vyo, label="odom")
 ax[1].set_ylabel("vy [m/s]")
 ax[1].grid()
 ax[1].legend()
 
 ax[2].plot(tr, wzr, "--", label="raw")
 ax[2].plot(ts, wzs, label="smoothed")
+# ax[2].plot(to, wzo, label="odom")
 ax[2].set_ylabel("wz [rad/s]")
 ax[2].set_xlabel("Time [s]")
 ax[2].grid()

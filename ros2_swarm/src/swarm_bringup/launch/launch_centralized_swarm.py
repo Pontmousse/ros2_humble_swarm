@@ -181,7 +181,7 @@ def generate_launch_description():
         name="plot_juggler"
     )
 
-    ld.add_action(plot_juggler)
+    # ld.add_action(plot_juggler)
 
     ##############################################################################
     ##############################################################################
@@ -648,6 +648,7 @@ def generate_launch_description():
         for robot_name in robot_names:
             bag_topics.extend([
                 f'/{robot_name}/localization/odom',
+                f'/{robot_name}/odom',
 
                 # Virtual-spacecraft dynamics
                 f'/{robot_name}/virtual_spacecraft/odom',
