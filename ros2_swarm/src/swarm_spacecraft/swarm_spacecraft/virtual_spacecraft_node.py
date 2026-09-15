@@ -11,7 +11,9 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import Trigger
 
 from .dynamics import PlanarState
+from .dynamics import chw_force
 from .dynamics import integrate_constant_wrench
+from .dynamics import mean_motion
 from .dynamics import rotate_body_to_inertial
 from .dynamics import rotate_inertial_to_body
 
@@ -93,6 +95,10 @@ class VirtualSpacecraftNode(Node):
         self.declare_parameter("wrench_timeout", 0.25)
         self.declare_parameter("maximum_time_step", 0.05)
         self.declare_parameter("wrench_sources", ["bounding_box"])
+        self.declare_parameter("enable_chw", False)
+        self.declare_parameter("orbit_altitude", 400000.0)
+        self.declare_parameter("gravity", 9.80665)
+        self.declare_parameter("earth_radius", 6371000.0)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -121,6 +127,20 @@ class VirtualSpacecraftNode(Node):
             raise ValueError(
                 "physical, rate, timeout, and limit parameters must be positive"
             )
+        self.enable_chw = bool(self.get_parameter("enable_chw").value)
+        self.orbit_altitude = float(self.get_parameter("orbit_altitude").value)
+        self.gravity = float(self.get_parameter("gravity").value)
+        self.earth_radius = float(self.get_parameter("earth_radius").value)
+        self.mean_motion = mean_motion(
+            self.orbit_altitude, self.gravity, self.earth_radius
+        )
+        if self.enable_chw:
+            self.get_logger().info(
+                "Clohessy-Wiltshire enabled at "
+                f"{self.orbit_altitude:.0f} m, mean motion "
+                f"{self.mean_motion:.6e} rad/s"
+            )
+
         self.reference = PlanarState()
         self.measured = PlanarState()
         self.measured_frame_id = ""
@@ -292,6 +312,11 @@ class VirtualSpacecraftNode(Node):
 
         dt = max(0.0, min(dt, self.maximum_time_step))
         force_x, force_y, torque = self.total_wrench(now.nanoseconds)
+        if self.enable_chw:
+            # Environmental, so it is added after the actuation clamp.
+            chw_x, chw_y = chw_force(self.reference, self.mean_motion, self.mass)
+            force_x += chw_x
+            force_y += chw_y
         applied = Wrench()
         applied.force.x = force_x
         applied.force.y = force_y

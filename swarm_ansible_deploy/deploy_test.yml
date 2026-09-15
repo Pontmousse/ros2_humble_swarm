@@ -1,0 +1,13 @@
+- name: Fleet deployment smoke test
+  hosts: robots
+  become: true
+
+  vars:
+    test_version: "v4"
+
+  tasks:
+    - name: Write deployment marker
+      ansible.builtin.copy:
+        content: "{{ test_version }}\n"
+        dest: /tmp/ansible_deploy_test.txt
+        mode: "0644"

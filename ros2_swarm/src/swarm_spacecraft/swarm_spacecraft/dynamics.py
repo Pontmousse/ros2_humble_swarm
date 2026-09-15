@@ -36,6 +36,28 @@ def rotate_inertial_to_body(x: float, y: float, yaw: float) -> Tuple[float, floa
     return cosine * x + sine * y, -sine * x + cosine * y
 
 
+def mean_motion(altitude: float, gravity: float, earth_radius: float) -> float:
+    """Orbital mean motion for a circular orbit at the given altitude."""
+    if altitude < 0.0 or gravity <= 0.0 or earth_radius <= 0.0:
+        raise ValueError("altitude must be non-negative, gravity and radius positive")
+    gravitational_parameter = gravity * earth_radius * earth_radius
+    semi_major_axis = earth_radius + altitude
+    return math.sqrt(gravitational_parameter / semi_major_axis**3)
+
+
+def chw_force(state: PlanarState, motion: float, mass: float) -> Tuple[float, float]:
+    """Planar Clohessy-Wiltshire force about an LVLH origin at (0, 0).
+
+    x is radial and y is along-track, so the state is read as an LVLH
+    offset directly with no frame change.
+    """
+    if mass <= 0.0:
+        raise ValueError("mass must be positive")
+    radial = 3.0 * motion * motion * state.x + 2.0 * motion * state.vy
+    along_track = -2.0 * motion * state.vx
+    return mass * radial, mass * along_track
+
+
 def integrate_constant_wrench(
     state: PlanarState,
     force_x: float,

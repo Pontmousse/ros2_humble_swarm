@@ -27,6 +27,17 @@
     maximum_force: 1.0
     maximum_torque: 0.2
 
+    # Planar Clohessy-Wiltshire relative dynamics, added on top of the clamped
+    # wrench because orbital mechanics is environment and must not consume
+    # control authority. The LVLH origin is swarm_map (0, 0) with x radial and
+    # y along-track, so the state is read as an LVLH offset with no transform.
+    # At 400 km the mean motion is ~1.1e-3 rad/s, so the force is ~1e-5 N at a
+    # 2 m offset: present and correct, but invisible next to maximum_force.
+    enable_chw: true
+    orbit_altitude: 400000.0
+    gravity: 9.80665
+    earth_radius: 6371000.0
+
     # Stop accelerating on a stale wrench and clamp long scheduler gaps.
     odometry_timeout: 0.25
     wrench_timeout: 0.25
