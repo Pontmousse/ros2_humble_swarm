@@ -3,7 +3,7 @@
   gather_facts: false
 
   vars:
-    expected_version: "v4"
+    expected_version: "v3"
 
   tasks:
     - name: Read deployment marker

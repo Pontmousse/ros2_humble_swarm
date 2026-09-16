@@ -23,3 +23,8 @@ robots:
     beacon: 5
     serial: 159CKCH0070F8S
     init_orientation: 90.0
+
+  - name: RM6
+    beacon: 6
+    serial: 159xxxxxxxxxxx
+    init_orientation: 90.0

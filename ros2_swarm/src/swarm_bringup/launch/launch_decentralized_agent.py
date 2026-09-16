@@ -2,6 +2,8 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
+import datetime
+from launch.actions import TimerAction
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, ExecuteProcess
 from launch.actions import RegisterEventHandler
 from launch.event_handlers import OnProcessExit
@@ -99,7 +101,7 @@ def rm_preflight(robot_ips, verbose=False):
 
 def generate_launch_description():
     init_period = 2.0 # in seconds
-    alpha = 1.0 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
+    alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
     timer_frequency = 0.01 # in seconds
@@ -271,6 +273,8 @@ def generate_launch_description():
     ##############################################################################
     ##############################################################################
     for i in range(N):
+        robot_name = robot_names[i]
+
         mm_filtered = Node(
         package="swarm_filter",
         executable="mm_filtered",
@@ -313,7 +317,11 @@ def generate_launch_description():
                     "init_period": init_period,
                     "timer_frequency": timer_frequency,
                     "init_orientation": init_orientation,
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
+                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                    "global_frame_id": "swarm_map",
+                    "gps_timeout": 0.25,
+                    "odometry_timeout": 0.25,
+                    "gps_position_variance": 0.01,
                 }
             ]
         )
@@ -341,7 +349,7 @@ def generate_launch_description():
                     "timer_frequency": timer_frequency,
                     "serial_number": serial_number,
                     "aruco_type": "DICT_6X6_250",
-                    "aruco_size": 2.5,
+                    "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
@@ -397,8 +405,8 @@ def generate_launch_description():
                 {
                     "timer_frequency": timer_frequency,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_6X6_250",
-                    "aruco_size": 4.3,
+                    "aruco_type": "DICT_5X5_100",
+                    "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
@@ -454,7 +462,7 @@ def generate_launch_description():
                 ]
             )
 
-        ld.add_action(ep_control)
+        # ld.add_action(ep_control)
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################
@@ -476,7 +484,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        ld.add_action(ep_pointing_planner)
+        # ld.add_action(ep_pointing_planner)
 
         ###################################
         ##### - Encapsulation Phase - #####
@@ -496,7 +504,7 @@ def generate_launch_description():
                     }
                 ]
             )
-        ld.add_action(ep_motion_planner)
+        # ld.add_action(ep_motion_planner)
 
 
     ##############################################################################
@@ -520,7 +528,7 @@ def generate_launch_description():
                 ]
             )
 
-        ld.add_action(cp_control)
+        # ld.add_action(cp_control)
 
 
     ##############################################################################
@@ -540,7 +548,7 @@ def generate_launch_description():
             ],
         )
 
-        ld.add_action(magnet_node)
+        # ld.add_action(magnet_node)
 
 
 
@@ -569,5 +577,97 @@ def generate_launch_description():
     #     )
 
     #     ld.add_action(consensus_node)
+
+
+
+    ##############################################################################
+    ###################### - Virtual Spacecraft Launch - #########################
+    ##############################################################################
+
+    enable_virtual_spacecraft = os.environ.get(
+        "VIRTUAL_SPACECRAFT", "false"
+    ).lower() in ("true", "1", "yes", "on")
+
+    if enable_virtual_spacecraft:
+        virtual_spacecraft_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory("swarm_bringup"),
+                    "launch",
+                    "launch_virtual_spacecraft.py"
+                )
+            )
+        )
+
+        ld.add_action(virtual_spacecraft_launch)
+
+
+
+
+    ##############################################################################
+    ############################ ROSBAG RECORDING ################################
+    ##############################################################################
+
+    bag_topics = [
+        '/tf',
+        '/tf_static',
+    ]
+
+    for robot_name in robot_names:
+        bag_topics.extend([
+            f'/{robot_name}/localization/odom',
+            f'/{robot_name}/odom',
+
+            # Virtual-spacecraft dynamics
+            f'/{robot_name}/virtual_spacecraft/odom',
+            f'/{robot_name}/virtual_spacecraft/applied_wrench',
+
+            # Forces going into virtual-spacecraft dynamics
+            f'/{robot_name}/spacecraft_wrench',
+            f'/{robot_name}/avoidance_wrench',
+
+            # ArUco perception
+            f'/{robot_name}/landmarks_unf',
+            f'/{robot_name}/landmarks',
+            f'/{robot_name}/targets_unf',
+            f'/{robot_name}/targets',
+
+            # Velocity commands: before and after Nav2 velocity smoother
+            f'/{robot_name}/cmd_vel_raw',
+            f'/{robot_name}/cmd_vel',
+
+            # Raw positioning / orientation comparison
+            f'/{robot_name}/mm_pos_unf',
+            f'/{robot_name}/localization/imu_odom',
+            f'/{robot_name}/localization/mm_imu_odom',
+        ])
+
+    # ~/rosbags/swarm_20260909_185500/
+    bag_root = os.path.expanduser('~/rosbags')
+    os.makedirs(bag_root, exist_ok=True)
+
+    bag_name = datetime.now().strftime(f'swarm_boundingbox_{N}{"agent" if N == 1 else "agents"}_%Y%m%d_%H%M%S')
+    bag_path = os.path.join(bag_root, bag_name)
+
+    bag_record = ExecuteProcess(
+        cmd=[
+            'ros2',
+            'bag',
+            'record',
+            '-s', 'sqlite3',
+            '-o', bag_path,
+            *bag_topics,
+        ],
+        output='screen',
+    )
+
+    # Give both launch files / robot drivers a little time to appear
+    # before starting rosbag discovery.
+    ld.add_action(
+        TimerAction(
+            period=3.0,
+            actions=[bag_record],
+        )
+    )
 
     return ld
