@@ -3,6 +3,9 @@
   hosts: robots
   become: yes
 
+  vars:
+    swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v1"
+
   tasks:
 
     - name: Update apt cache
@@ -74,15 +77,20 @@
     - name: Trigger udev
       command: udevadm trigger
 
+    - name: Load swarm config
+      include_vars:
+        file: ../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml
+        name: swarm_cfg
+
     - name: Pull swarm Docker image
       community.docker.docker_image:
-        name: elghaliasri/ros2-humble-swarm:robot-arm64-v1
+        name: "{{ swarm_image }}"
         source: pull
 
     - name: Run swarm container
       community.docker.docker_container:
         name: "{{ inventory_hostname }}"
-        image: elghaliasri/ros2-humble-swarm:robot-arm64-v1
+        image: "{{ swarm_image }}"
         state: started
         restart_policy: always
         privileged: yes
@@ -92,6 +100,16 @@
           - /dev/ttyUSB0
           - /dev/ttyUSB1
           - /dev/ttyAMA0
+        env:
+          ROBOT_NAME:         "{{ swarm_cfg.robots[robot_idx].name }}"
+          BEACON_ADDR:        "{{ swarm_cfg.robots[robot_idx].beacon | string }}"
+          ROBOT_SERIAL:       "{{ swarm_cfg.robots[robot_idx].serial }}"
+          INITIAL_ORIENT:     "{{ swarm_cfg.robots[robot_idx].init_orientation | string }}"
+          ROBOT_IP:           "{{ swarm_cfg.robots[robot_idx].ip | default('') }}"
+          ROS_DOMAIN_ID:      "0"
+          RMW_IMPLEMENTATION: "rmw_fastrtps_cpp"
+          ROS_LOCALHOST_ONLY: "0"
+          VIRTUAL_SPACECRAFT: "false"
 
     - name: Reboot robot to apply group changes
       reboot:

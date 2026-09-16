@@ -3,28 +3,34 @@ robots:
     beacon: 1
     serial: 159CKC50070ECX
     init_orientation: 90.0
+    ip: 192.168.1.151
 
   - name: RM2
     beacon: 2
     serial: 159CKC50070E5N
     init_orientation: 90.0
+    ip: 192.168.1.152
 
   - name: RM3
     beacon: 3
     serial: 159CG9J0050797
     init_orientation: 90.0
+    ip: 192.168.1.153
 
   - name: RM4
     beacon: 4
     serial: 159CG9V0050HED
     init_orientation: 90.0
+    ip: 192.168.1.154
 
   - name: RM5
     beacon: 5
     serial: 159CKCH0070F8S
     init_orientation: 90.0
+    ip: 192.168.1.155
 
   - name: RM6
     beacon: 6
     serial: 159xxxxxxxxxxx
     init_orientation: 90.0
+    ip: 192.168.1.156
