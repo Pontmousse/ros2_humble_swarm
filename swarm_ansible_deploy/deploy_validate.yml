@@ -1,21 +1,22 @@
-- name: Validate fleet deployment
+- name: Validate fleet image
   hosts: robots
   gather_facts: false
 
-  vars:
-    expected_version: "v3"
+  vars_files:
+    - vars.yml
 
   tasks:
-    - name: Read deployment marker
-      ansible.builtin.slurp:
-        src: /tmp/ansible_deploy_test.txt
-      register: marker
+    - name: Get container info
+      community.docker.docker_container_info:
+        name: "{{ inventory_hostname }}"
+      register: container_info
 
-    - name: Verify correct version
+    - name: Assert correct image is running
       ansible.builtin.assert:
         that:
-          - marker.content | b64decode | trim == expected_version
+          - container_info.container.Config.Image == swarm_image
         fail_msg: >
-          Wrong deployment version on {{ inventory_hostname }}
+          {{ inventory_hostname }}: expected {{ swarm_image }},
+          got {{ container_info.container.Config.Image }}
         success_msg: >
-          {{ inventory_hostname }} is running {{ expected_version }}
+          {{ inventory_hostname }} confirmed running {{ swarm_image }}

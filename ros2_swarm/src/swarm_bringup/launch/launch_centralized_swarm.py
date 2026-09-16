@@ -19,22 +19,23 @@ gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 def load_swarm_config():
 
     # Original configuration (order matters!)
-    beacon_addresses = [1, 2, 3, 4, 5]
+    beacon_addresses = [1, 2, 3, 4, 5, 6]
 
-    robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5"]
+    robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5", "RM6"]
 
     robot_serial_numbers = [
         "159CKC50070ECX",
         "159CKC50070E5N",
         "159CG9J0050797",
         "159CG9V0050HED",
-        "159CKCH0070F8S"
+        "159CKCH0070F8S",
+        "159CKC50070EVP"
     ]
 
     # Pinned robot IPs, same order as robot_names. Leave "" to fall back to
     # SN broadcast discovery (UDP 40927), which only works on a network that
     # forwards broadcast to the host.
-    robot_ips = ["","", "", "", ""]
+    robot_ips = ["","", "", "", "", ""]
 
     env_ips = os.getenv('ROBOT_IPS')
     if env_ips:
@@ -44,7 +45,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 0.0, 90.0, 0.0]
+    init_orientations = [90.0, 0.0, 0.0, 90.0, 0.0, 0.0]
 
 
 

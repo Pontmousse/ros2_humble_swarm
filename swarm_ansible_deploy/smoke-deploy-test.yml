@@ -3,7 +3,7 @@
   become: true
 
   vars:
-    test_version: "v3"
+    test_version: "v9.0.0"
 
   tasks:
     - name: Write deployment marker

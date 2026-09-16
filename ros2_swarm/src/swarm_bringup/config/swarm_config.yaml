@@ -31,6 +31,6 @@ robots:
 
   - name: RM6
     beacon: 6
-    serial: 159xxxxxxxxxxx
+    serial: 159CKC50070EVP
     init_orientation: 90.0
     ip: 192.168.1.156

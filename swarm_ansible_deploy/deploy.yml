@@ -3,13 +3,41 @@
   hosts: robots
   become: yes
 
-  vars:
-    swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v1"
+  vars_files:
+    - vars.yml
 
   tasks:
 
+    # ================================
+    # ROS 2 apt repository/key
+    # ================================
+    - name: Remove legacy ROS 2 apt source
+      ansible.builtin.file:
+        path: /etc/apt/sources.list.d/ros2.list
+        state: absent
+
+    - name: Get latest ros2-apt-source release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest
+        return_content: yes
+      register: ros_apt_release
+
+    - name: Download latest ros2-apt-source
+      ansible.builtin.get_url:
+        url: "https://github.com/ros-infrastructure/ros-apt-source/releases/download/{{ ros_apt_release.json.tag_name }}/ros2-apt-source_{{ ros_apt_release.json.tag_name }}.{{ ansible_distribution_release }}_all.deb"
+        dest: /tmp/ros2-apt-source.deb
+        mode: "0644"
+
+    - name: Install/update ros2-apt-source
+      ansible.builtin.apt:
+        deb: /tmp/ros2-apt-source.deb
+
+    # ================================
+    # System packages and Docker
+    # ================================
+
     - name: Update apt cache
-      apt:
+      ansible.builtin.apt:
         update_cache: yes
 
     - name: Install required system packages
@@ -114,3 +142,18 @@
     - name: Reboot robot to apply group changes
       reboot:
         reboot_timeout: 300
+
+    - name: Get container info
+      community.docker.docker_container_info:
+        name: "{{ inventory_hostname }}"
+      register: container_info
+
+    - name: Assert correct image is running
+      ansible.builtin.assert:
+        that:
+          - container_info.container.Config.Image == swarm_image
+        fail_msg: >
+          {{ inventory_hostname }}: expected {{ swarm_image }},
+          got {{ container_info.container.Config.Image }}
+        success_msg: >
+          {{ inventory_hostname }} confirmed running {{ swarm_image }}

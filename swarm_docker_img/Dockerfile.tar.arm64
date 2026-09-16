@@ -1,4 +1,4 @@
-FROM ros:humble
+FROM elghaliasri/ros2-humble-swarm:robot-arm64-v8
 
 SHELL ["/bin/bash", "-c"]
 
@@ -19,12 +19,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-launch-xml \
     ros-humble-cv-bridge \
     ros-humble-launch-testing-ament-cmake \
-    ros-humble-robot-state-publisher \
-    ros-humble-joint-state-publisher \
-    ros-humble-joint-state-publisher-gui \
-    ros-humble-joy \
-    ros-humble-joy-teleop \
-    ros-humble-joy-linux \
+    # ros-humble-robot-state-publisher \
+    # ros-humble-joint-state-publisher \
+    # ros-humble-joint-state-publisher-gui \
+    # ros-humble-joy \
+    # ros-humble-joy-teleop \
+    # ros-humble-joy-linux \
     ros-humble-ffmpeg-encoder-decoder \
     gpiod \
     && rm -rf /var/lib/apt/lists/*
@@ -32,24 +32,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ================================
 # Copy EXACT Python Environment
 # ================================
+# RUN mkdir -p /root/.local/lib/python3.10
+# COPY swarm_docker_img/python_arm64_env.tar.gz /tmp/
+# RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
+#     rm /tmp/python_arm64_env.tar.gz
+
 RUN mkdir -p /root/.local/lib/python3.10
-COPY swarm_docker_img/python_arm64_env.tar.gz /tmp/
-RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
-    rm /tmp/python_arm64_env.tar.gz
+ADD swarm_docker_img/python_arm64_env.tar.gz /root/.local/lib/python3.10/
 
 ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
 
 RUN python3 -m pip install --no-cache-dir gpiod
 
-# ================================
-# Workspace
-# ================================
-WORKDIR /ros2_ws
-RUN mkdir -p src
-
-COPY ros2_marvelmind/src/ src/
-COPY ros2_robomaster/src/ src/
-COPY ros2_swarm/src/ src/
 
 # ================================
 # rosdep
@@ -59,6 +53,17 @@ RUN rosdep init 2>/dev/null || true && \
     rosdep update && \
     rosdep install --from-paths src --ignore-src -r -y && \
     rm -rf /var/lib/apt/lists/*
+
+# ================================
+# Workspace
+# ================================
+RUN rm -rf /ros2_ws
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+COPY ros2_marvelmind/src/ src/
+COPY ros2_robomaster/src/ src/
+COPY ros2_swarm/src/ src/
 
 # ================================
 # Build
