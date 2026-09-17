@@ -8,9 +8,6 @@
 
   tasks:
 
-    - name: Prepare robot
-      ansible.builtin.include_tasks: tasks/system_setup.yml
-
     - name: Load runtime configuration
       ansible.builtin.include_tasks: tasks/runtime_config.yml
 
