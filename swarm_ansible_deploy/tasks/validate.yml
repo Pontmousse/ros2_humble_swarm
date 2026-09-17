@@ -1,0 +1,29 @@
+- name: Get container info
+  community.docker.docker_container_info:
+    name: "{{ inventory_hostname }}"
+  register: container_info
+
+- name: Get local image info
+  community.docker.docker_image_info:
+    name: "{{ swarm_image }}"
+  register: image_info
+
+- name: Validate swarm deployment
+  ansible.builtin.assert:
+    that:
+      - container_info.exists
+      - container_info.container.State.Running
+      - container_info.container.Config.Image == swarm_image
+      - image_info.images | length > 0
+      - container_info.container.Image == image_info.images[0].Id
+      - "'ROBOT_NAME=' ~ swarm_env.ROBOT_NAME in container_info.container.Config.Env"
+      - "'BEACON_ADDR=' ~ swarm_env.BEACON_ADDR in container_info.container.Config.Env"
+      - "'ROBOT_SERIAL=' ~ swarm_env.ROBOT_SERIAL in container_info.container.Config.Env"
+      - "'VIRTUAL_SPACECRAFT=' ~ swarm_env.VIRTUAL_SPACECRAFT in container_info.container.Config.Env"
+
+    fail_msg: >
+      {{ inventory_hostname }} deployment validation FAILED.
+
+    success_msg: >
+      {{ inventory_hostname }} is running {{ swarm_image }}
+      as {{ swarm_env.ROBOT_NAME }}.

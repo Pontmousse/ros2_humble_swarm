@@ -1,0 +1,21 @@
+- name: Create/recreate swarm container
+  community.docker.docker_container:
+    name: "{{ inventory_hostname }}"
+    image: "{{ swarm_image }}"
+    state: started
+    recreate: true
+    restart_policy: always
+    privileged: yes
+    network_mode: host
+
+    devices:
+      - /dev/gpiomem
+      - /dev/ttyUSB0
+      - /dev/ttyUSB1
+      - /dev/ttyAMA0
+
+    volumes:
+      - "{{ remote_config_dir }}/swarm_config.yaml:{{ container_config_dir }}/swarm_config.yaml:ro"
+      - "{{ remote_config_dir }}/virtual_spacecraft.yaml:{{ container_config_dir }}/virtual_spacecraft.yaml:ro"
+
+    env: "{{ swarm_env }}"

@@ -1,22 +1,16 @@
-- name: Validate fleet image
+---
+- name: Validate RoboMaster fleet
   hosts: robots
+  become: yes
   gather_facts: false
 
   vars_files:
     - vars.yml
 
   tasks:
-    - name: Get container info
-      community.docker.docker_container_info:
-        name: "{{ inventory_hostname }}"
-      register: container_info
 
-    - name: Assert correct image is running
-      ansible.builtin.assert:
-        that:
-          - container_info.container.Config.Image == swarm_image
-        fail_msg: >
-          {{ inventory_hostname }}: expected {{ swarm_image }},
-          got {{ container_info.container.Config.Image }}
-        success_msg: >
-          {{ inventory_hostname }} confirmed running {{ swarm_image }}
+    - name: Load expected runtime configuration
+      ansible.builtin.include_tasks: tasks/runtime_config.yml
+
+    - name: Validate deployment
+      ansible.builtin.include_tasks: tasks/validate.yml

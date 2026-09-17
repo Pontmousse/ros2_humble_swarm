@@ -1,0 +1,17 @@
+- name: Create RoboMaster config directory
+  ansible.builtin.file:
+    path: "{{ remote_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy swarm config
+  ansible.builtin.copy:
+    src: "{{ swarm_config_src }}"
+    dest: "{{ remote_config_dir }}/swarm_config.yaml"
+    mode: "0644"
+
+- name: Deploy virtual spacecraft config
+  ansible.builtin.copy:
+    src: "{{ virtual_spacecraft_config_src }}"
+    dest: "{{ remote_config_dir }}/virtual_spacecraft.yaml"
+    mode: "0644"

@@ -1,28 +1,21 @@
 ---
-- name: Deploy RoboMaster Swarm Node
+- name: Deploy RoboMaster runtime configuration
   hosts: robots
   become: yes
+  gather_facts: false
 
   vars_files:
     - vars.yml
 
   tasks:
 
-    - name: Prepare robot
-      ansible.builtin.include_tasks: tasks/system_setup.yml
-
     - name: Load runtime configuration
       ansible.builtin.include_tasks: tasks/runtime_config.yml
 
-    - name: Deploy configuration
+    - name: Copy configuration files
       ansible.builtin.include_tasks: tasks/copy_config.yml
 
-    - name: Pull swarm image
-      community.docker.docker_image:
-        name: "{{ swarm_image }}"
-        source: pull
-
-    - name: Deploy container
+    - name: Recreate container
       ansible.builtin.include_tasks: tasks/container.yml
 
     - name: Validate deployment

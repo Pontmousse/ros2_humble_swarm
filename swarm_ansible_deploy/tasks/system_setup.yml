@@ -1,0 +1,101 @@
+# ================================
+# ROS 2 apt repository/key
+# ================================
+- name: Remove legacy ROS 2 apt source
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ros2.list
+    state: absent
+
+- name: Get latest ros2-apt-source release
+  ansible.builtin.uri:
+    url: https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest
+    return_content: yes
+  register: ros_apt_release
+
+- name: Download latest ros2-apt-source
+  ansible.builtin.get_url:
+    url: "https://github.com/ros-infrastructure/ros-apt-source/releases/download/{{ ros_apt_release.json.tag_name }}/ros2-apt-source_{{ ros_apt_release.json.tag_name }}.{{ ansible_distribution_release }}_all.deb"
+    dest: /tmp/ros2-apt-source.deb
+    mode: "0644"
+
+- name: Install/update ros2-apt-source
+  ansible.builtin.apt:
+    deb: /tmp/ros2-apt-source.deb
+
+# ================================
+# System packages and Docker
+# ================================
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+
+- name: Install required system packages
+  ansible.builtin.apt:
+    name:
+      - docker.io
+      - python3-pip
+      - python3-rpi.gpio
+      - git
+      - libopus-dev
+    state: present
+
+- name: Ensure docker service is running
+  ansible.builtin.systemd:
+    name: docker
+    enabled: yes
+    state: started
+
+- name: Install docker Python module for Ansible
+  ansible.builtin.pip:
+    name: docker
+
+- name: Ensure gpio group exists
+  ansible.builtin.group:
+    name: gpio
+    state: present
+
+- name: Ensure dialout group exists
+  ansible.builtin.group:
+    name: dialout
+    state: present
+
+- name: Add user to docker group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: yes
+
+- name: Add user to gpio group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: gpio
+    append: yes
+
+- name: Add user to dialout group
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: dialout
+    append: yes
+
+- name: Create GPIO udev rules
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/99-gpio.rules
+    content: |
+      SUBSYSTEM=="gpio*", GROUP="gpio", MODE="770"
+      SUBSYSTEM=="pwm*", GROUP="gpio", MODE="770"
+      KERNEL=="spidev*", GROUP="gpio", MODE="660"
+      KERNEL=="i2c-[0-9]*", GROUP="gpio", MODE="660"
+      KERNEL=="ttyAMA[0-9]*", GROUP="gpio", MODE="660"
+      KERNEL=="gpiomem", GROUP="gpio", MODE="660"
+
+- name: Reload udev rules
+  ansible.builtin.command: udevadm control --reload-rules
+  changed_when: true
+
+- name: Trigger udev
+  ansible.builtin.command: udevadm trigger
+  changed_when: true
+
+- name: Reboot robot to apply group changes
+  ansible.builtin.reboot:
+    reboot_timeout: 300

@@ -1,1 +1,12 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.0.2"
+
+remote_config_dir: /opt/robomaster/config
+container_config_dir: /ros2_ws/src/swarm_bringup/config
+
+swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
+virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
+
+ros_domain_id: "0"
+rmw_implementation: "rmw_fastrtps_cpp"
+ros_localhost_only: "0"
+virtual_spacecraft: "true"

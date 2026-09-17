@@ -1,0 +1,22 @@
+- name: Load swarm config
+  ansible.builtin.include_vars:
+    file: "{{ swarm_config_src }}"
+    name: swarm_cfg
+
+# Human robot_idx is 1-based, YAML list is 0-based
+- name: Select robot config
+  ansible.builtin.set_fact:
+    robot_cfg: "{{ swarm_cfg.robots[(robot_idx | int) - 1] }}"
+
+- name: Build container environment
+  ansible.builtin.set_fact:
+    swarm_env:
+      ROBOT_NAME:         "{{ robot_cfg.name }}"
+      BEACON_ADDR:        "{{ robot_cfg.beacon | string }}"
+      ROBOT_SERIAL:       "{{ robot_cfg.serial }}"
+      INITIAL_ORIENT:     "{{ robot_cfg.init_orientation | string }}"
+      ROBOT_IP:           "{{ robot_cfg.ip | default('') }}"
+      ROS_DOMAIN_ID:      "{{ ros_domain_id }}"
+      RMW_IMPLEMENTATION: "{{ rmw_implementation }}"
+      ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"
+      VIRTUAL_SPACECRAFT: "{{ virtual_spacecraft }}"
