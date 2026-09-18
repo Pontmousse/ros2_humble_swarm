@@ -68,8 +68,8 @@
     timer_frequency: 0.01
 
     # Outer-loop gains. Start low and identify the real velocity-loop bandwidth.
-    position_gain: 2.0
-    yaw_gain: 1.5
+    position_gain: 1.0
+    yaw_gain: 0.5
 
     # Conservative RoboMaster motion-rendering limits.
     maximum_speed: 0.4

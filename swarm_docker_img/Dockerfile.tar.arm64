@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.20
+
 FROM elghaliasri/ros2-humble-swarm:robot-arm64-v8
 
 SHELL ["/bin/bash", "-c"]
@@ -19,51 +21,57 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-launch-xml \
     ros-humble-cv-bridge \
     ros-humble-launch-testing-ament-cmake \
-    # ros-humble-robot-state-publisher \
-    # ros-humble-joint-state-publisher \
-    # ros-humble-joint-state-publisher-gui \
-    # ros-humble-joy \
-    # ros-humble-joy-teleop \
-    # ros-humble-joy-linux \
     ros-humble-ffmpeg-encoder-decoder \
     gpiod \
     && rm -rf /var/lib/apt/lists/*
 
 # ================================
-# Copy EXACT Python Environment
+# Exact Python Environment
 # ================================
-# RUN mkdir -p /root/.local/lib/python3.10
-# COPY swarm_docker_img/python_arm64_env.tar.gz /tmp/
-# RUN tar -xzf /tmp/python_arm64_env.tar.gz -C /root/.local/lib/python3.10 && \
-#     rm /tmp/python_arm64_env.tar.gz
-
 RUN mkdir -p /root/.local/lib/python3.10
 ADD swarm_docker_img/python_arm64_env.tar.gz /root/.local/lib/python3.10/
 
-ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages:$PYTHONPATH
+ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages
 
 RUN python3 -m pip install --no-cache-dir gpiod
 
 # ================================
-# Workspace
+# Clean inherited v8 workspace
 # ================================
+WORKDIR /
 RUN rm -rf /ros2_ws
-WORKDIR /ros2_ws
-RUN mkdir -p src
-
-COPY ros2_marvelmind/src/ src/
-COPY ros2_robomaster/src/ src/
-COPY ros2_swarm/src/ src/
 
 # ================================
-# rosdep
+# ROS Dependencies
+#
+# Copy ONLY package.xml files first.
+# Normal .py/.cpp/.yaml/launch changes will NOT invalidate rosdep.
 # ================================
+COPY --parents \
+    ./ros2_marvelmind/src/**/package.xml \
+    ./ros2_robomaster/src/**/package.xml \
+    ./ros2_swarm/src/**/package.xml \
+    /tmp/rosdep_src/
+
 RUN rosdep init 2>/dev/null || true && \
     apt-get update && \
     rosdep update && \
-    rosdep install --from-paths src --ignore-src -r -y && \
-    rm -rf /var/lib/apt/lists/*
+    rosdep install --from-paths /tmp/rosdep_src --ignore-src -r -y && \
+    rm -rf /tmp/rosdep_src /var/lib/apt/lists/*
 
+RUN echo "=== BUILTIN INTERFACES CHECK ===" && \
+    dpkg -l | grep -E 'ros-humble-(builtin-interfaces|rosidl-generator-c|std-msgs)' && \
+    find /opt/ros/humble -name 'libbuiltin_interfaces__rosidl_generator_c.so*' -ls
+# ================================
+# Workspace
+# ================================
+WORKDIR /ros2_ws
+RUN mkdir -p src
+
+# Full source is copied AFTER rosdep
+COPY ros2_marvelmind/src/ src/
+COPY ros2_robomaster/src/ src/
+COPY ros2_swarm/src/ src/
 
 # ================================
 # Build
@@ -78,7 +86,6 @@ RUN source /opt/ros/humble/setup.bash && \
 COPY swarm_docker_img/init.sh /init.sh
 RUN chmod +x /init.sh
 
-# Allow serial device access
 RUN usermod -aG dialout root
 
 ENTRYPOINT ["/init.sh"]

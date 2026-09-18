@@ -1,25 +1,29 @@
-# ROS 2 Python Node to Arm the Virtual Spacecraft Simulation on All Robots (RM1 to RM10)
+# ROS 2 Python Node to Arm the Virtual Spacecraft Simulation on selected robots (default: RM1 to RM10)
+
+import argparse
+from typing import Any
 
 import rclpy
+import rclpy.utilities
 from rclpy.node import Node
 from std_srvs.srv import Trigger
 
 
 class ArmAllNode(Node):
-    def __init__(self):
+    def __init__(self, robot_indices):
         super().__init__("arm_all_node")
-        self.get_logger().info("Arm All Node Initialized")
-        self.arm_all_robots()
+        self.get_logger().info(
+            f"Arm All Node Initialized for {', '.join(f'RM{i}' for i in robot_indices)}"
+        )
+        self.arm_robots(robot_indices)
 
-    def arm_all_robots(self):
+    def arm_robots(self, robot_indices):
         # Create every client up front so DDS discovery for all robots runs
         # concurrently in the background, instead of paying the discovery
         # latency serially, once per robot.
         clients = {
-            f"RM{i}": self.create_client(
-                Trigger, f"/RM{i}/virtual_spacecraft/arm"
-            )
-            for i in range(1, 11)
+            f"RM{i}": self.create_client(Trigger, f"/RM{i}/virtual_spacecraft/arm")
+            for i in robot_indices
         }
         for robot_name, client in clients.items():
             self.get_logger().info(f"Arming {robot_name} virtual spacecraft...")
@@ -41,9 +45,25 @@ class ArmAllNode(Node):
             self.get_logger().warning(f"Service {service_name} not available")
 
 
-def main(args=None):
+def parse_robot_indices(args):
+    parser = argparse.ArgumentParser(
+        description="Arm the virtual spacecraft simulation on one or more robots."
+    )
+    parser.add_argument(
+        "robots",
+        nargs="*",
+        type=int,
+        default=list(range(1, 11)),
+        help="Robot indices to arm, e.g. '4' or '1 2 4'. Defaults to RM1..RM10.",
+    )
+    return parser.parse_args(args).robots
+
+
+def main(args: Any = None) -> None:
     rclpy.init(args=args)
-    node = ArmAllNode()
+    parsed_args = rclpy.utilities.remove_ros_args(args=args)
+    robot_indices = parse_robot_indices(parsed_args[1:])
+    node = ArmAllNode(robot_indices)
     node.destroy_node()
     rclpy.shutdown()
 

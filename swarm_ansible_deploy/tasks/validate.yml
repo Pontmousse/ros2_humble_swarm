@@ -20,9 +20,18 @@
       - "'BEACON_ADDR=' ~ swarm_env.BEACON_ADDR in container_info.container.Config.Env"
       - "'ROBOT_SERIAL=' ~ swarm_env.ROBOT_SERIAL in container_info.container.Config.Env"
       - "'VIRTUAL_SPACECRAFT=' ~ swarm_env.VIRTUAL_SPACECRAFT in container_info.container.Config.Env"
+      - "'ROS_DOMAIN_ID=' ~ swarm_env.ROS_DOMAIN_ID in container_info.container.Config.Env"
+      - "'RMW_IMPLEMENTATION=' ~ swarm_env.RMW_IMPLEMENTATION in container_info.container.Config.Env"
+      - "'ROS_LOCALHOST_ONLY=' ~ swarm_env.ROS_LOCALHOST_ONLY in container_info.container.Config.Env"
 
     fail_msg: >
       {{ inventory_hostname }} deployment validation FAILED.
+      Expected image: {{ swarm_image }}.
+      Running container image: {{ container_info.container.Config.Image | default('unknown') }}.
+      Expected ROS networking: ROS_DOMAIN_ID={{ swarm_env.ROS_DOMAIN_ID }},
+      RMW_IMPLEMENTATION={{ swarm_env.RMW_IMPLEMENTATION }},
+      ROS_LOCALHOST_ONLY={{ swarm_env.ROS_LOCALHOST_ONLY }}.
+      Running container env: {{ container_info.container.Config.Env | select('match', '^(ROS_DOMAIN_ID|RMW_IMPLEMENTATION|ROS_LOCALHOST_ONLY)=') | list }}.
 
     success_msg: >
       {{ inventory_hostname }} is running {{ swarm_image }}

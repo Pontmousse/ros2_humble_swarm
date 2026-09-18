@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.0"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2"
 
 remote_config_dir: /opt/robomaster/config
 container_config_dir: /ros2_ws/src/swarm_bringup/config

@@ -40,6 +40,8 @@ def load_swarm_config():
     robot_ips = [x.strip() for x in os.getenv("ROBOT_IP", "").split(",")]
     robot_ips = (robot_ips + [""] * n)[:n]
 
+    marvelmind_port = os.environ.get("MARVELMIND_PORT", "/dev/ttyACM0")
+
     if not (
         len(beacon_addresses) ==
         len(robot_serial_numbers) ==
@@ -54,6 +56,7 @@ def load_swarm_config():
         robot_serial_numbers,
         robot_ips,
         init_orientations,
+        marvelmind_port,
     )
 
 
@@ -106,7 +109,7 @@ def generate_launch_description():
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
-    beacon_addresses, robot_names, robot_serial_numbers, robot_ips, init_orientations = load_swarm_config()
+    beacon_addresses, robot_names, robot_serial_numbers, robot_ips, init_orientations, marvelmind_port = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
@@ -231,6 +234,7 @@ def generate_launch_description():
             {
                 "robot_names": robot_names,
                 "beacon_addresses": beacon_addresses,
+                "port_address": marvelmind_port,
                 **qos_parameters(depth=1, reliability='BEST_EFFORT')
             }
         ]
