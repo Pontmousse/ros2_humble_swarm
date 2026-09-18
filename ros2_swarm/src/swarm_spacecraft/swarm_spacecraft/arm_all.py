@@ -12,25 +12,21 @@ class ArmAllNode(Node):
         self.arm_all_robots()
 
     def arm_all_robots(self):
-        for i in range(1, 11):
-            robot_name = f"RM{i}"
-            service_name = f"/{robot_name}/virtual_spacecraft/arm"
-            if self.service_exists(service_name):
-                self.get_logger().info(f"Arming {robot_name} virtual spacecraft...")
-                self.call_arm_service(service_name)
-            else:
-                self.get_logger().info(f"{robot_name} not active or service not found.")
+        # Create every client up front so DDS discovery for all robots runs
+        # concurrently in the background, instead of paying the discovery
+        # latency serially, once per robot.
+        clients = {
+            f"RM{i}": self.create_client(
+                Trigger, f"/RM{i}/virtual_spacecraft/arm"
+            )
+            for i in range(1, 11)
+        }
+        for robot_name, client in clients.items():
+            self.get_logger().info(f"Arming {robot_name} virtual spacecraft...")
+            self.call_arm_service(client, f"/{robot_name}/virtual_spacecraft/arm")
 
-    def service_exists(self, service_name):
-        service_list = self.get_service_names_and_types()
-        for name, types in service_list:
-            if name == service_name and "std_srvs/srv/Trigger" in types:
-                return True
-        return False
-
-    def call_arm_service(self, service_name):
-        client = self.create_client(Trigger, service_name)
-        if client.wait_for_service(timeout_sec=1.0):
+    def call_arm_service(self, client, service_name):
+        if client.wait_for_service(timeout_sec=10.0):
             request = Trigger.Request()
             future = client.call_async(request)
             rclpy.spin_until_future_complete(self, future)
