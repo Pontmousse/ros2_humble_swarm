@@ -180,7 +180,7 @@ def generate_launch_description():
                 namespace=robot_name,
                 output="screen",
                 parameters=[
-                    {"autostart": False, "node_names": ["velocity_smoother"]}
+                    {"autostart": True, "node_names": ["velocity_smoother"]}
                 ],
             )
         )

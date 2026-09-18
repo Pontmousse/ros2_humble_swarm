@@ -3,6 +3,7 @@
   hosts: robots
   become: yes
   gather_facts: false
+  strategy: free
 
   vars_files:
     - vars.yml

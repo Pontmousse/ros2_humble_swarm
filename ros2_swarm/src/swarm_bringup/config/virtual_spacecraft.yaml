@@ -7,10 +7,16 @@
 # travel past a wall before reversing. Overshoot during a bounce is expected
 # behavior. Size the physical safe area with clearance beyond these limits.
 /**:
+  # ros__parameters:
+  #   x_min: 1.5
+  #   x_max: 2.5
+  #   y_min: -2.0
+  #   y_max: -1.0
+
   ros__parameters:
-    x_min: 1.5
-    x_max: 2.5
-    y_min: -2.0
+    x_min: -4.5
+    x_max: 0.0
+    y_min: -4.0
     y_max: -1.0
 
 /**/virtual_spacecraft:

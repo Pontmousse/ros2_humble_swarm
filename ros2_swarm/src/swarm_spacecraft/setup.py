@@ -21,6 +21,7 @@ setup(
     entry_points={
         "console_scripts": [
             "virtual_spacecraft = swarm_spacecraft.virtual_spacecraft_node:main",
+            "arm_all = swarm_spacecraft.arm_all:main",
         ],
     },
 )

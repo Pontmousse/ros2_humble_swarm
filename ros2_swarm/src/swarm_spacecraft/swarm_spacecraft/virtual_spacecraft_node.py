@@ -147,6 +147,7 @@ class VirtualSpacecraftNode(Node):
         self.reference_frame_id = ""
         self.virtual_frame_id = namespaced_virtual_frame(self.get_namespace())
         self.initialized = False
+        self.armed = False
         self.last_odometry_time = None
         self.last_update_time = self.get_clock().now()
 
@@ -166,6 +167,7 @@ class VirtualSpacecraftNode(Node):
             Wrench, "virtual_spacecraft/applied_wrench", qos_profile
         )
         self.create_service(Trigger, "virtual_spacecraft/reset", self.reset_callback)
+        self.create_service(Trigger, "virtual_spacecraft/arm", self.arm_callback)
         self.create_timer(timer_frequency, self.update)
         self.get_logger().info("Virtual spacecraft simulator ready")
 
@@ -178,7 +180,7 @@ class VirtualSpacecraftNode(Node):
         )
         self.measured_frame_id = message.header.frame_id.lstrip("/")
         self.last_odometry_time = self.get_clock().now().nanoseconds
-        if not self.initialized and self.measured_frame_id:
+        if not self.armed and self.measured_frame_id:
             self.reset_reference()
 
     def subscribe_wrench_sources(self, qos_profile) -> None:
@@ -281,6 +283,23 @@ class VirtualSpacecraftNode(Node):
         response.message = "Virtual state reset to physical pose"
         return response
 
+    def arm_callback(self, request, response):
+        """Freeze a final resync to the physical pose, then start integrating."""
+        del request
+        if not self.localization_is_fresh():
+            response.success = False
+            response.message = "No fresh localization odometry received"
+            return response
+        if not self.measured_frame_id:
+            response.success = False
+            response.message = "Localization odometry frame_id is empty"
+            return response
+        self.reset_reference()
+        self.armed = True
+        response.success = True
+        response.message = "Virtual spacecraft armed"
+        return response
+
     def reset_reference(self) -> None:
         """Place a stationary virtual spacecraft at the measured pose."""
         self.reference = PlanarState(
@@ -307,7 +326,7 @@ class VirtualSpacecraftNode(Node):
         now = self.get_clock().now()
         dt = (now - self.last_update_time).nanoseconds * 1.0e-9
         self.last_update_time = now
-        if not self.initialized:
+        if not self.initialized or not self.armed:
             return
 
         dt = max(0.0, min(dt, self.maximum_time_step))
