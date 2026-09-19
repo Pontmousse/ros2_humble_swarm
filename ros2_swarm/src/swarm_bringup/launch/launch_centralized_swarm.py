@@ -33,7 +33,7 @@ def load_swarm_config():
     # Pinned robot IPs, same order as robot_names. Leave "" to fall back to
     # SN broadcast discovery (UDP 40927), which only works on a network that
     # forwards broadcast to the host.
-    robot_ips = ["","", "", "", "", ""]
+    robot_ips = ["","", "", "192.168.1.154", "192.168.1.5", "192.168.1.6"]
 
     env_ips = os.getenv('ROBOT_IPS')
     if env_ips:

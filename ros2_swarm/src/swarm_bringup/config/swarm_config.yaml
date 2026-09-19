@@ -24,7 +24,7 @@ robots:
     beacon: 4
     serial: 159CG9V0050HED
     init_orientation: 90.0
-    # ip: 192.168.1.154
+    ip: 192.168.1.154
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM5
