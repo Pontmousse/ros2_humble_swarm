@@ -22,6 +22,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-humble-cv-bridge \
     ros-humble-launch-testing-ament-cmake \
     ros-humble-ffmpeg-encoder-decoder \
+    ros-humble-diagnostic-updater \
+    ros-humble-nav2-lifecycle-manager \
     gpiod \
     && rm -rf /var/lib/apt/lists/*
 

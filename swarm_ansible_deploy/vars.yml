@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.3"
 swarm_image_repo: "elghaliasri/ros2-humble-swarm"
 
 # Container names used by older revisions of this playbook. Removed on deploy so

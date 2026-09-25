@@ -46,7 +46,7 @@ def generate_launch_description():
     )
     visualization_argument = DeclareLaunchArgument(
         "enable_guidance_visualization",
-        default_value="true",
+        default_value="false",
         choices=["true", "false"],
         description="Enable guidance and motion-rendering RViz markers",
     )

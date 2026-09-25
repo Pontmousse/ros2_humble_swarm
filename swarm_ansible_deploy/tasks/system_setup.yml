@@ -21,6 +21,7 @@
 - name: Install/update ros2-apt-source
   ansible.builtin.apt:
     deb: /tmp/ros2-apt-source.deb
+    lock_timeout: 600
 
 # ================================
 # System packages and Docker
@@ -28,6 +29,7 @@
 - name: Update apt cache
   ansible.builtin.apt:
     update_cache: yes
+    lock_timeout: 600
 
 - name: Install required system packages
   ansible.builtin.apt:
@@ -38,6 +40,7 @@
       - git
       - libopus-dev
     state: present
+    lock_timeout: 600
 
 - name: Ensure docker service is running
   ansible.builtin.systemd:
@@ -46,8 +49,10 @@
     state: started
 
 - name: Install docker Python module for Ansible
-  ansible.builtin.pip:
-    name: docker
+  ansible.builtin.apt:
+    name: python3-docker
+    state: present
+    lock_timeout: 600
 
 - name: Ensure gpio group exists
   ansible.builtin.group:

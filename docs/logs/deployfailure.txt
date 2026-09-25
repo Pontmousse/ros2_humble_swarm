@@ -1,0 +1,279 @@
+ansible-playbook provision.yml
+
+PLAY [Provision RoboMaster system] ***************************************************************************************************************************************
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************
+ok: [robot4]
+ok: [robot5]
+ok: [robot6]
+ok: [robot1]
+
+TASK [Prepare robot system] **********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/system_setup.yml for robot1, robot4, robot5, robot6
+
+TASK [Remove legacy ROS 2 apt source] ************************************************************************************************************************************
+ok: [robot5]
+ok: [robot4]
+ok: [robot6]
+ok: [robot1]
+
+TASK [Get latest ros2-apt-source release] ********************************************************************************************************************************
+ok: [robot5]
+ok: [robot4]
+ok: [robot6]
+ok: [robot1]
+
+TASK [Download latest ros2-apt-source] ***********************************************************************************************************************************
+changed: [robot5]
+changed: [robot4]
+changed: [robot6]
+changed: [robot1]
+
+TASK [Install/update ros2-apt-source] ************************************************************************************************************************************
+changed: [robot5]
+changed: [robot4]
+changed: [robot6]
+ok: [robot1]
+
+TASK [Update apt cache] **************************************************************************************************************************************************
+changed: [robot5]
+changed: [robot4]
+changed: [robot6]
+changed: [robot1]
+
+TASK [Install required system packages] **********************************************************************************************************************************
+ok: [robot4]
+fatal: [robot5]: FAILED! => {"cache_update_time": 1790123280, "cache_updated": false, "changed": false, "msg": "'/usr/bin/apt-get -y -o \"Dpkg::Options::=--force-confdef\" -o \"Dpkg::Options::=--force-confold\"       install 'docker.io=29.1.3-0ubuntu3~24.04.2' 'python3-pip=24.0+dfsg-1ubuntu1.3' 'python3-rpi.gpio=0.7.1~a4-1build5' 'libopus-dev=1.4-1build1'' failed: E: Error, pkgProblemResolver::Resolve generated breaks, this may be caused by held packages.\n", "rc": 100, "stderr": "E: Error, pkgProblemResolver::Resolve generated breaks, this may be caused by held packages.\n", "stderr_lines": ["E: Error, pkgProblemResolver::Resolve generated breaks, this may be caused by held packages."], "stdout": "Reading package lists...\nBuilding dependency tree...\nReading state information...\nSome packages could not be installed. This may mean that you have\nrequested an impossible situation or if you are using the unstable\ndistribution that some required packages have not yet been created\nor been moved out of Incoming.\nThe following information may help to resolve the situation:\n\nThe following packages have unmet dependencies:\n containerd.io : Conflicts: containerd\n", "stdout_lines": ["Reading package lists...", "Building dependency tree...", "Reading state information...", "Some packages could not be installed. This may mean that you have", "requested an impossible situation or if you are using the unstable", "distribution that some required packages have not yet been created", "or been moved out of Incoming.", "The following information may help to resolve the situation:", "", "The following packages have unmet dependencies:", " containerd.io : Conflicts: containerd"]}
+ok: [robot1]
+changed: [robot6]
+
+TASK [Ensure docker service is running] **********************************************************************************************************************************
+ok: [robot4]
+ok: [robot6]
+ok: [robot1]
+
+TASK [Install docker Python module for Ansible] **************************************************************************************************************************
+fatal: [robot4]: FAILED! => {"changed": false, "cmd": ["/usr/bin/python3", "-m", "pip.__main__", "install", "docker"], "msg": "\n:stderr: error: externally-managed-environment\n\n× This environment is externally managed\n╰─> To install Python packages system-wide, try apt install\n    python3-xyz, where xyz is the package you are trying to\n    install.\n    \n    If you wish to install a non-Debian-packaged Python package,\n    create a virtual environment using python3 -m venv path/to/venv.\n    Then use path/to/venv/bin/python and path/to/venv/bin/pip. Make\n    sure you have python3-full installed.\n    \n    If you wish to install a non-Debian packaged Python application,\n    it may be easiest to use pipx install xyz, which will manage a\n    virtual environment for you. Make sure you have pipx installed.\n    \n    See /usr/share/doc/python3.12/README.venv for more information.\n\nnote: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.\nhint: See PEP 668 for the detailed specification.\n"}
+changed: [robot6]
+ok: [robot1]
+
+TASK [Ensure gpio group exists] ******************************************************************************************************************************************
+ok: [robot1]
+changed: [robot6]
+
+TASK [Ensure dialout group exists] ***************************************************************************************************************************************
+ok: [robot6]
+ok: [robot1]
+
+TASK [Add user to docker group] ******************************************************************************************************************************************
+changed: [robot6]
+ok: [robot1]
+
+TASK [Add user to gpio group] ********************************************************************************************************************************************
+changed: [robot6]
+ok: [robot1]
+
+TASK [Add user to dialout group] *****************************************************************************************************************************************
+changed: [robot6]
+ok: [robot1]
+
+TASK [Create GPIO udev rules] ********************************************************************************************************************************************
+changed: [robot6]
+ok: [robot1]
+
+TASK [Reload udev rules] *************************************************************************************************************************************************
+changed: [robot6]
+changed: [robot1]
+
+TASK [Trigger udev] ******************************************************************************************************************************************************
+changed: [robot6]
+changed: [robot1]
+
+TASK [Reboot robot to apply group changes] *******************************************************************************************************************************
+changed: [robot6]
+changed: [robot1]
+
+PLAY RECAP ***************************************************************************************************************************************************************
+robot1                     : ok=19   changed=5    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+robot4                     : ok=9    changed=3    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+robot5                     : ok=7    changed=3    unreachable=0    failed=1    skipped=0    rescued=0    ignored=0   
+robot6                     : ok=19   changed=13   unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+
+ansible-playbook deploy.yml
+
+PLAY [Deploy RoboMaster Swarm Node] **************************************************************************************************************************************
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Load runtime configuration] ****************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/runtime_config.yml for robot4
+
+TASK [Load swarm config] *************************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Select robot config] ***********************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Build container environment] ***************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Deploy configuration] **********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/copy_config.yml for robot4
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************
+ok: [robot6]
+
+TASK [Load runtime configuration] ****************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/runtime_config.yml for robot6
+
+TASK [Load swarm config] *************************************************************************************************************************************************
+ok: [robot6]
+
+TASK [Select robot config] ***********************************************************************************************************************************************
+ok: [robot6]
+
+TASK [Build container environment] ***************************************************************************************************************************************
+ok: [robot6]
+
+TASK [Deploy configuration] **********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/copy_config.yml for robot6
+
+TASK [Create RoboMaster config directory] ********************************************************************************************************************************
+ok: [robot4]
+
+TASK [Create RoboMaster config directory] ********************************************************************************************************************************
+changed: [robot6]
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************
+ok: [robot1]
+
+TASK [Load runtime configuration] ****************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/runtime_config.yml for robot1
+
+TASK [Load swarm config] *************************************************************************************************************************************************
+ok: [robot1]
+
+TASK [Select robot config] ***********************************************************************************************************************************************
+ok: [robot1]
+
+TASK [Build container environment] ***************************************************************************************************************************************
+ok: [robot1]
+
+TASK [Deploy configuration] **********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/copy_config.yml for robot1
+
+TASK [Gathering Facts] ***************************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Load runtime configuration] ****************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/runtime_config.yml for robot5
+
+TASK [Load swarm config] *************************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Select robot config] ***********************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Build container environment] ***************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Deploy configuration] **********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/copy_config.yml for robot5
+
+TASK [Deploy swarm config] ***********************************************************************************************************************************************
+changed: [robot4]
+
+TASK [Create RoboMaster config directory] ********************************************************************************************************************************
+ok: [robot1]
+
+TASK [Create RoboMaster config directory] ********************************************************************************************************************************
+changed: [robot5]
+
+TASK [Deploy swarm config] ***********************************************************************************************************************************************
+changed: [robot6]
+
+TASK [Deploy virtual spacecraft config] **********************************************************************************************************************************
+ok: [robot4]
+
+TASK [Deploy swarm config] ***********************************************************************************************************************************************
+changed: [robot5]
+
+TASK [Pull swarm image] **************************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Deploy container] **************************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/container.yml for robot4
+
+TASK [Deploy virtual spacecraft config] **********************************************************************************************************************************
+changed: [robot6]
+
+TASK [Deploy swarm config] ***********************************************************************************************************************************************
+changed: [robot1]
+
+TASK [Deploy virtual spacecraft config] **********************************************************************************************************************************
+changed: [robot5]
+
+TASK [Inspect existing containers] ***************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Pull swarm image] **************************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Deploy container] **************************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/container.yml for robot5
+
+TASK [Pull swarm image] **************************************************************************************************************************************************
+fatal: [robot6]: FAILED! => {"changed": false, "msg": "Error pulling image elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2 - 404 Client Error for http+docker://localhost/v1.52/images/create?tag=robot-arm64-v9.1.2&fromImage=elghaliasri%2Fros2-humble-swarm: Not Found (\"no matching manifest for linux/arm/v7 in the manifest list entries: no match for platform in manifest: not found\")"}
+
+TASK [Inspect existing containers] ***************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Deploy virtual spacecraft config] **********************************************************************************************************************************
+changed: [robot1]
+
+TASK [Remove stray swarm containers] *************************************************************************************************************************************
+changed: [robot4] => (item=swarm)
+
+TASK [Remove stray swarm containers] *************************************************************************************************************************************
+ok: [robot5] => (item=swarm)
+
+TASK [Create/recreate swarm container] ***********************************************************************************************************************************
+changed: [robot5]
+
+TASK [Validate deployment] ***********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/validate.yml for robot5
+
+TASK [Get container info] ************************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Get running containers] ********************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Validate exactly one swarm container is running] *******************************************************************************************************************
+ok: [robot5] => {
+    "changed": false,
+    "msg": "robot5 is the only running swarm container."
+}
+
+TASK [Get local image info] **********************************************************************************************************************************************
+ok: [robot5]
+
+TASK [Validate swarm deployment] *****************************************************************************************************************************************
+ok: [robot5] => {
+    "changed": false,
+    "msg": "robot5 is running elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2 as RM5.\n"
+}
+
+TASK [Create/recreate swarm container] ***********************************************************************************************************************************
+changed: [robot4]
+
+TASK [Validate deployment] ***********************************************************************************************************************************************
+included: /home/elghali/projects/ros2_humble_swarm/swarm_ansible_deploy/tasks/validate.yml for robot4
+
+TASK [Get container info] ************************************************************************************************************************************************
+ok: [robot4]
+
+TASK [Pull swarm image] **************************************************************************************************************************************************
+fatal: [robot1]: FAILED! => {"changed": false, "msg": "Error pulling image elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2 - 500 Server Error for http+docker://localhost/v1.52/images/create?tag=robot-arm64-v9.1.2&fromImage=elghaliasri%2Fros2-humble-swarm: Internal Server Error (\"failed to resolve reference \"docker.io/elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.2\": failed to do request: Head \"https://registry-1.docker.io/v2/elghaliasri/ros2-humble-swarm/manifests/robot-arm64-v9.1.2\": dial tcp: lookup registry-1.docker.io on 127.0.0.53:53: read udp 127.0.0.1:58354->127.0.0.53:53: i/o timeout\")"}
+^C [ERROR]: User interrupted execution

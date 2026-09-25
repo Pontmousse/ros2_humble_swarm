@@ -45,7 +45,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [90.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    init_orientations = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
 
 

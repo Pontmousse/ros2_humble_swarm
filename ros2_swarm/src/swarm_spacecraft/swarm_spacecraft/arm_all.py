@@ -9,6 +9,10 @@ from rclpy.node import Node
 from std_srvs.srv import Trigger
 
 
+# Discovery on the full swarm graph has been measured between 9 s and 19 s.
+DISCOVERY_TIMEOUT_SEC = 30.0
+
+
 class ArmAllNode(Node):
     def __init__(self, robot_indices):
         super().__init__("arm_all_node")
@@ -30,7 +34,7 @@ class ArmAllNode(Node):
             self.call_arm_service(client, f"/{robot_name}/virtual_spacecraft/arm")
 
     def call_arm_service(self, client, service_name):
-        if client.wait_for_service(timeout_sec=10.0):
+        if client.wait_for_service(timeout_sec=DISCOVERY_TIMEOUT_SEC):
             request = Trigger.Request()
             future = client.call_async(request)
             rclpy.spin_until_future_complete(self, future)
@@ -42,7 +46,10 @@ class ArmAllNode(Node):
             else:
                 self.get_logger().error(f"Failed to arm {service_name}")
         else:
-            self.get_logger().warning(f"Service {service_name} not available")
+            self.get_logger().warning(
+                f"Service {service_name} not discovered within "
+                f"{DISCOVERY_TIMEOUT_SEC:.0f}s - the node is most likely not running"
+            )
 
 
 def parse_robot_indices(args):

@@ -2,41 +2,41 @@ robots:
   - name: RM1
     beacon: 1
     serial: 159CKC50070ECX
-    init_orientation: 90.0
-    ip: 192.168.50.1
+    init_orientation: 0.0
+    # ip: 192.168.50.11
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM2
     beacon: 2
     serial: 159CKC50070E5N
-    init_orientation: 90.0
+    init_orientation: 0.0
     # ip: 192.168.50.152
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM3
     beacon: 3
     serial: 159CG9J0050797
-    init_orientation: 90.0
-    # ip: 192.168.50.153
+    init_orientation: 0.0
+    # ip: 192.168.50.3
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM4
     beacon: 4
     serial: 159CG9V0050HED
-    init_orientation: 90.0
+    init_orientation: 0.0
     # ip: 192.168.50.154
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM5
     beacon: 5
     serial: 159CKCH0070F8S
-    init_orientation: 90.0
+    init_orientation: 0.0
     # ip: 192.168.50.155
     # marvelmind_port: /dev/ttyACM0
 
   - name: RM6
     beacon: 6
     serial: 159CKC50070EVP
-    init_orientation: 90.0
+    init_orientation: 0.0
     # ip: 192.168.50.156
     # marvelmind_port: /dev/ttyACM0
