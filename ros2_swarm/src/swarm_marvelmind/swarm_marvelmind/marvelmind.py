@@ -307,7 +307,7 @@ class MarvelmindHedge (Thread):
                         self.serialPort = serial.Serial(self.tty, self.baud, timeout=3)
                         print ("Serial port opened")
                     readChar = self.serialPort.read(1)
-                    while (readChar != None) and (readChar != '') and (not self.terminationRequired):
+                    while (readChar != None) and (readChar != b'') and (not self.terminationRequired):
                         self._bufferSerialDeque.append(readChar)
                         readChar = self.serialPort.read(1)
                         bufferList = list(self._bufferSerialDeque)
