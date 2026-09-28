@@ -42,6 +42,7 @@ setup(
 
             'stop_all = swarm_controller.stop_all:main',
             'all_capture = swarm_controller.all_capture:main',
+            'capture_supervisor = swarm_controller.capture_supervisor:main',
             
         ],
     },

@@ -62,7 +62,7 @@ class MarvelmindNode(Node):
 
         #####################
 
-        self.time_period = 0.001 
+        self.time_period = 0.02
 
         self.get_logger().info("Publishing indoor GPS data.")
         self.pos_pub = self.create_publisher(HedgePositionAddressed, "/mm_all_pos" ,self.qos_profile)
@@ -73,9 +73,9 @@ class MarvelmindNode(Node):
         self.imu_timer = self.create_timer(self.time_period, self.publish_imu_callback)
 
     def publish_imu_callback(self):
-        msg = HedgeImuAddressed()
-        imu_msg = Imu()
         if self.hedge.rawImuUpdated:
+            msg = HedgeImuAddressed()
+            imu_msg = Imu()
             # self.get_logger().info("Raw IMU data updated.")
             self.hedge.rawImuUpdated = False # set back to False to not keep entering the condition and triggering the callback content - comes back only if rawImuUpdated is True again
             temp = self.hedge.raw_imu()
@@ -107,8 +107,8 @@ class MarvelmindNode(Node):
 
 
     def publish_pos_callback(self):
-        msg_pos = HedgePositionAddressed()
         if self.hedge.positionUpdated:
+            msg_pos = HedgePositionAddressed()
             # self.get_logger().info("Position data updated.")
             self.hedge.positionUpdated = False # set back to False to not keep entering the condition and triggering the callback content - comes back only if rawImuUpdated is True again
             temp = self.hedge.position()

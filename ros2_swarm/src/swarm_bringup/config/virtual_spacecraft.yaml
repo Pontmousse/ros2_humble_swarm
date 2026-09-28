@@ -13,9 +13,12 @@
   #   y_min: -2.0
   #   y_max: -1.0
 
+  # Walls (≈ beacon extents): west ~x=-5.61, east ~x=+0.36, north ~y=0.0,
+  # south ~y=-5.02. Box pulled in to leave ~1 m overshoot clearance every side;
+  # the previous x_max: 0.0 sat right on the east wall (beacon 13) → collisions.
   ros__parameters:
     x_min: -4.5
-    x_max: 0.0
+    x_max: -1.0
     y_min: -4.0
     y_max: -1.0
 
@@ -122,15 +125,19 @@
 
     # Box geometry comes from the shared /** block above.
     # Braking runway inside each wall; must stay below half the shortest side.
-    boundary_margin: 0.01
+    # Was 0.01 m (≈no runway → max overshoot). 0.4 m starts the reverse burn
+    # well before the boundary. Shortest side is 3.0 m, so half is 1.5 m > 0.4.
+    boundary_margin: 0.4
 
     # Finite firings. These must not exceed virtual_spacecraft.maximum_force /
     # maximum_torque, or the simulator clamps the sum and the guidance law is
     # silently solving a different problem than the one it commanded.
-    boundary_force: 1.5
+    # Brought at/under the 1.0 N / 0.2 Nm envelope so commanded == rendered
+    # (were 1.5 / 2.0 / 0.5 → clamped, so braking was weaker than the law assumed).
+    boundary_force: 1.0
     rebound_speed: 0.30
-    maximum_force: 2.0
-    maximum_torque: 0.5
+    maximum_force: 1.0
+    maximum_torque: 0.2
 
     # Thrust rises and falls as a raised cosine over initial_burn_ramp seconds
     # at each end of the burn. A step demands unbounded chassis acceleration to
@@ -138,9 +145,10 @@
     # Clamped internally to half of initial_burn_duration.
     initial_burn_duration: 2.0
     initial_burn_ramp: 2.0
-    initial_force_x: 1.0
-    initial_force_y: 1.0
-    initial_torque: 0.5
+    # 0.7/0.7 → resultant 0.99 N ≤ 1.0 envelope (were 1.0/1.0 → 1.41, clamped).
+    initial_force_x: 0.7
+    initial_force_y: 0.7
+    initial_torque: 0.2
 
     # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
     # drawn once per bounce. Breaks the degenerate straight-line rebound.

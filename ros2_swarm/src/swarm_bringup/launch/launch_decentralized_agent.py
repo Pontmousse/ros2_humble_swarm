@@ -317,7 +317,7 @@ def generate_launch_description():
         parameters=[
                 {
                     "init_period": init_period,
-                    "timer_frequency": timer_frequency,
+                    "timer_frequency": 0.05,
                     "init_orientation": init_orientation,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
                     "global_frame_id": "swarm_map",
@@ -530,7 +530,33 @@ def generate_launch_description():
                 ]
             )
 
-        # ld.add_action(cp_control)
+        ld.add_action(cp_control)
+
+    ##############################################################################
+    ############### - Search <-> Capture handoff supervisor - ####################
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        capture_supervisor = Node(
+            package="swarm_controller",
+            executable="capture_supervisor",
+            name="capture_supervisor",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    # Consecutive detected frames before switching to capture.
+                    "detect_frames": 5,
+                    # Seconds the target may be lost before resuming search.
+                    "lost_timeout": 2.0,
+                    # Match the BEST_EFFORT publisher on the targets topic.
+                    "qos_reliability": "BEST_EFFORT",
+                }
+            ],
+        )
+
+        ld.add_action(capture_supervisor)
 
 
     ##############################################################################

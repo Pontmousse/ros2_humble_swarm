@@ -141,7 +141,7 @@ class MarvelmindHedge (Thread):
         self.tty = tty  # serial
         self.baud = baud  # baudrate
         self.debug = debug  # debug flag
-        self._bufferSerialDeque = collections.deque(maxlen=255)  # serial buffer
+        self._serialBuffer = bytearray()  # serial buffer (bounded to 255 bytes on append)
         self._bufferSerialReply= bytearray(6)
         self._userDataArray= bytearray(255)
 
@@ -308,16 +308,17 @@ class MarvelmindHedge (Thread):
                         print ("Serial port opened")
                     readChar = self.serialPort.read(1)
                     while (readChar != None) and (readChar != b'') and (not self.terminationRequired):
-                        self._bufferSerialDeque.append(readChar)
+                        self._serialBuffer += readChar
+                        if (len(self._serialBuffer) > 255):
+                            del self._serialBuffer[:-255]
                         readChar = self.serialPort.read(1)
-                        bufferList = list(self._bufferSerialDeque)
-                        
-                        strbuf = (b''.join(bufferList))
+
+                        strbuf = self._serialBuffer
 
                         pktHdrOffset = strbuf.find(b'\xff\x47')
                         if (pktHdrOffset == -1):
                             pktHdrOffset = strbuf.find(b'\xff\x4a')
-                        if (pktHdrOffset >= 0 and len(bufferList) > pktHdrOffset + 4 and pktHdrOffset<220):
+                        if (pktHdrOffset >= 0 and len(strbuf) > pktHdrOffset + 4 and pktHdrOffset<220):
 #                           print(bufferList)
                             isMmMessageDetected = False
                             isCmMessageDetected = False
@@ -431,13 +432,13 @@ class MarvelmindHedge (Thread):
                                     isUserDataMessageDetected = True
                                     if (self.debug): print ('Message with user payload data was detected')
 																     												
-                            msgLen = ord(bufferList[pktHdrOffset + 4])
+                            msgLen = strbuf[pktHdrOffset + 4]
                             if (self.debug): print ('Message length: ', msgLen)
                             
                             self.dataEvent.set()
 
                             try:
-                                if (len(bufferList) > pktHdrOffset + 4 + msgLen + 2):
+                                if (len(strbuf) > pktHdrOffset + 4 + msgLen + 2):
                                     usnCRC16 = 0
                                     if (isCmMessageDetected):
                                         usnTimestamp, usnX, usnY, usnZ, usnAdr, usnAngle, usnCRC16 = struct.unpack_from ('<LhhhxBhxxH', strbuf, pktHdrOffset + 5)
@@ -543,8 +544,7 @@ class MarvelmindHedge (Thread):
                                     elif pktHdrOffset >= 0:
                                         if self.debug:
                                             print ('\n>> Found USNAV beacon packet header at offset %d' % pktHdrOffset)
-                                    for x in range(0, pktHdrOffset + msgLen + 7):
-                                        self._bufferSerialDeque.popleft()
+                                    del self._serialBuffer[:pktHdrOffset + msgLen + 7]
                             except struct.error:
                                 print ('smth wrong')
                 except OSError:

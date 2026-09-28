@@ -94,7 +94,7 @@ class ArucoDetectorNode(Node):
             self.get_logger().info(f"Calibration files loaded.")
 
         # use H.264 image format, compressed, lighter in bandwidth and faster refresh rate and same quality
-        self.use_h264 = True
+        self.use_h264 = False
         self.get_logger().info(f"Using H.264 video stream: {self.use_h264}")
 
         # Subscribe to video stream

@@ -8,6 +8,7 @@ from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_srvs.srv import SetBool
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -216,8 +217,22 @@ class BoundingBoxSearchNode(Node):
         self.wrench_publisher = self.create_publisher(
             Wrench, "spacecraft_wrench", qos_profile
         )
+        # Runtime on/off switch so a supervisor can hand control to the capture
+        # controller. Disabled means we keep publishing an explicit zero wrench.
+        self.enabled = True
+        self.enable_service = self.create_service(
+            SetBool, "search/enable", self.handle_enable
+        )
         self.create_timer(self.timer_frequency, self.update)
         self.get_logger().info("Bounding-box free-drift search guidance ready")
+
+    def handle_enable(self, request, response):
+        """Enable or disable the search wrench at runtime."""
+        self.enabled = request.data
+        response.success = True
+        response.message = f"search {'enabled' if request.data else 'disabled'}"
+        self.get_logger().info(response.message)
+        return response
 
     def validate_parameters(self) -> None:
         """Reject inconsistent search geometry and firing parameters."""
@@ -288,6 +303,12 @@ class BoundingBoxSearchNode(Node):
 
     def update(self) -> None:
         """Publish the current finite firing or an explicit zero wrench."""
+        # Disabled by the supervisor during the capture phase: yield cmd_vel
+        # authority by commanding no wrench.
+        if not self.enabled:
+            self.wrench_publisher.publish(Wrench())
+            return
+
         now = self.get_clock().now()
         if not self.reference_is_valid(now) or self.initial_burn_start is None:
             self.wrench_publisher.publish(Wrench())
