@@ -26,9 +26,14 @@ class H264VideoProcessor(Node):
 
     def h264_callback(self, msg):
         try:
-            packets = self.decoder.parse(msg.data)
+            # msg.data arrives as array.array('B'); parse() expects bytes.
+            packets = self.decoder.parse(bytes(msg.data))
             for packet in packets:
-                frames = self.decoder.decode(packet)
+                try:
+                    frames = self.decoder.decode(packet)
+                except av.error.InvalidDataError as decode_err:
+                    self.get_logger().warn(f"Invalid data during decode: {decode_err}")
+                    continue
                 for frame in frames:
                     img = frame.to_ndarray(format='bgr24')
                     
@@ -44,8 +49,10 @@ class H264VideoProcessor(Node):
                         rclpy.shutdown()
 
                     self.get_logger().info(f"I am here and the image shape is: {img.shape}") # Debug
-        except av.OSError as e:
+        except av.FFmpegError as e:
             self.get_logger().warn(f"H264 decode error: {e}")
+        except Exception as e:
+            self.get_logger().warn(f"Unexpected error in h264 callback: {e}")
 
 def main(args=None):
     rclpy.init(args=args)

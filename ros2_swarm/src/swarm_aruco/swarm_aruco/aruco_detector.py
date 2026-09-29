@@ -142,8 +142,9 @@ class ArucoDetectorNode(Node):
 
     def h264_image_callback(self, msg: H264Packet):
         try:
-            # Parse the incoming data into packets
-            packets = self.decoder.parse(msg.data)
+            # Parse the incoming data into packets.
+            # msg.data arrives as array.array('B'); parse() expects bytes.
+            packets = self.decoder.parse(bytes(msg.data))
             for packet in packets:
                 try:
                     frames = self.decoder.decode(packet)
@@ -170,8 +171,10 @@ class ArucoDetectorNode(Node):
                     self.get_logger().warn(f"Invalid data during decode: {decode_err}")
                     continue
 
-        except av.AVError as parse_err:
+        except av.FFmpegError as parse_err:
             self.get_logger().warn(f"Error parsing packet: {parse_err}")
+        except Exception as e:
+            self.get_logger().warn(f"Unexpected error in h264 callback: {e}")
 
 
     ########################################################################################
