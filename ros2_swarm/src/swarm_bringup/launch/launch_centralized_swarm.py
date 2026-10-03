@@ -14,6 +14,32 @@ from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 
+# STRICT_CALIBRATION=0 downgrades the aruco intrinsics sanity check from a hard
+# failure to a warning, so the swarm can be brought up on a known-bad
+# calibration while it is being re-shot. Default 1 (reject).
+# Uses the ROBOT_IDX env-var convention rather than a launch argument, because
+# the aruco detector parameters are built as a plain dict (a LaunchConfiguration
+# would arrive as a string, not an int).
+strict_calibration = 0 if os.environ.get("STRICT_CALIBRATION") == "0" else 1
+if strict_calibration == 0:
+    print("WARNING: STRICT_CALIBRATION=0 -- implausible camera intrinsics will "
+          "only warn. Poses may be mis-scaled; do not record runs.")
+
+# CALIBRATE_CAMERA=1 puts the *landmark* detector into chessboard-capture mode
+# (20 photos, one every 6 s) instead of detecting markers.
+#
+# Env-driven rather than an edited-in literal so it cannot be left switched on
+# by accident: an unset shell variable is the safe default. Applied ONLY to
+# landmark_detector -- target_detector shares the same camera and the same
+# output folder, so enabling both makes them overwrite each other's photos.
+#
+# Calibrate ONE robot at a time: the detector nodes are built in a loop over
+# ROBOT_IDX, so this activates for every selected robot simultaneously.
+calibrate_camera = 1 if os.environ.get("CALIBRATE_CAMERA") == "1" else 0
+if calibrate_camera == 1:
+    print("CALIBRATE_CAMERA=1 -- landmark_detector will capture chessboard "
+          "photos instead of detecting markers.")
+
 def load_swarm_config():
 
     # Original configuration (order matters!)
@@ -69,7 +95,6 @@ def load_swarm_config():
 
     if not idx:
         raise ValueError("ROBOT_IDX is set but contains no valid indices.")
-
 
 
     ################################################################################################
@@ -287,7 +312,15 @@ def generate_launch_description():
         ]
     )
 
-    ld.add_action(mm)
+    # Marvelmind is irrelevant to camera calibration, and with no beacon on
+    # /dev/ttyACM0 it retries in a tight loop whose log spam buries the photo
+    # countdown. Skip it while calibrating; restored automatically afterwards
+    # because this keys off the env var, not a commented-out line.
+    if calibrate_camera == 1:
+        print("CALIBRATE_CAMERA=1 -- skipping marvelmind_obs (log spam would "
+              "bury the photo countdown).")
+    else:
+        ld.add_action(mm)
 
     ##############################################################################
     ##############################################################################
@@ -313,7 +346,10 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(hedge)
+        # hedgehog_obs only consumes marvelmind_obs output, which is not
+        # running during calibration. Silent either way; skipped for tidiness.
+        if calibrate_camera != 1:
+            ld.add_action(hedge)
 
     ##############################################################################
     ##############################################################################
@@ -395,7 +431,8 @@ def generate_launch_description():
                     "aruco_type": "DICT_6X6_250",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
-                    "calibrate_camera": 0,
+                    "calibrate_camera": calibrate_camera,
+                    "strict_calibration": strict_calibration,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
@@ -454,8 +491,13 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_100",
                     "aruco_size": 3.556,
+                    # Deliberately NOT wired to CALIBRATE_CAMERA: this node
+                    # shares the camera and the photo output folder with
+                    # landmark_detector, and two capturers overwrite each
+                    # other's photos.
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
+                    "strict_calibration": strict_calibration,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]

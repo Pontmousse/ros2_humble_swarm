@@ -66,9 +66,23 @@ class ArucoDetectorNode(Node):
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
 
 
-        # For timer 
+        # For timer
         self.declare_parameter("timer_frequency", 0.01)
         self.timer_frequency = self.get_parameter("timer_frequency").value
+
+        # Detection-rate throttle. ArUco pose estimation (solvePnP) is the single
+        # biggest CPU consumer on the Pi (~116% in profiling), running once per
+        # incoming camera frame. Cap it to detect_max_hz: frames arriving faster
+        # than this are dropped BEFORE cv_bridge conversion + detection, so we
+        # skip the whole decode-image->gray->solvePnP cost on skipped frames.
+        # <= 0 disables the throttle (process every frame).
+        self.declare_parameter("detect_max_hz", 5.0)
+        detect_max_hz = float(self.get_parameter("detect_max_hz").value)
+        self.detect_min_interval = (1.0 / detect_max_hz) if detect_max_hz > 0.0 else 0.0
+        self.last_detect_time = 0.0
+        self.get_logger().info(
+            f"Detection throttle: detect_max_hz={detect_max_hz} "
+            f"(min interval {self.detect_min_interval*1000:.0f} ms)")
 
         self.aruco = ArucoMarker(sn = self.serial_number,
                                  aruco_type = self.aruco_type,
@@ -77,6 +91,7 @@ class ArucoDetectorNode(Node):
 
         # For the calibration process
         self.declare_parameter("calibrate_camera", 0)
+        self.declare_parameter("strict_calibration", 1)
         self.last_photo_time = time.time()
         self.countdown_logged = set()
         self.image_interval = 6  # seconds
@@ -88,10 +103,23 @@ class ArucoDetectorNode(Node):
         self.num_images = 20
         self.image_count = 0     
         if self.calibrate:
+            # camera_calibration() globs '*.jpg', so photos left over from a
+            # previous session would be silently mixed into the new solve --
+            # which is how a fresh calibration can inherit the exact bias it
+            # was meant to remove. Clear them first.
+            self._clear_old_photos()
             self.get_logger().warn(f"Calibration started. Be ready to place (9x6) chessboard for taking photos.")
-        else: 
-            self.aruco.load_calibration()
-            self.get_logger().info(f"Calibration files loaded.")
+        else:
+            # Reject implausible intrinsics at startup rather than silently
+            # producing mis-scaled poses. Set strict_calibration:=0 to run with
+            # a known-bad calibration (it only warns), e.g. while working
+            # through re-calibrating the fleet.
+            K, _ = self.aruco.load_calibration(
+                strict=bool(self.get_parameter("strict_calibration").value))
+            self.get_logger().info(
+                f"Calibration loaded for {self.serial_number}: "
+                f"fx={K[0][0]:.1f} fy={K[1][1]:.1f} "
+                f"cx={K[0][2]:.1f} cy={K[1][2]:.1f}")
 
         # use H.264 image format, compressed, lighter in bandwidth and faster refresh rate and same quality
         self.use_h264 = False
@@ -141,6 +169,14 @@ class ArucoDetectorNode(Node):
     ##############################################
 
     def h264_image_callback(self, msg: H264Packet):
+        # Throttle detection (same as color path). Note: H.264 must still be
+        # parsed/decoded to advance the stream; we only gate the per-frame
+        # ArUco detection work via detect_arucos below.
+        now = time.time()
+        throttle_detect = not (self.detect_min_interval > 0.0 and
+                               (now - self.last_detect_time) < self.detect_min_interval)
+        if throttle_detect:
+            self.last_detect_time = now
         try:
             # Parse the incoming data into packets.
             # msg.data arrives as array.array('B'); parse() expects bytes.
@@ -155,12 +191,23 @@ class ArucoDetectorNode(Node):
                         # Calibration and ArUco detection logic
                         if self.calibrate:
                             self.take_photo(img, self.use_h264)
-                            if self.image_count == self.num_images:
-                                self.aruco.camera_calibration()
-                                self.aruco.load_calibration()
-                                self.get_logger().info("Calibration complete. Files loaded.")
+                            # See color_image_callback for why this is `>=`
+                            # and why self.calibrate is cleared up front.
+                            if self.image_count >= self.num_images:
                                 self.calibrate = False
-                        else:
+                                try:
+                                    self.aruco.camera_calibration()
+                                    self.aruco.load_calibration(
+                                        strict=bool(self.get_parameter(
+                                            "strict_calibration").value))
+                                    self.get_logger().info("Calibration complete. Files loaded.")
+                                except Exception as cal_err:
+                                    self.get_logger().error(
+                                        f"CALIBRATION FAILED: {cal_err}")
+                                    self.get_logger().error(
+                                        "Photo capture stopped. Fix the issue "
+                                        "and relaunch with CALIBRATE_CAMERA=1.")
+                        elif throttle_detect:
                             self.detect_arucos(img)
                         #######################################
 
@@ -180,18 +227,43 @@ class ArucoDetectorNode(Node):
     ########################################################################################
 
     def color_image_callback(self, msg: Image):
+        # Throttle detection: drop frames arriving faster than detect_max_hz
+        # BEFORE any conversion/detection work. publish_markers keeps republishing
+        # the last stored markers on its own timer, so downstream rate is unaffected.
+        now = time.time()
+        if self.detect_min_interval > 0.0 and (now - self.last_detect_time) < self.detect_min_interval:
+            return
+        self.last_detect_time = now
         try:
-            # Convert ROS Image to OpenCV format
-            img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+            # Convert ROS Image to OpenCV format. The decoder now publishes
+            # mono8 (single-channel gray); ArUco detection runs on gray anyway,
+            # so we take it directly and skip a redundant BGR<->gray round-trip.
+            img = self.bridge.imgmsg_to_cv2(msg, desired_encoding='mono8')
 
             #######################################
             if self.calibrate:
                 self.take_photo(img, self.use_h264)
-                if self.image_count == self.num_images:
-                    self.aruco.camera_calibration()
-                    self.aruco.load_calibration()
-                    self.get_logger().info(f"Calibration complete. Files loaded.")
+                # `>=` not `==`: if the calibration attempt below fails, the
+                # count keeps rising and an equality test can never fire again,
+                # leaving the node snapping photos forever.
+                if self.image_count >= self.num_images:
+                    # Stop capturing BEFORE attempting the calibration, so a
+                    # rejected calibration ends the session instead of looping.
                     self.calibrate = False
+                    try:
+                        self.aruco.camera_calibration()
+                        self.aruco.load_calibration(
+                            strict=bool(self.get_parameter(
+                                "strict_calibration").value))
+                        self.get_logger().info("Calibration complete. Files loaded.")
+                    except Exception as cal_err:
+                        # Must be reported here: the outer handler would label
+                        # this "Failed to convert image", which it is not.
+                        self.get_logger().error(
+                            f"CALIBRATION FAILED: {cal_err}")
+                        self.get_logger().error(
+                            "Photo capture stopped. Fix the issue and relaunch "
+                            "with CALIBRATE_CAMERA=1 to retry.")
             else:
                 self.detect_arucos(img)
             #######################################
@@ -200,6 +272,44 @@ class ArucoDetectorNode(Node):
             self.get_logger().warn(f"Failed to convert image: {e}")
 
     ########################################################################################
+
+    def _clear_old_photos(self):
+        '''
+        Move any existing calibration photos into a timestamped subfolder.
+
+        camera_calibration() does glob('<sn>/*.jpg'), which is NOT recursive,
+        so archiving into a subdirectory removes them from the solve while
+        keeping them on disk -- deliberately not deleting, since some of these
+        are symlinks into the git-tracked src/ tree.
+        '''
+        folder = os.path.join(
+            get_package_share_directory('swarm_bringup'),
+            'calibration',
+            self.serial_number
+        )
+        if not os.path.isdir(folder):
+            self.get_logger().error(
+                f"Calibration folder does not exist: {folder}. "
+                f"cv2.imwrite will fail SILENTLY -- create it before continuing.")
+            return
+
+        stale = [f for f in os.listdir(folder) if f.endswith('.jpg')]
+        if not stale:
+            return
+
+        archive = os.path.join(folder, f"archive_{int(time.time())}")
+        os.makedirs(archive, exist_ok=True)
+        for f in stale:
+            try:
+                os.rename(os.path.join(folder, f), os.path.join(archive, f))
+            except OSError as err:
+                self.get_logger().warn(f"Could not archive {f}: {err}")
+
+        self.get_logger().warn(
+            f"Archived {len(stale)} pre-existing photo(s) into "
+            f"{os.path.basename(archive)}/ so they do not contaminate this "
+            f"calibration.")
+
 
     def take_photo(self, img, use_h264):
         current_time = time.time()
@@ -233,8 +343,7 @@ class ArucoDetectorNode(Node):
     ########################################################################################
 
     def detect_arucos(self, img):
-        frame = self.aruco.pose_estimation(img)
-        cv2.imwrite("aruco_corner_frame.jpg", frame)
+        self.aruco.pose_estimation(img)
 
         tvecs = self.aruco.tvecs
         rvecs = self.aruco.rvecs

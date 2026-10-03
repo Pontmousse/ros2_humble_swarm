@@ -14,6 +14,25 @@ class ArucoMarker():
     pose_estimate - given frames of image, find the relative position of aruco markers
     '''
 
+    # Minimum number of photos with a successfully detected chessboard before
+    # cv2.calibrateCamera is allowed to produce a calibration we keep.
+    MIN_CALIBRATION_VIEWS = 8
+
+    # Reference intrinsics the RoboMaster driver itself publishes on
+    # camera/camera_info at 640x360 (robomaster_ros/config/
+    # rm_camera_calibration_360.yaml). Same lens on every robot, so a
+    # self-calibration that disagrees wildly is wrong, not "unit variation".
+    REFERENCE_FX_AT_640 = 317.03
+
+    # Accepted band around the reference, as a fraction. 0.25 lets genuine
+    # unit-to-unit differences and focus spread through while catching the
+    # ~0.5x failures.
+    FX_TOLERANCE = 0.25
+
+    # How far the principal point may sit from the image centre, as a fraction
+    # of image width/height.
+    PRINCIPAL_POINT_TOLERANCE = 0.15
+
     def __init__(self, sn, aruco_type="DICT_5X5_100", aruco_marker_side_length = 2.5, scale = (1.5, 0.80)):
         '''
             2.5 cm - > DICT_5X5_100  - >  scale = (1.5, 0.80)
@@ -59,7 +78,15 @@ class ArucoMarker():
 
         self.CameraMatrix = []
         self.DistortionMatrix = []
-        
+
+        # Build the ArUco detector once and reuse it. pose_estimation() used to
+        # rebuild the dictionary, the DetectorParameters and the ArucoDetector
+        # object on every single frame (per detector node) -- pure per-frame
+        # overhead. The dictionary is fixed for the node's lifetime.
+        self._detector = cv2.aruco.ArucoDetector(
+            cv2.aruco.getPredefinedDictionary(self.ARUCO_DICT[self.aruco_type]),
+            cv2.aruco.DetectorParameters())
+
 
 
     def generate_markers(self, num = 10):
@@ -132,7 +159,14 @@ class ArucoMarker():
 
                 objpoints.append(objp)
                 corners2 = cv2.cornerSubPix(gray, corners, (11,11), (-1,-1), criteria)
-                imgpoints.append(corners)
+                # BUGFIX: this used to append `corners` (the raw integer-ish
+                # detections) while discarding the sub-pixel refined `corners2`
+                # computed on the line above. cornerSubPix was pure wasted work
+                # and the solver was fed ~0.5 px-noisy observations, which
+                # biases the focal length far more than the principal point --
+                # exactly the fx-too-small / cx-plausible signature seen on
+                # several robots.
+                imgpoints.append(corners2)
 
                 # Draw and display the corners
                 cv2.drawChessboardCorners(img, chessboardSize, corners2, ret)
@@ -141,8 +175,38 @@ class ArucoMarker():
 
         cv2.destroyAllWindows()
 
+        # calibrateCamera happily returns a garbage focal length from a handful
+        # of near-identical views instead of failing, so refuse to write a
+        # calibration that cannot possibly be well conditioned.
+        if len(images) == 0:
+            raise RuntimeError(
+                f"No .jpg photos found under calibration/{self.sn}. The "
+                f"take_photo step writes to the *install* share directory and "
+                f"cv2.imwrite fails silently if it does not exist.")
+        if len(objpoints) < self.MIN_CALIBRATION_VIEWS:
+            raise RuntimeError(
+                f"Only {len(objpoints)} of {len(images)} photos had a "
+                f"detectable {chessboardSize[0]}x{chessboardSize[1]} chessboard "
+                f"(need >= {self.MIN_CALIBRATION_VIEWS}). Refusing to write a "
+                f"calibration -- too few views makes focal length and distance "
+                f"degenerate. Re-shoot with the board filling more of the frame.")
+
+        print(f"Using {len(objpoints)}/{len(images)} photos with a detected board.")
+
     ############## CALIBRATION #######################################################
         ret, cameraMatrix, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, frameSize, None, None)
+
+        print(f"Reprojection error (cv2.calibrateCamera ret): {ret:.4f} px")
+
+        # Validate BEFORE writing, so a bad run cannot overwrite a good stored
+        # calibration. The yaml on disk is left untouched if this raises.
+        try:
+            self._sanity_check_intrinsics(
+                cameraMatrix, frameSize, context="freshly computed")
+        except RuntimeError as err:
+            raise RuntimeError(
+                f"{err}\n\nThe existing calibration file was NOT overwritten. "
+                f"Re-shoot the photos with more varied board poses.") from err
 
         filename = self.sn+'/'+self.sn + "_cam_cal.yaml"
         path = os.path.join(
@@ -174,6 +238,14 @@ class ArucoMarker():
         else:
             img = None
 
+        # The undistortion preview below is diagnostic only -- the calibration
+        # has already been written. Previously `img = None` fell straight into
+        # img.shape and raised AttributeError, discarding a perfectly good
+        # calibration run at the very last step.
+        if img is None:
+            print("Skipping undistortion preview: no readable .jpg available.")
+            return
+
         # Extract new Camera matrix
         h,  w = img.shape[:2]
         newCameraMatrix, roi = cv2.getOptimalNewCameraMatrix(cameraMatrix, dist, (w,h), 1, (w,h))
@@ -196,20 +268,110 @@ class ArucoMarker():
         # cv2.imshow("undistored mapping picture", dst)
 
         # Reprojection Error
-        mean_error = 0
+        #
+        # BUGFIX: this used to divide the L2 norm by len(imgpoints2) (= N, the
+        # number of corners per view). cv2.norm(..., NORM_L2) already returns
+        # sqrt(sum of squared errors) over all N points, so RMS requires
+        # dividing by sqrt(N), not N. The old figure was understated by a
+        # factor of sqrt(54) ~= 7.35 -- which is why the cheat sheet's
+        # "under 1.0 is good" rule was in practice accepting anything under
+        # ~7 px RMS, and why every stored calibration looked acceptable while
+        # producing visibly wrong focal lengths.
+        total_sq_error = 0.0
+        total_points = 0
 
         for i in range(len(objpoints)):
             imgpoints2, _ = cv2.projectPoints(objpoints[i], rvecs[i], tvecs[i], cameraMatrix, dist)
-            error = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)/len(imgpoints2)
-            mean_error += error
+            norm = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)
+            total_sq_error += norm * norm
+            total_points += len(imgpoints2)
 
-        print( "Calibration Complete!\ntotal error: {}".format(mean_error/len(objpoints)) )
+        rms_error = np.sqrt(total_sq_error / total_points)
+
+        print("Calibration Complete!")
+        print(f"RMS reprojection error: {rms_error:.4f} px "
+              f"(cv2.calibrateCamera reported {ret:.4f})")
+        if rms_error > 1.0:
+            print(f"WARNING: {rms_error:.2f} px is high -- a good calibration is "
+                  f"under ~1.0 px. The intrinsics passed the plausibility check "
+                  f"but are probably still imprecise. Consider re-shooting with "
+                  f"the board closer, flatter and more varied in angle.")
 
     
 
-    def load_calibration(self):
+    def _sanity_check_intrinsics(self, K, frameSize, context="loaded"):
+        '''
+        Raise if a camera matrix is physically implausible for this hardware.
+
+        A bad calibration does not announce itself: pose_estimation() will keep
+        returning tvecs, just scaled wrong, and the error grows with distance.
+        Catching it here turns a silent multi-hour debugging session into one
+        loud message at startup.
+
+        K          = 3x3 camera matrix
+        frameSize  = (width, height) the calibration applies to
+        context    = wording for the error message
+        '''
+        if K is None:
+            raise RuntimeError(
+                f"[{self.sn}] camera matrix is None ({context}). The yaml is "
+                f"missing its 'K' node, or the file could not be parsed.")
+
+        K = np.asarray(K, dtype=float)
+        if K.shape != (3, 3):
+            raise RuntimeError(
+                f"[{self.sn}] camera matrix has shape {K.shape}, expected (3, 3).")
+
+        width, height = frameSize
+        fx, fy = K[0][0], K[1][1]
+        cx, cy = K[0][2], K[1][2]
+
+        problems = []
+
+        # fx and fy scale linearly with image width, so normalise before
+        # comparing against the 640-px reference.
+        expected_fx = self.REFERENCE_FX_AT_640 * (width / 640.0)
+        lo = expected_fx * (1.0 - self.FX_TOLERANCE)
+        hi = expected_fx * (1.0 + self.FX_TOLERANCE)
+        if not (lo <= fx <= hi):
+            problems.append(
+                f"fx={fx:.1f} is outside [{lo:.1f}, {hi:.1f}] "
+                f"(driver reports ~{expected_fx:.1f} at {width}x{height}). "
+                f"Distance estimates will be off by ~{expected_fx / fx:.2f}x.")
+
+        # Square pixels: fx and fy must agree closely on this sensor.
+        if fx > 0 and abs(fx - fy) / fx > 0.10:
+            problems.append(
+                f"fx={fx:.1f} and fy={fy:.1f} differ by "
+                f"{100 * abs(fx - fy) / fx:.0f}% (expected <10%).")
+
+        # Principal point belongs near the image centre.
+        if abs(cx - width / 2.0) > self.PRINCIPAL_POINT_TOLERANCE * width:
+            problems.append(
+                f"cx={cx:.1f} is far from the image centre {width / 2.0:.1f}.")
+        if abs(cy - height / 2.0) > self.PRINCIPAL_POINT_TOLERANCE * height:
+            problems.append(
+                f"cy={cy:.1f} is far from the image centre {height / 2.0:.1f}.")
+
+        if problems:
+            raise RuntimeError(
+                f"[{self.sn}] implausible {context} intrinsics:\n  - "
+                + "\n  - ".join(problems)
+                + f"\nRe-run calibration (see scripts/camera-calibration-cheatsheet.md) "
+                  f"or inspect with scripts/check_intrinsics.py.")
+
+        return True
+
+
+    def load_calibration(self, frameSize=(640, 360), strict=True):
         '''
         initialize the detection of aruco markers: load the calibration parameters
+
+        frameSize = (width, height) of the stream these intrinsics will be used
+                    on, used to sanity-check the values.
+        strict    = raise on implausible intrinsics. Set False to downgrade to
+                    a printed warning (e.g. while deliberately testing a known
+                    bad calibration).
         '''
         filename = self.sn + '/' + self.sn + "_cam_cal.yaml"
         filepath = os.path.join(
@@ -217,10 +379,36 @@ class ArucoMarker():
             'calibration',
             filename
         )
-        cv_file = cv2.FileStorage(filepath, cv2.FILE_STORAGE_READ) 
-        self.CameraMatrix = cv_file.getNode('K').mat() # cameraMatrix
-        self.DistortionMatrix = cv_file.getNode('D').mat() # DistorsionMatrix
-        cv_file.release()
+
+        # Fail loudly and early. Previously a missing file sailed through: the
+        # FileStorage read returned an empty node, .mat() returned None, and the
+        # first frame blew up deep inside estimatePoseSingleMarkers where the
+        # detector node's broad `except` swallowed it into a single warn line.
+        if not os.path.isfile(filepath):
+            raise FileNotFoundError(
+                f"[{self.sn}] no calibration file at {filepath}. Check the "
+                f"serial_number parameter matches a folder under "
+                f"swarm_bringup/calibration, and that swarm_bringup has been "
+                f"rebuilt (this reads the install share directory, not src/).")
+
+        cv_file = cv2.FileStorage(filepath, cv2.FILE_STORAGE_READ)
+        try:
+            self.CameraMatrix = cv_file.getNode('K').mat() # cameraMatrix
+            self.DistortionMatrix = cv_file.getNode('D').mat() # DistorsionMatrix
+        finally:
+            cv_file.release()
+
+        if self.DistortionMatrix is None:
+            raise RuntimeError(
+                f"[{self.sn}] calibration file {filepath} has no 'D' node.")
+
+        try:
+            self._sanity_check_intrinsics(self.CameraMatrix, frameSize)
+        except RuntimeError:
+            if strict:
+                raise
+            print(f"WARNING: [{self.sn}] intrinsics failed the sanity check and "
+                  f"are being used anyway (strict=False).")
 
         return self.CameraMatrix, self.DistortionMatrix
 
@@ -232,13 +420,15 @@ class ArucoMarker():
         frame = a frame of the video taken in numpy array format
         '''
         tvec = []
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        aruco_dict = cv2.aruco.getPredefinedDictionary(self.ARUCO_DICT[self.aruco_type])
-        parameters = cv2.aruco.DetectorParameters()
 
-        detector = cv2.aruco.ArucoDetector(aruco_dict, parameters)
-        corners, ids, _ = detector.detectMarkers(gray)
+        # Accept either a single-channel gray frame (the hardware decoder now
+        # publishes mono8) or a legacy 3-channel BGR frame. Only convert when
+        # we are actually handed colour -- the detector needs gray regardless.
+        if frame.ndim == 2:
+            gray = frame
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = self._detector.detectMarkers(gray)
 
         if len(corners) > 0:
 
@@ -248,18 +438,17 @@ class ArucoMarker():
 
             for i in range(0, len(ids)):
 
-                rvec, tvec, markerPoints = estimatePoseSingleMarkers(corners[i], 
+                rvec, tvec, markerPoints = estimatePoseSingleMarkers(corners[i],
                         self.aruco_marker_side_length, self.CameraMatrix, self.DistortionMatrix)
 
-                cv2.aruco.drawDetectedMarkers(frame, corners)
-
+                # NOTE: drawDetectedMarkers()/drawFrameAxes() removed -- they
+                # annotated `frame` for a debug display that is never shown
+                # (the detector node discards the returned frame), so they were
+                # pure per-marker CPU waste and also require a 3-channel image
+                # (incompatible with the new mono8 input).
                 rvec = np.array(rvec, dtype=np.float32)
                 tvec = np.array(tvec, dtype=np.float32)
-                cv2.drawFrameAxes(frame, self.CameraMatrix, self.DistortionMatrix, rvec, tvec, 3)
 
-                
-                
-                
                 self.tvecs[i,0] = tvec[0][2] * self.scalex
                 self.tvecs[i,1] = -1 * tvec[0][0] * self.scaley # Room configuration for y-axis
 
