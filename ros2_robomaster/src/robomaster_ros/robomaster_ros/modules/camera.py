@@ -467,16 +467,14 @@ class Camera(robomaster.media.LiveView, Module):  # type: ignore
             parser = H264Parser()
         while self._video_streaming:
             # blocking
+            # Process ONE chunk per iteration. The previous implementation
+            # drained and concatenated the whole queue into a single blob;
+            # once slightly behind, that produced a ~32-packet blob whose
+            # software decode took ~2s, which backed the queue up further -
+            # a runaway loop that pinned delivery at ~0.5 fps. Decoding one
+            # chunk at a time keeps decode ~12ms and the loop at ~30 fps
+            # (the H264 decoder buffers partial NALs internally).
             data = self._video_stream_conn._sock_queue.get()
-            while True:
-                # empty the queue
-                try:
-                    additional_data = self._video_stream_conn._sock_queue.get(
-                        False)
-                    if additional_data:
-                        data += additional_data
-                except queue.Empty:
-                    break
             if not data:
                 continue
             capture_time = self.clock.now()
@@ -512,7 +510,7 @@ class Camera(robomaster.media.LiveView, Module):  # type: ignore
                 if self.min_video_period:
                     if capture_time < self.next_capture_time:
                         continue
-                for frame in frames[-1:]:
+                for frame in frames:
                     # self.logger.info(f"SHAPE {frame.shape}")
                     i_msg = self.bridge.cv2_to_imgmsg(frame, encoding="bgr8")
                     # + rclpy.duration.Duration(nanoseconds=3e8)
