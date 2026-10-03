@@ -19,6 +19,33 @@ def _split_env(name, cast=str):
         raise RuntimeError(f"Missing required environment variable: {name}")
     return [cast(x.strip()) for x in val.split(",") if x.strip()]
 
+def _detect_marvelmind_port(fallback):
+    """Return the /dev/ttyACM* whose USB manufacturer is Marvelmind.
+
+    RNDIS adds a DJI CDC-ACM device that can steal /dev/ttyACM0, shifting the
+    Marvelmind modem to ttyACM1 on some boots. A fixed port number then silently
+    opens the DJI serial device. We walk up the /sys device tree from each ACM
+    node (the 'manufacturer' attribute lives on the USB device, a few parents
+    above the tty) and match 'marvelmind' case-insensitively. /dev/serial/by-id
+    is absent in this privileged container, so /sys is the only identity source.
+    Falls back to the given port (MARVELMIND_PORT / ttyACM1) if nothing matches.
+    """
+    import glob
+    for dev in sorted(glob.glob("/dev/ttyACM*")):
+        name = os.path.basename(dev)
+        up = os.path.realpath(f"/sys/class/tty/{name}/device")
+        for _ in range(6):
+            up = os.path.dirname(up)
+            man_path = os.path.join(up, "manufacturer")
+            if os.path.isfile(man_path):
+                try:
+                    if "marvelmind" in open(man_path).read().strip().lower():
+                        return dev
+                except OSError:
+                    pass
+                break
+    return fallback
+
 def load_swarm_config():
     """
     Load swarm configuration from resolved environment variables.
@@ -40,7 +67,18 @@ def load_swarm_config():
     robot_ips = [x.strip() for x in os.getenv("ROBOT_IP", "").split(",")]
     robot_ips = (robot_ips + [""] * n)[:n]
 
-    marvelmind_port = os.environ.get("MARVELMIND_PORT", "/dev/ttyACM0")
+    # Resolve the Marvelmind modem's serial port by USB identity, not by a fixed
+    # /dev/ttyACMn number. RNDIS matters here: when the RoboMaster is on USB
+    # (RNDIS) instead of WiFi it enumerates a DJI CDC-ACM device that can grab
+    # /dev/ttyACM0 and push the Marvelmind modem to ttyACM1 (or vice versa on a
+    # different boot). A fixed number then silently opens the DJI port, no
+    # Marvelmind fixes arrive, and virtual_spacecraft reports "No fresh
+    # localization odometry". Scan the ACM ports and pick the one whose USB
+    # manufacturer is Marvelmind; fall back to MARVELMIND_PORT / ttyACM1 only if
+    # detection fails. (/dev/serial/by-id is not present inside this privileged
+    # container, so we read the USB descriptor from /sys instead.)
+    marvelmind_port = _detect_marvelmind_port(
+        os.environ.get("MARVELMIND_PORT", "/dev/ttyACM1"))
 
     if not (
         len(beacon_addresses) ==
@@ -105,7 +143,7 @@ def generate_launch_description():
     alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
-    timer_frequency = 0.01 # in seconds
+    timer_frequency = 0.2 # 5 Hz (was 10 Hz) - robot can't react faster; drives cp_controller + hedgehog_obs
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
@@ -141,9 +179,14 @@ def generate_launch_description():
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
+        conn_type = os.getenv("CONN_TYPE", "rndis")
+        # rndis reaches the robot over USB at a fixed 192.168.42.2; a pinned WiFi
+        # robot_ip would override that and break the USB link, so drop it.
+        robot_ip = "" if conn_type == "rndis" else robot_ips[i]
+
         name_arg = DeclareLaunchArgument(f'name_{i}', default_value=robot_name)
         serial_arg = DeclareLaunchArgument(f'serial_number_{i}', default_value=serial_number)
-        robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ips[i])
+        robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ip)
         enable_led_arg = DeclareLaunchArgument(f'enable_led_{i}', default_value='true')
         enable_speaker_arg = DeclareLaunchArgument(f'enable_speaker_{i}', default_value='true')
         enable_chassis_arg = DeclareLaunchArgument(f'enable_chassis_{i}', default_value='true')
@@ -160,12 +203,40 @@ def generate_launch_description():
             launch_arguments={
                 'name': LaunchConfiguration(f'name_{i}'),
                 'serial_number': LaunchConfiguration(f'serial_number_{i}'),
+                'conn_type': conn_type,
                 'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
                 'diagnostics': diagnostics,
                 'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
                 'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
                 'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
-                'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}')
+                'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}'),
+                # SOFTWARE DECODE: driver decodes H.264 internally and publishes
+                # raw camera/image_color. video_raw ON (1), video_h264 OFF (-1).
+                # The SDK software decoder is the only path that yields a usable
+                # image_color for this robot (the Pi hardware VPU cannot decode
+                # the RoboMaster multi-slice bitstream; see project memory).
+                'video_raw': '1',
+                'video_h264': '-1',
+                # Cap the driver's image_color publish rate. The decoder still
+                # software-decodes every H.264 chunk (that cost is upstream of
+                # this gate and unavoidable), but frames arriving faster than
+                # this skip cv2_to_imgmsg + the ~690KB DDS publish. The real win
+                # is downstream: the aruco detector then receives only ~6 fps,
+                # so its per-frame Image deserialization (the 77%-CPU floor the
+                # consumer-side detect_max_hz throttle could NOT remove) drops.
+                # 6.0 sits just above the detector's 5 Hz so the two throttles
+                # don't beat against each other and starve detection to 4 fps.
+                'video_rate': '6.0',
+                # CHASSIS_LEAD (2): gimbal yaw follows the chassis heading so the
+                # camera always points out the front of the robot. This is the
+                # desired behaviour. The ~58 deg pitch bob seen earlier was a
+                # symptom of the latched-CAPTURE runaway (the robot circling
+                # violently drove the gimbal pitch stabilizer to the floor), not
+                # inherent to CHASSIS_LEAD; that runaway is fixed upstream by
+                # capture_supervisor.stop_chassis() zeroing cmd_vel around the
+                # velocity_smoother PAUSE. FREE (0) was tried but world-fixes the
+                # yaw, so the camera stops facing forward -> rejected.
+                'gimbal_mode': '2'
             }.items()
         )
 
@@ -186,8 +257,6 @@ def generate_launch_description():
                 OnProcessExit(target_action=preflight_action, on_exit=[s1])))
         else:
             ld.add_action(s1)
-
-        ##############################################################################
 
         topic = '/'+robot_name+'/leds/color'
         led = ExecuteProcess(
@@ -348,19 +417,20 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
                 {
-                    "timer_frequency": timer_frequency,
+                    "timer_frequency": 0.05,
                     "serial_number": serial_number,
                     "aruco_type": "DICT_6X6_250",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
+                    "detect_max_hz": 5.0,  # see target_detector note
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
         )
 
-        ld.add_action(landmarks)
-    
+        # ld.add_action(landmarks)  # DISABLED: testing search->chase via target_detector (targets topic)
+
     ##############################################################################
     ##############################################################################
     for i in range(N):
@@ -383,7 +453,7 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(aruco_landmark_filter)
+        # ld.add_action(aruco_landmark_filter)  # DISABLED: testing search->chase via target path
 
 
 
@@ -405,18 +475,23 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
                 {
-                    "timer_frequency": timer_frequency,
+                    "timer_frequency": 0.05,
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_100",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
+                    # Cap ArUco detection at 5 Hz. solvePnP-per-frame was the #1
+                    # CPU consumer (~116%) on the Pi; dropping frames before
+                    # conversion/detection frees ~a core. publish_markers keeps
+                    # republishing the last markers, so downstream rate is kept.
+                    "detect_max_hz": 5.0,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
         )
 
-        ld.add_action(targets)
+        ld.add_action(targets)  # ENABLED: feeds `targets` so capture_supervisor can switch SEARCH<->CHASE
 
     ##############################################################################
     ##############################################################################
@@ -547,9 +622,17 @@ def generate_launch_description():
             parameters=[
                 {
                     # Consecutive detected frames before switching to capture.
-                    "detect_frames": 5,
+                    "detect_frames": 3,
                     # Seconds the target may be lost before resuming search.
-                    "lost_timeout": 2.0,
+                    # Raised 2.0->4.0 to ride through brief detection dropouts
+                    # (low-fps flicker) and stop the CAPTURE<->SEARCH oscillation.
+                    "lost_timeout": 4.0,
+                    # Empty frames tolerated before the ENTRY streak resets, so a
+                    # steadily-held marker that flickers still reaches CAPTURE.
+                    "miss_tolerance": 3,
+                    # Once stable detection latches us into CAPTURE, stay there:
+                    # do NOT auto-fall back to SEARCH on target loss.
+                    "latch_capture": True,
                     # Match the BEST_EFFORT publisher on the targets topic.
                     "qos_reliability": "BEST_EFFORT",
                 }
