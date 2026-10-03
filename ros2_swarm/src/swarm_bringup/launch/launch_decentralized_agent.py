@@ -143,7 +143,7 @@ def generate_launch_description():
     alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
-    timer_frequency = 0.2 # 5 Hz (was 10 Hz) - robot can't react faster; drives cp_controller + hedgehog_obs
+    timer_frequency = 0.05 # 20 Hz - drives cp_controller + hedgehog_obs
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
