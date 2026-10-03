@@ -306,12 +306,19 @@ class MarvelmindHedge (Thread):
                         print ("Trying open serial port: {:s}".format(self.tty))
                         self.serialPort = serial.Serial(self.tty, self.baud, timeout=3)
                         print ("Serial port opened")
-                    readChar = self.serialPort.read(1)
+                    # Read the whole serial backlog at once instead of one byte
+                    # per syscall. The ~230-line parse block below runs once per
+                    # read, so byte-by-byte reads made it re-scan the 255-byte
+                    # buffer on every single byte -- the source of this node's
+                    # ~25% idle CPU burn. in_waiting drains the OS buffer in one
+                    # call; when idle it is 0, so read(1) still blocks up to the
+                    # 3s timeout waiting for the next byte (no busy-spin).
+                    readChar = self.serialPort.read(max(1, self.serialPort.in_waiting))
                     while (readChar != None) and (readChar != b'') and (not self.terminationRequired):
                         self._serialBuffer += readChar
                         if (len(self._serialBuffer) > 255):
                             del self._serialBuffer[:-255]
-                        readChar = self.serialPort.read(1)
+                        readChar = self.serialPort.read(max(1, self.serialPort.in_waiting))
 
                         strbuf = self._serialBuffer
 

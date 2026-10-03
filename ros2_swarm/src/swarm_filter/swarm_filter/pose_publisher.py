@@ -274,9 +274,18 @@ def make_localization_odometry(
     message.pose.covariance[28] = UNOBSERVED_VARIANCE
     message.pose.covariance[35] = source_odometry.pose.covariance[35]
 
-    message.twist = deepcopy(source_odometry.twist)
+    # Preserve the source twist without deep-copying the whole message tree
+    # (a 36-element covariance copy ran up to ~300x/s at 100Hz across the
+    # localization + comparison publishers). message.twist is already a fresh
+    # TwistWithCovariance from Odometry(); copy only what we keep and overwrite
+    # the three fields we control.
+    source_twist = source_odometry.twist
+    message.twist.covariance = source_twist.covariance
     message.twist.twist.linear.x = body_vx
     message.twist.twist.linear.y = body_vy
+    message.twist.twist.linear.z = source_twist.twist.linear.z
+    message.twist.twist.angular.x = source_twist.twist.angular.x
+    message.twist.twist.angular.y = source_twist.twist.angular.y
     message.twist.twist.angular.z = yaw_rate
 
     return message

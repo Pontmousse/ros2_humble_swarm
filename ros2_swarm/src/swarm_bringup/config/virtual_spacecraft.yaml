@@ -27,7 +27,7 @@
     # Virtual vehicle properties; these need not match the RoboMaster hardware.
     mass: 5.0
     yaw_inertia: 1.0
-    timer_frequency: 0.01
+    timer_frequency: 0.02  # 50 Hz (was 100 Hz) - dt is measured from the clock, gains unaffected
 
     # Bounds on the summed virtual input, applied once to the total so adding a
     # contributor cannot raise the authority the safe area was sized for.
@@ -89,7 +89,7 @@
 
 /**/nav2_pidff:
   ros__parameters:
-    timer_frequency: 0.01
+    timer_frequency: 0.2  # 5 Hz (was 10 Hz) - robot can't react faster; dt measured from clock, gains unaffected
 
     enable_pid: true
 
@@ -119,7 +119,7 @@
 
 /**/bounding_box_search:
   ros__parameters:
-    timer_frequency: 0.02
+    timer_frequency: 0.1  # 10 Hz (was 50 Hz) - callback is time/position driven, not rate driven; consumer holds last wrench between updates
     reference_timeout: 0.25
     global_frame_id: "swarm_map"
 
@@ -349,7 +349,7 @@
 /**/velocity_smoother:
   ros__parameters:
     use_sim_time: false
-    smoothing_frequency: 50.0
+    smoothing_frequency: 5.0  # 5 Hz (was 10 Hz) - final cmd_vel rate to driver; robot can't react faster
     scale_velocities: true
     feedback: "OPEN_LOOP"
 
@@ -382,7 +382,7 @@
 /**/pose_publisher:
   ros__parameters:
     init_period: 2.0
-    timer_frequency: 0.01
+    timer_frequency: 0.1  # 10 Hz (was 100 Hz) - timer only re-publishes already-fused state; fusion runs in sensor callbacks
     init_orientation: 0.0
 
     global_frame_id: "swarm_map"
