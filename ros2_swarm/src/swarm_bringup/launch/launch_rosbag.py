@@ -43,6 +43,14 @@ def generate_launch_description():
     bag_topics = [
         '/tf',
         '/tf_static',
+
+        # Absolute names: every robot's marvelmind_obs publishes into these
+        # same two topics, so one entry captures the whole modem TDMA cycle.
+        # Without this the bag cannot answer "was beacon N alive?" -- the
+        # per-robot mm_pos_unf below is already address-filtered, so a dead
+        # beacon and a beacon the modem never scheduled look identical.
+        '/mm_all_pos',
+        '/mm_all_imu',
     ]
 
     for robot_name in robot_names:
@@ -72,13 +80,34 @@ def generate_launch_description():
             f'/{robot_name}/mm_pos_unf',
             f'/{robot_name}/localization/imu_odom',
             f'/{robot_name}/localization/mm_imu_odom',
+
+            # Fused pose actually consumed by the guidance laws. Without it a
+            # bag records the avoidance_wrench but not the state it was
+            # computed from, so the law cannot be replayed offline.
+            f'/{robot_name}/pose',
+
+            # Both neighbour sources, so the two can be compared on the same
+            # run: nbh_pos comes from the Marvelmind modem (anonymous, no
+            # validity flag), comms/* from the UDP broadcast (carries
+            # robot_id, age and valid).
+            f'/{robot_name}/nbh_pos',
+            f'/{robot_name}/comms/neighbours',
+            f'/{robot_name}/comms/diagnostics',
+
+            # Guidance setpoint, i.e. the attractive term's output.
+            f'/{robot_name}/target_position',
         ])
 
     # ~/rosbags/swarm_20260909_185500/
     bag_root = os.path.expanduser('~/rosbags')
     os.makedirs(bag_root, exist_ok=True)
 
-    bag_name = datetime.now().strftime(f'swarm_boundingbox_{N}{"agent" if N == 1 else "agents"}_%Y%m%d_%H%M%S')
+    # The experiment tag used to be hardcoded to "boundingbox", so every bag
+    # in ~/rosbags claims to be a bounding-box run regardless of what was
+    # actually tested. Override with BAG_TAG=avoidance (etc.) so runs can be
+    # told apart later without opening each one.
+    tag = os.getenv('BAG_TAG', 'boundingbox')
+    bag_name = datetime.now().strftime(f'swarm_{tag}_{N}{"agent" if N == 1 else "agents"}_%Y%m%d_%H%M%S')
     bag_path = os.path.join(bag_root, bag_name)
 
     bag_record = ExecuteProcess(
