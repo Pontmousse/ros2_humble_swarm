@@ -21,3 +21,12 @@
       RMW_IMPLEMENTATION: "{{ rmw_implementation }}"
       ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"
       VIRTUAL_SPACECRAFT: "{{ virtual_spacecraft }}"
+      # Set explicitly, never left to an implicit default. The launch file's
+      # fallback changed between image versions -- v9.1.5 passed no conn_type
+      # to s1.launch at all, so the driver's own "sta" default won, while HEAD
+      # defaults to "rndis". That is how two robots deployed from the same
+      # playbook ended up on different transports with nothing in this repo
+      # recording the difference. Pinning it here makes the transport a
+      # property of the deployment rather than of whichever image tag happens
+      # to be installed on a given Pi.
+      CONN_TYPE:          "{{ conn_type }}"

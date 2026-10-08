@@ -19,6 +19,13 @@ echo "[swarm_robot] ROS_LOCALHOST_ONLY=$ROS_LOCALHOST_ONLY"
 echo "[swarm_robot] ROBOT_IDX=$ROBOT_IDX"
 echo "[swarm_robot] VIRTUAL_SPACECRAFT=$VIRTUAL_SPACECRAFT"
 echo "[swarm_robot] LAUNCH_FILE=$LAUNCH_FILE"
+# The driver's own startup banner prints conn_type, but it only runs when
+# RM_DIAGNOSTICS != off, which is not the default. Without this line there is
+# no record anywhere of which transport a robot came up on -- which is exactly
+# how RM2 (rndis) and RM6 (sta) diverged unnoticed. "(unset)" is itself
+# meaningful: it means the launch file's built-in default decided, and that
+# default is not the same across image versions.
+echo "[swarm_robot] CONN_TYPE=${CONN_TYPE:-(unset -> launch-file default)}"
 
 echo "[swarm_robot] Launching swarm agent..."
 
