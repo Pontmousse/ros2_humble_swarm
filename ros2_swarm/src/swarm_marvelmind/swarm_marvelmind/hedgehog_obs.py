@@ -77,9 +77,19 @@ class HedgehogNode(Node):
         self.imu_pub = self.create_publisher(Imu, "mm_imu" ,self.qos_profile)
         self.get_logger().info("Publishing IMU data.")
 
-        # Publishing timer
-        self.pos = HedgePositionAddressed()
-        self.imu = Imu()
+        # Publishing timer.
+        #
+        # These stay None until a packet carrying OUR beacon_address arrives.
+        # They used to be default-constructed messages, which meant a hedgehog
+        # that never appears in the modem's TDMA cycle still published
+        # address=0, timestamp_ms=0, x=y=z=0.0 at the timer rate, forever, and
+        # downstream could not tell that from "the robot really is at the
+        # origin". Six of ten bags in ~/rosbags are exactly this case, one of
+        # them for 290 s. Publishing nothing is the honest failure: every
+        # consumer of `pose`/`mm_pos_unf` already guards against a missing
+        # source, none of them guard against a plausible-looking zero.
+        self.pos = None
+        self.imu = None
         self.pub_timer_callback = self.create_timer(self.timer_frequency, self.pub_timer_callback)
 
 
@@ -156,11 +166,20 @@ class HedgehogNode(Node):
 
     def pub_timer_callback(self):
         # publish IMU data
-        self.imu_pub.publish(self.imu)
+        if self.imu is not None:
+            self.imu_pub.publish(self.imu)
 
         # publish position data
-        self.pos_pub.publish(self.pos)
-        # publish neighbours data
+        if self.pos is not None:
+            self.pos_pub.publish(self.pos)
+        else:
+            # A silent topic is easy to miss in a terminal full of logs, so say
+            # it out loud. This is the single most common hardware failure here.
+            self.get_logger().warning(
+                f"no Marvelmind fix for beacon_address={self.beacon_address} yet; "
+                "mm_pos_unf stays silent until one arrives",
+                throttle_duration_sec=5.0,
+            )
 
     def pos_callback(self, msg: HedgePositionAddressed):
         if msg.address == self.beacon_address:
@@ -193,9 +212,13 @@ class HedgehogNode(Node):
     def neighbours_buffer_callback(self):
         now = self.get_clock().now()
 
-        for timestamp in self.neighbours_time_stamps:
-            if now - timestamp > Duration(seconds=2.0): # seconds of buffer
-                idx = self.neighbours_time_stamps.index(timestamp)
+        # Walk backwards: deleting from a list while a forward `for` iterates it
+        # skips whatever shifts down into the freed slot, so with N consecutive
+        # stale neighbours only about half were dropped per tick. Indexing by
+        # position also avoids `.index(timestamp)`, which returns the *first*
+        # equal timestamp and can therefore delete the wrong neighbour.
+        for idx in reversed(range(len(self.neighbours_time_stamps))):
+            if now - self.neighbours_time_stamps[idx] > Duration(seconds=2.0):
                 # delete unseen neighboor
                 del self.neighbours[idx]
                 del self.neighbours_addresses[idx]
