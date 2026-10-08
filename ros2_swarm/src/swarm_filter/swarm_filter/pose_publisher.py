@@ -14,7 +14,7 @@ from collections import deque
 from copy import deepcopy
 import math
 from statistics import median
-from typing import Optional
+from typing import Optional, Tuple
 
 from geometry_msgs.msg import Quaternion, TransformStamped
 from marvelmind_ros2_msgs.msg import HedgePositionAddressed
@@ -95,6 +95,38 @@ def genuine_gps_update_time(
     if timestamp_ms != previous_timestamp_ms:
         return now_nanoseconds
     return previous_update_nanoseconds
+
+
+def robust_mean(
+    samples, outlier_radius: float, min_samples: int
+) -> Optional[Tuple[np.ndarray, int, int]]:
+    """Mean of the samples lying within `outlier_radius` of their median.
+
+    Marvelmind emits isolated multi-metre jumps: measured on bag 20260910_200332
+    (563 genuine fixes) the step between consecutive fixes is p50 0.051 m but
+    p99 4.49 m and max 5.02 m, in a 6x5 m room. 7.8% of fixes sit more than
+    0.35 m from a local median. Those outliers are almost always *isolated* --
+    run lengths are {1: 21, 2: 3, 3: 4, 4: 1} -- so a median centre is reliable
+    and a hard inlier gate rejects them outright.
+
+    A low-pass (One Euro) is the wrong tool here: it attenuates a spike instead
+    of rejecting it, leaks it into later samples through its own state, and its
+    adaptive cutoff opens up exactly when the apparent velocity is highest, i.e.
+    on the spike itself. Measured against a per-window robust truth, estimator
+    error over a 2 s window is p90 0.367 m / max 1.554 m for median3 + mean, vs
+    p90 0.071 m / max 0.128 m for this gate.
+
+    Returns None when too few samples survive, so the caller can decline to act
+    rather than anchor on garbage.
+    """
+    samples = np.asarray(samples, dtype=float)
+    if len(samples) < min_samples:
+        return None
+    centre = np.median(samples, axis=0)
+    inliers = samples[np.linalg.norm(samples - centre, axis=1) <= outlier_radius]
+    if len(inliers) < min_samples:
+        return None
+    return np.mean(inliers, axis=0), len(inliers), len(samples)
 
 
 def namespaced_base_frame(namespace: str, odometry_child_frame: str) -> str:
@@ -484,14 +516,16 @@ class PosePublisherNode(Node):
         self.imu_timeout = float(self.get_parameter("imu_timeout").value)
 
         # ---------------------------------------------------------------------
-        # Initial Marvelmind filtering
+        # Marvelmind outlier rejection
+        #
+        # `position_filter_enabled` now selects robust_mean vs a plain mean.
+        # `position_median_window`, `position_min_cutoff`, `position_beta` and
+        # `position_derivative_cutoff` configured the old per-sample One Euro
+        # stage; they stay declared so existing config files keep loading, but
+        # nothing reads them.
         # ---------------------------------------------------------------------
 
         self.position_filter_enabled = bool(self.get_parameter("position_filter_enabled").value)
-        position_median_window = int(self.get_parameter("position_median_window").value)
-        position_min_cutoff = float(self.get_parameter("position_min_cutoff").value)
-        position_beta = float(self.get_parameter("position_beta").value)
-        position_derivative_cutoff = float(self.get_parameter("position_derivative_cutoff").value)
 
         # ---------------------------------------------------------------------
         # Running odometry-position filtering
@@ -590,24 +624,11 @@ class PosePublisherNode(Node):
             ),
         )
 
-        # ---------------------------------------------------------------------
-        # Initial Marvelmind filter
-        # ---------------------------------------------------------------------
-
-        self.x_median = RollingMedian(position_median_window)
-        self.y_median = RollingMedian(position_median_window)
-
-        self.x_filter = OneEuroFilter(
-            position_min_cutoff,
-            position_beta,
-            position_derivative_cutoff,
-        )
-
-        self.y_filter = OneEuroFilter(
-            position_min_cutoff,
-            position_beta,
-            position_derivative_cutoff,
-        )
+        # Marvelmind position is no longer smoothed per sample. Both the startup
+        # anchor and the running drift estimate use `robust_mean`, which rejects
+        # the spikes a low-pass would merely smear. `position_median_window`,
+        # `position_min_cutoff`, `position_beta` and `position_derivative_cutoff`
+        # stay declared so existing config files keep loading, but are unused.
 
         # ---------------------------------------------------------------------
         # Running odometry displacement One Euro filters
@@ -824,25 +845,19 @@ class PosePublisherNode(Node):
         self.gps_disagreement_buffer.clear()
         self.gps_correction_window_start_nanoseconds = now_nanoseconds
 
-        if len(samples) < self.gps_correction_min_samples:
+        result = robust_mean(
+            samples,
+            self.gps_correction_outlier_radius,
+            self.gps_correction_min_samples,
+        )
+
+        if result is None:
             self.get_logger().debug(
-                f"GPS correction skipped: only {len(samples)} disagreement samples."
+                f"GPS correction skipped: {len(samples)} samples, too few agree."
             )
             return
 
-        # Median center rejects the effect of isolated Marvelmind jumps. Then
-        # average only samples close to that robust center.
-        center = np.median(samples, axis=0)
-        distances = np.linalg.norm(samples - center, axis=1)
-        inliers = samples[distances <= self.gps_correction_outlier_radius]
-
-        if len(inliers) < self.gps_correction_min_samples:
-            self.get_logger().debug(
-                f"GPS correction skipped: only {len(inliers)}/{len(samples)} inliers."
-            )
-            return
-
-        estimate = np.mean(inliers, axis=0)
+        estimate, n_inliers, n_samples = result
 
         # Do not let a single calibration window move the correction target by
         # an arbitrarily large amount. Large genuine drift is still recovered
@@ -858,7 +873,7 @@ class PosePublisherNode(Node):
 
         self.get_logger().info(
             "GPS drift calibration: "
-            f"samples={len(samples)}, inliers={len(inliers)}, "
+            f"samples={n_samples}, inliers={n_inliers}, "
             f"target=({estimate[0]:+.3f}, {estimate[1]:+.3f}) m"
         )
 
@@ -883,7 +898,6 @@ class PosePublisherNode(Node):
         """Initialize global x/y, then use GPS to estimate slow odometry drift."""
 
         now = self.get_clock().now()
-        now_seconds = now.nanoseconds * 1.0e-9
 
         genuine_update = message.timestamp_ms != self.last_gps_timestamp_ms
 
@@ -905,23 +919,38 @@ class PosePublisherNode(Node):
         if not math.isfinite(raw_x) or not math.isfinite(raw_y):
             return
 
-        # Startup still uses the original filtered/averaged Marvelmind anchor.
+        # `init_pos` is the anchor every later pose is built on, so it gets the
+        # same outlier gate as the running drift path -- see `robust_mean`. It
+        # used to be a plain mean of median3+One Euro output, which lets a run of
+        # two or more bad fixes through; such runs do occur (8 of 29 observed
+        # runs were length >= 2).
         if self.gps_initializing:
-            if self.position_filter_enabled:
-                median_x = self.x_median.update(raw_x)
-                median_y = self.y_median.update(raw_y)
-                candidate_x = self.x_filter.update(median_x, now_seconds)
-                candidate_y = self.y_filter.update(median_y, now_seconds)
-            else:
-                candidate_x = raw_x
-                candidate_y = raw_y
-
-            self.pos_buffer.append([candidate_x, candidate_y])
+            self.pos_buffer.append([raw_x, raw_y])
 
             elapsed = (now - self.init_start_time).nanoseconds * 1.0e-9
 
             if elapsed >= self.init_period:
-                self.init_pos = np.mean(self.pos_buffer, axis=0)
+                if self.position_filter_enabled:
+                    result = robust_mean(
+                        self.pos_buffer,
+                        self.gps_correction_outlier_radius,
+                        self.gps_correction_min_samples,
+                    )
+                else:
+                    result = (np.mean(self.pos_buffer, axis=0), len(self.pos_buffer),
+                              len(self.pos_buffer))
+
+                if result is None:
+                    # Keep collecting rather than anchoring on garbage. A bad
+                    # anchor is not self-evident downstream; a slow start is.
+                    self.get_logger().warning(
+                        f"Marvelmind init deferred: {len(self.pos_buffer)} samples, "
+                        "too few agree. Still collecting.",
+                        throttle_duration_sec=5.0,
+                    )
+                    return
+
+                self.init_pos, inliers, total = result
                 self.x[0] = float(self.init_pos[0])
                 self.x[1] = float(self.init_pos[1])
                 self.gps_initializing = False
@@ -930,7 +959,8 @@ class PosePublisherNode(Node):
                     "Marvelmind global-position initialization complete."
                 )
                 self.get_logger().info(
-                    f"Initial global position: {self.init_pos} meters"
+                    f"Initial global position: {self.init_pos} meters "
+                    f"({inliers}/{total} fixes agreed)"
                 )
             return
 
@@ -1209,17 +1239,23 @@ class PosePublisherNode(Node):
     def publish_state(self) -> None:
         """Publish pose and localization odometry."""
 
+        now = self.get_clock().now()
+
+        # `pose` used to be published before this check, so until Marvelmind
+        # initialized it broadcast self.x == (0, 0) at the timer rate -- and
+        # with a dead beacon, forever. Every consumer (position_guidance3,
+        # pointing_guidance*, ep_proportional_controller) already treats a
+        # missing pose as "do nothing", so silence is both safer and more
+        # informative than a plausible origin.
+        if not self.localization_is_ready(now.nanoseconds):
+            return
+
         legacy_message = State()
         legacy_message.x = float(self.x[0])
         legacy_message.y = float(self.x[1])
         legacy_message.theta = float(degrees(self.x[2]))
 
         self.pose_pub.publish(legacy_message)
-
-        now = self.get_clock().now()
-
-        if not self.localization_is_ready(now.nanoseconds):
-            return
 
         stamp = now.to_msg()
 
