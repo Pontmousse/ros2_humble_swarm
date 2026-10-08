@@ -34,3 +34,4 @@ services:
       - ./ros2_swarm/src/swarm_bringup:/ros2_ws/src/swarm_bringup
       - ./ros2_swarm/src/swarm_controller:/ros2_ws/src/swarm_controller
       - ./ros2_swarm/src/swarm_aruco:/ros2_ws/src/swarm_aruco
+      - ./ros2_swarm/src/swarm_comms:/ros2_ws/src/swarm_comms

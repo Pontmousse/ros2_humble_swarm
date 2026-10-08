@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 
@@ -19,7 +20,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/CoordXY.msg"
   "msg/Markers.msg"
   "msg/Neighbours.msg"
-  DEPENDENCIES sensor_msgs
+  "msg/NeighbourState.msg"
+  "msg/NeighbourStates.msg"
+  DEPENDENCIES sensor_msgs std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
