@@ -58,6 +58,65 @@ def chw_force(state: PlanarState, motion: float, mass: float) -> Tuple[float, fl
     return mass * radial, mass * along_track
 
 
+def limit_planar_velocity(
+    state: PlanarState,
+    maximum_speed: float,
+    maximum_yaw_rate: float,
+) -> PlanarState:
+    """Cap translational speed and yaw rate, preserving velocity direction.
+
+    This is deliberately non-physical. A spacecraft has no top speed, and an
+    undamped double integrator driven by repeated boundary firings accumulates
+    velocity without bound -- which is exactly what happened: on 2026-10-07 RM2
+    was chasing a reference coasting at 0.461 m/s against its own 0.5 m/s
+    actuator limit, leaving 8% of authority to correct a 1.26 m tracking error.
+    The error could not converge, and no amount of CPU tuning would have fixed
+    it, because the reference was simply faster than the tracker.
+
+    The cap belongs here rather than in the guidance law because every wrench
+    contributor feeds the same integrator; clamping one source still lets the
+    others run the velocity up.
+
+    Scale the translational pair together rather than clamping each axis, so a
+    capped spacecraft keeps travelling along its current heading instead of
+    being deflected toward whichever axis saturated first.
+    """
+    if maximum_speed <= 0.0 or maximum_yaw_rate <= 0.0:
+        raise ValueError("maximum_speed and maximum_yaw_rate must be positive")
+
+    vx, vy = state.vx, state.vy
+    speed = math.hypot(vx, vy)
+    if speed > maximum_speed:
+        scale = maximum_speed / speed
+        vx *= scale
+        vy *= scale
+
+    yaw_rate = max(-maximum_yaw_rate, min(maximum_yaw_rate, state.yaw_rate))
+
+    return PlanarState(
+        x=state.x,
+        y=state.y,
+        yaw=state.yaw,
+        vx=vx,
+        vy=vy,
+        yaw_rate=yaw_rate,
+    )
+
+
+def hold_planar_state(state: PlanarState) -> PlanarState:
+    """Return the same pose at rest, for publishing a frozen reference.
+
+    Used when physical localization goes stale and the virtual reference stops
+    advancing. The trajectory it then describes genuinely has zero velocity,
+    even though the simulator retains the momentum it will resume with, so the
+    published twist must read zero: an Odometry message is a statement about
+    the reference trajectory, and nav2_pidff feeds reference velocity forward.
+    Reporting the retained coast velocity would command motion the reference is
+    not making.
+    """
+    return PlanarState(x=state.x, y=state.y, yaw=state.yaw)
+
+
 def integrate_constant_wrench(
     state: PlanarState,
     force_x: float,

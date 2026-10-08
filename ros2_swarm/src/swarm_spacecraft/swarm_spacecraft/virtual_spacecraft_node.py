@@ -12,7 +12,9 @@ from std_srvs.srv import Trigger
 
 from .dynamics import PlanarState
 from .dynamics import chw_force
+from .dynamics import hold_planar_state
 from .dynamics import integrate_constant_wrench
+from .dynamics import limit_planar_velocity
 from .dynamics import mean_motion
 from .dynamics import rotate_body_to_inertial
 from .dynamics import rotate_inertial_to_body
@@ -91,6 +93,12 @@ class VirtualSpacecraftNode(Node):
         self.declare_parameter("timer_frequency", 0.01)
         self.declare_parameter("maximum_force", 2.0)
         self.declare_parameter("maximum_torque", 0.5)
+        # Keep these strictly below the tracking controller's own limits
+        # (nav2_pidff.maximum_speed / maximum_yaw_rate). The reference must
+        # stay catchable: whatever margin is left here is the entire
+        # authority the physical robot has to close a tracking error.
+        self.declare_parameter("maximum_speed", 0.25)
+        self.declare_parameter("maximum_yaw_rate", 0.5)
         self.declare_parameter("odometry_timeout", 0.25)
         self.declare_parameter("wrench_timeout", 0.25)
         self.declare_parameter("maximum_time_step", 0.05)
@@ -108,6 +116,10 @@ class VirtualSpacecraftNode(Node):
         timer_frequency = float(self.get_parameter("timer_frequency").value)
         self.maximum_force = float(self.get_parameter("maximum_force").value)
         self.maximum_torque = float(self.get_parameter("maximum_torque").value)
+        self.maximum_speed = float(self.get_parameter("maximum_speed").value)
+        self.maximum_yaw_rate = float(
+            self.get_parameter("maximum_yaw_rate").value
+        )
         self.odometry_timeout = float(
             self.get_parameter("odometry_timeout").value
         )
@@ -119,6 +131,8 @@ class VirtualSpacecraftNode(Node):
             timer_frequency,
             self.maximum_force,
             self.maximum_torque,
+            self.maximum_speed,
+            self.maximum_yaw_rate,
             self.odometry_timeout,
             self.wrench_timeout,
             self.maximum_time_step,
@@ -148,6 +162,7 @@ class VirtualSpacecraftNode(Node):
         self.virtual_frame_id = namespaced_virtual_frame(self.get_namespace())
         self.initialized = False
         self.armed = False
+        self.frozen = False
         self.last_odometry_time = None
         self.last_update_time = self.get_clock().now()
 
@@ -329,6 +344,36 @@ class VirtualSpacecraftNode(Node):
         if not self.initialized or not self.armed:
             return
 
+        # Freeze instead of integrating when the physical pose has gone stale.
+        # nav2_pidff stops the chassis on exactly this condition, so a
+        # reference that kept integrating would walk away from a robot that is
+        # no longer being commanded, and nothing would ever pull it back.
+        # Measured 2026-10-07: RM6 lost localization for 14.2 s and the
+        # resulting runaway drove the peak tracking error to 3.95 m, against
+        # the 0.072 m median the velocity cap holds while the pose stream is
+        # healthy. The cap bounds how fast the reference runs away; only this
+        # stops it running away at all.
+        #
+        # odometry_timeout must stay <= nav2_pidff.odometry_timeout, so the
+        # reference freezes no later than the tracker stops. Raising this one
+        # alone reopens the gap.
+        if not self.localization_is_fresh():
+            if not self.frozen:
+                self.frozen = True
+                self.get_logger().warn(
+                    "Localization stale; freezing the virtual reference"
+                )
+            # Keep publishing so a freeze is observable as a stationary
+            # reference rather than as a dead topic, which is what a silent
+            # simulator and a crashed one have always looked like here.
+            self.publish_reference(now, moving=False)
+            return
+        if self.frozen:
+            self.frozen = False
+            self.get_logger().info(
+                "Localization recovered; resuming virtual integration"
+            )
+
         dt = max(0.0, min(dt, self.maximum_time_step))
         force_x, force_y, torque = self.total_wrench(now.nanoseconds)
         if self.enable_chw:
@@ -350,25 +395,40 @@ class VirtualSpacecraftNode(Node):
             self.inertia,
             dt,
         )
+        # Applied *after* integration, so applied_wrench still reports the
+        # wrench the guidance law actually asked for. Clamping the force
+        # instead would misreport the law and would not bound the velocity
+        # anyway -- a bounded force integrated forever is still unbounded.
+        self.reference = limit_planar_velocity(
+            self.reference,
+            self.maximum_speed,
+            self.maximum_yaw_rate,
+        )
         self.publish_reference(now)
 
-    def publish_reference(self, stamp) -> None:
-        """Publish the observable virtual reference as odometry."""
+    def publish_reference(self, stamp, moving: bool = True) -> None:
+        """Publish the observable virtual reference as odometry.
+
+        Pass moving=False while the reference is frozen, so the twist reports
+        the stationary trajectory rather than the momentum the simulator is
+        holding on to for when integration resumes.
+        """
+        state = self.reference if moving else hold_planar_state(self.reference)
         message = Odometry()
         message.header.stamp = stamp.to_msg()
         message.header.frame_id = self.reference_frame_id
         message.child_frame_id = self.virtual_frame_id
-        message.pose.pose.position.x = self.reference.x
-        message.pose.pose.position.y = self.reference.y
-        z, w = quaternion_from_yaw(self.reference.yaw)
+        message.pose.pose.position.x = state.x
+        message.pose.pose.position.y = state.y
+        z, w = quaternion_from_yaw(state.yaw)
         message.pose.pose.orientation.z = z
         message.pose.pose.orientation.w = w
         body_vx, body_vy = rotate_inertial_to_body(
-            self.reference.vx, self.reference.vy, self.reference.yaw
+            state.vx, state.vy, state.yaw
         )
         message.twist.twist.linear.x = body_vx
         message.twist.twist.linear.y = body_vy
-        message.twist.twist.angular.z = self.reference.yaw_rate
+        message.twist.twist.angular.z = state.yaw_rate
         self.reference_publisher.publish(message)
 
 
