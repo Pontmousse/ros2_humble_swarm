@@ -210,12 +210,20 @@ def generate_launch_description():
                 'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
                 'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
                 'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}'),
-                # SOFTWARE DECODE: driver decodes H.264 internally and publishes
-                # raw camera/image_color. video_raw ON (1), video_h264 OFF (-1).
-                # The SDK software decoder is the only path that yields a usable
-                # image_color for this robot (the Pi hardware VPU cannot decode
-                # the RoboMaster multi-slice bitstream; see project memory).
-                'video_raw': '1',
+                # VIDEO OFF (both -1). The software H.264 decode runs inside the
+                # driver process, under the same GIL as the SDK's recv_task. On
+                # 2026-10-07 RM2 logged "client recv_task is not running" ->
+                # "Disconnected", and stopping the client then blocked for 58 s
+                # -- a starved receive thread, not a USB fault (the RNDIS link
+                # and /dev/ttyACM1 stayed enumerated throughout). Decode is the
+                # prime suspect, so it is off until the disconnects are shown to
+                # survive without it.
+                #
+                # To restore: video_raw '1', video_h264 '-1'. That asymmetry is
+                # deliberate -- the SDK software decoder is the only path that
+                # yields a usable image_color here, because the Pi hardware VPU
+                # cannot decode the RoboMaster multi-slice bitstream.
+                'video_raw': '-1',
                 'video_h264': '-1',
                 # Cap the driver's image_color publish rate. The decoder still
                 # software-decodes every H.264 chunk (that cost is upstream of
@@ -340,6 +348,40 @@ def generate_launch_description():
         )
 
         ld.add_action(hedge)
+
+    ##############################################################################
+    ########################## - UDP state broadcast - ###########################
+    # Directed broadcast of the WiFi subnet, not 255.255.255.255: with RNDIS up
+    # the route table can pick usb0, where only the RoboMaster body listens.
+    comms_broadcast_address = os.getenv("SWARM_BROADCAST_ADDR", "192.168.50.255")
+    comms_bind_device = os.getenv("SWARM_BROADCAST_IFACE", "")
+
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        comms = Node(
+            package="swarm_comms",
+            executable="state_broadcaster",
+            name="state_broadcaster",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                    {
+                        # Beacon address doubles as the swarm-wide robot id so the
+                        # two identity schemes cannot drift apart.
+                        "robot_id": beacon_addresses[i],
+                        "broadcast_address": comms_broadcast_address,
+                        "bind_device": comms_bind_device,
+                        "broadcast_rate": 10.0,
+                        "receive_rate": 50.0,
+                        "stale_timeout": 0.5,
+                        "drop_timeout": 5.0,
+                    }
+                ]
+            )
+
+        ld.add_action(comms)
 
     ##############################################################################
     ##############################################################################
@@ -491,7 +533,11 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(targets)  # ENABLED: feeds `targets` so capture_supervisor can switch SEARCH<->CHASE
+        # ld.add_action(targets)  # DISABLED 2026-10-07 with the driver's video:
+        # solvePnP-per-frame was the single largest CPU consumer (~116%) on this
+        # Pi, and with video_raw off it would only ever see an empty topic.
+        # Re-enable together with video_raw '1'; it feeds `targets` so
+        # capture_supervisor can switch SEARCH<->CHASE.
 
     ##############################################################################
     ##############################################################################
@@ -515,7 +561,8 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(targets_filter)
+        # ld.add_action(targets_filter)  # DISABLED 2026-10-07: its only input is
+        # targets_unf from the now-disabled target_detector.
 
 
     ##############################################################################
@@ -581,7 +628,11 @@ def generate_launch_description():
                     }
                 ]
             )
-        # ld.add_action(ep_motion_planner)
+        # ENABLED: sole publisher of avoidance_wrench, which virtual_spacecraft
+        # has been subscribing to all along with nothing on the other end. Its
+        # other output, target_position, still has no consumer (ep_control below
+        # stays disabled), so this adds the avoidance wrench and nothing else.
+        ld.add_action(ep_motion_planner)
 
 
     ##############################################################################
