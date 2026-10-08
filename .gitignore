@@ -19,5 +19,8 @@ swarm_docker_img/python_user_env.tar.gz
 **/*.jpg
 **/*.png
 
+# Rosbag recordings (large binary data, ~195M and growing)
+bags/
+
 # OS
 .DS_Store
