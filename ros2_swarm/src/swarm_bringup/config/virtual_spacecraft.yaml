@@ -36,6 +36,19 @@
     maximum_force: 1.0
     maximum_torque: 0.2
 
+    # Bounds on the virtual *state*, not the input. maximum_force alone does not
+    # bound velocity: this is an undamped double integrator, so a bounded force
+    # applied long enough reaches any speed. Measured 2026-10-07 on RM2, the
+    # reference was coasting at 0.461 m/s while nav2_pidff.maximum_speed is
+    # 0.5 -- 8% of authority left to close a 1.26 m error, so the error could
+    # not converge.
+    #
+    # Held at half the tracker's limits (0.5 m/s, 1.0 rad/s), leaving 2x the
+    # reference speed as catch-up authority. Raise only together with the
+    # nav2_pidff limits, and never above them.
+    maximum_speed: 0.25
+    maximum_yaw_rate: 0.5
+
     # Planar Clohessy-Wiltshire relative dynamics, added on top of the clamped
     # wrench because orbital mechanics is environment and must not consume
     # control authority. The LVLH origin is swarm_map (0, 0) with x radial and
@@ -47,7 +60,15 @@
     gravity: 9.80665
     earth_radius: 6371000.0
 
-    # Stop accelerating on a stale wrench and clamp long scheduler gaps.
+    # odometry_timeout now gates integration, not just arming: past it the
+    # reference freezes in place instead of coasting on. nav2_pidff stops the
+    # chassis on the same staleness, so a reference that kept integrating
+    # would walk away from a robot nobody is commanding -- measured 2026-10-07,
+    # RM6 lost localization for 14.2 s and the runaway peaked at 3.95 m of
+    # tracking error against a 0.072 m median while the stream was healthy.
+    #
+    # MUST stay <= nav2_pidff.odometry_timeout (0.3), so the reference freezes
+    # no later than the tracker stops. Raising this one alone reopens the gap.
     odometry_timeout: 0.25
     wrench_timeout: 0.25
     maximum_time_step: 0.05
@@ -89,7 +110,20 @@
 
 /**/nav2_pidff:
   ros__parameters:
-    timer_frequency: 0.2  # 5 Hz (was 10 Hz) - robot can't react faster; dt measured from clock, gains unaffected
+    # 20 Hz (was 5 Hz). The old comment justified 5 Hz with "robot can't react
+    # faster", which is true of the chassis but not of this loop: the rate also
+    # sets how long a spurious stop lasts. update() publishes a zero Twist
+    # whenever an input is older than odometry_timeout, so at 5 Hz every such
+    # misfire cost a full 200 ms of standstill. Measured 2026-10-07 on RM2:
+    # 24 gaps >0.25 s in 25 s on localization/odom, i.e. roughly one stop per
+    # second, against a virtual reference coasting at 0.46 m/s.
+    #
+    # 0.2 s period against a 0.25 s timeout also left only 50 ms of margin --
+    # the loop was barely faster than its own staleness gate. At 0.05 s the
+    # timeout is 5 control periods away.
+    #
+    # dt is measured from the clock, so the gains are unaffected by this change.
+    timer_frequency: 0.05
 
     enable_pid: true
 
@@ -109,8 +143,23 @@
     maximum_speed: 0.5
     maximum_yaw_rate: 1.0
 
-    odometry_timeout: 0.25
-    reference_timeout: 0.25
+    # 0.3 (was 0.25). update() publishes a zero Twist and wipes the integral
+    # whenever either input is older than this, so the value is not a safety
+    # margin -- it is the length of input dropout the controller rides through.
+    # Measured 2026-10-07 on RM2: 24 breaches in 25 s on localization/odom,
+    # worst gap 0.936 s, which is roughly one spurious stop per second.
+    #
+    # The cost of looser gating is acting on a stale pose, and that cost fell
+    # sharply once virtual_spacecraft.maximum_speed capped the reference at
+    # 0.25 m/s: 0.3 s of staleness is now 0.075 m of reference travel, against
+    # 0.28 m at the old uncapped 0.46 m/s coast. That is what makes 0.3
+    # affordable; it would not have been before the cap.
+    #
+    # Deliberately conservative. The gap distribution is unknown, so this may
+    # only catch the shortest of the 24 breaches -- measure the percentiles
+    # before reaching for a larger number.
+    odometry_timeout: 0.3
+    reference_timeout: 0.3
 
     qos_depth: 10
     qos_reliability: "RELIABLE"
@@ -134,9 +183,19 @@
     # silently solving a different problem than the one it commanded.
     # Brought at/under the 1.0 N / 0.2 Nm envelope so commanded == rendered
     # (were 1.5 / 2.0 / 0.5 → clamped, so braking was weaker than the law assumed).
-    boundary_force: 1.0
+    #
+    # Halved from 1.0 once avoidance_wrench became a second contributor. The
+    # simulator scales the *resultant* down to virtual_spacecraft.maximum_force
+    # (1.0 N), so two contributors capped at 1.0 each cancel to ~0 N when they
+    # oppose -- avoidance could never win, only tie, and the craft would coast
+    # into the neighbour. At 0.5 the box force yields 0.5 N of net authority to a
+    # saturated avoidance push while the total stays inside the validated
+    # envelope. boundary_force and initial_force_* come down with it: capping
+    # maximum_force alone would clamp them internally, which is the exact
+    # commanded-vs-rendered mismatch this block warns about.
+    boundary_force: 0.5
     rebound_speed: 0.30
-    maximum_force: 1.0
+    maximum_force: 0.5
     maximum_torque: 0.2
 
     # Thrust rises and falls as a raised cosine over initial_burn_ramp seconds
@@ -145,9 +204,10 @@
     # Clamped internally to half of initial_burn_duration.
     initial_burn_duration: 2.0
     initial_burn_ramp: 2.0
-    # 0.7/0.7 → resultant 0.99 N ≤ 1.0 envelope (were 1.0/1.0 → 1.41, clamped).
-    initial_force_x: 0.7
-    initial_force_y: 0.7
+    # 0.35/0.35 → resultant 0.49 N ≤ the 0.5 maximum_force above (was 0.7/0.7 →
+    # 0.99, which fit the old 1.0 cap but would now be clamped).
+    initial_force_x: 0.35
+    initial_force_y: 0.35
     initial_torque: 0.2
 
     # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
