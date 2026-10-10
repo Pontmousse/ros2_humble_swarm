@@ -255,7 +255,18 @@ class GuidanceNode(Node):
             # already starving the guidance timer.
             self.get_logger().warn("Pose not initialized yet (neighbours).",
                                    throttle_duration_sec=5.0)
-            self.vel1 = np.array([0, 0])
+            # vel2 and nbh_F* are this callback's outputs; vel1 belongs to
+            # landmarks_callback, whose identical guard above this one is where
+            # the line was copied from. Zeroing vel1 here did the exact
+            # inversion of the intent: it destroyed the landmark force and left
+            # the avoidance force standing. Latent so far only because
+            # self.pose is never reset to None once set, so this branch cannot
+            # run after either force has become non-zero -- which is also why
+            # it survived review. It stops being latent the moment pose is
+            # invalidated on a localization timeout.
+            self.vel2 = np.array([0, 0])
+            self.nbh_Fx = 0.0
+            self.nbh_Fy = 0.0
             return
         
         # NeighbourStates carries the whole table including entries already
