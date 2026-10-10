@@ -210,31 +210,75 @@ def generate_launch_description():
                 'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
                 'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
                 'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}'),
-                # VIDEO OFF (both -1). The software H.264 decode runs inside the
-                # driver process, under the same GIL as the SDK's recv_task. On
-                # 2026-10-07 RM2 logged "client recv_task is not running" ->
-                # "Disconnected", and stopping the client then blocked for 58 s
-                # -- a starved receive thread, not a USB fault (the RNDIS link
-                # and /dev/ttyACM1 stayed enumerated throughout). Decode is the
-                # prime suspect, so it is off until the disconnects are shown to
-                # survive without it.
+                # CAMERA MODULE UNLOADED. Not "video off" -- the whole module,
+                # via main.launch's `camera` arg (main.launch:106 -> 172
+                # camera.enabled). The per-stream switches below cannot achieve
+                # this on their own: video_ffmpeg defaults to $(var video) == 2,
+                # so leaving it unset silently turns the ffmpeg stream ON. RM6
+                # was found running exactly that way -- h264 -1, raw -1,
+                # ffmpeg 2 -- which is why this is a module-level switch.
                 #
-                # To restore: video_raw '1', video_h264 '-1'. That asymmetry is
-                # deliberate -- the SDK software decoder is the only path that
-                # yields a usable image_color here, because the Pi hardware VPU
-                # cannot decode the RoboMaster multi-slice bitstream.
-                'video_raw': '-1',
-                'video_h264': '-1',
-                # Cap the driver's image_color publish rate. The decoder still
-                # software-decodes every H.264 chunk (that cost is upstream of
-                # this gate and unavoidable), but frames arriving faster than
-                # this skip cv2_to_imgmsg + the ~690KB DDS publish. The real win
-                # is downstream: the aruco detector then receives only ~6 fps,
-                # so its per-frame Image deserialization (the 77%-CPU floor the
-                # consumer-side detect_max_hz throttle could NOT remove) drops.
-                # 6.0 sits just above the detector's 5 Hz so the two throttles
-                # don't beat against each other and starve detection to 4 fps.
-                'video_rate': '6.0',
+                # Why it is off: with h264 ON_DEMAND, a PC-side subscriber
+                # starts the stream on every robot at once (camera.py:303-305,
+                # a matched-publisher event, so immediate). The publish path is
+                # unthrottled -- camera.py:494-501 sends every chunk at ~55 Hz,
+                # and video_rate is only honoured in the raw branch at :510, so
+                # it does nothing for h264. The Pi then starves, localization
+                # gaps exceed virtual_spacecraft's 0.25 s odometry_timeout, the
+                # velocity_smoother bond (both ends on the same Pi) misses its
+                # 4 s deadline, lifecycle manager cleans it up, cmd_vel stops.
+                # Observed 2026-10-09: both robots stopped mid-run.
+                #
+                # To restore, uncomment the three below and drop this arg.
+                # Note the raw/h264 asymmetry is deliberate: the SDK software
+                # decoder is the only path yielding a usable image_color here,
+                # because the Pi hardware VPU cannot decode the RoboMaster
+                # multi-slice bitstream. And prefer ON_DEMAND (2) over ON (1) --
+                # ON emits SPS/PPS and the first IDR at driver boot, so a
+                # decoder joining later never gets a parameter set and every
+                # packet fails avcodec_send_packet forever.
+                'camera': 'false',
+                # 'video_raw': '-1',
+                # 'video_h264': '2',
+                # 'video_rate': '6.0',
+                # Onboard vision, which is a different path from video entirely:
+                # robomaster_ros/modules/vision.py calls sub_detect_info(), and
+                # neither it nor the SDK's vision.py mentions video or camera.
+                # Detection runs on the robot's own vision processor and comes
+                # back over the existing DDS-event channel as 9 bytes of header
+                # plus 20 bytes per detection -- 29 bytes for one target. No
+                # H.264 chunk reaches the Pi, so none of the decode cost that
+                # forced video_raw/video_h264 to -1 above applies. main.launch
+                # derives vision.enabled from this list being non-empty, so ''
+                # (the default) leaves the module unloaded exactly as before.
+                #
+                # 'robot' needs no marker on the target at all. UNVERIFIED on
+                # hardware: the source proves the client never asks for video,
+                # but not that the firmware is willing to run detection while no
+                # video stream is subscribed. That is what the /RM2/vision probe
+                # is for; if the topic stays empty, set this back to '' rather
+                # than reaching for video.
+                # Double quotes inside, single quotes outside, and that is not a
+                # style choice. main.launch does
+                #   <let name="vision" value="$(eval 'len($(var vision_targets)) > 0')"/>
+                # so this string is pasted inside a single-quoted $(eval ...).
+                # "['robot']" closes the eval's quote at the quote before robot
+                # and the substitution parser aborts the whole launch -- every
+                # node on the robot, not just vision. '["robot"]' is the same
+                # Python list literal with no quote collision.
+                # Empty: the robot's onboard detector does not work here, and
+                # this was measured, not assumed. With the video stream up
+                # (image_h264 at 55.6 Hz) and both 'robot' and 'person'
+                # subscribed, /RM2/vision produced zero messages over repeated
+                # 30 s windows with a person in frame. The SDK's four failure
+                # paths in sub_detect_info all log and return False, and
+                # robomaster_ros ignores that return value -- but the logs are
+                # clean, so the firmware ACKs ProtoVisionDetectEnable and then
+                # never pushes an event. Nothing left to read in the source.
+                # Leaving a target here costs a pointless handshake per boot.
+                # '[]', not '': this is pasted into $(eval 'len(...) > 0'), so
+                # an empty string makes that len() take no argument at all.
+                'vision_targets': '[]',
                 # CHASSIS_LEAD (2): gimbal yaw follows the chassis heading so the
                 # camera always points out the front of the robot. This is the
                 # desired behaviour. The ~58 deg pitch bob seen earlier was a
