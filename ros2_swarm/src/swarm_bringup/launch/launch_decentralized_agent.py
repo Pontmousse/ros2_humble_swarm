@@ -651,6 +651,32 @@ def generate_launch_description():
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,
+                        # Approach gain, s^-1, bracketed three ways: the
+                        # zero-order-hold budget on the Marvelmind period
+                        # (< 3.3), the body-x cap over the 52 mm noise floor
+                        # (< 0.96, else noise alone saturates the command),
+                        # and tracking lag v_target / gain (> 0.58).
+                        "approach_gain": 0.9,
+                        # Tangential alignment, (m/s)/rad. 0.0 steers by
+                        # rotation alone.
+                        "align_gain": 0.05,
+                        # Heading gain, s^-1. Capped at 2.3 by the rotation
+                        # cap over the bearing noise -- 52 mm of position
+                        # noise subtends 0.087 rad at buffer_radius = 0.60 --
+                        # well under the zero-order-hold budget of 3.3.
+                        "heading_gain": 1.0,
+                        # Target-velocity feedforward. The span is a noise
+                        # budget: a two-point difference on 52 mm fixes at
+                        # 0.35 s carries 0.21 m/s against a 0.03 m/s signal,
+                        # while a slope over 5.25 s (15 independent fixes)
+                        # gives 9 mm/s -- at the cost of lagging a change in
+                        # target velocity by ~2.6 s. SECONDS, not samples:
+                        # target_callback runs at the 10 Hz markers rate, so
+                        # a sample count would silently shrink the span.
+                        # Set feedforward_gain to 0.0 to A/B against the pure
+                        # proportional law.
+                        "target_velocity_span": 5.25,
+                        "feedforward_gain": 1.0,
                         **qos_parameters(depth=1, reliability='RELIABLE')
                     }
                 ]
@@ -681,9 +707,11 @@ def generate_launch_description():
                     # Empty frames tolerated before the ENTRY streak resets, so a
                     # steadily-held marker that flickers still reaches CAPTURE.
                     "miss_tolerance": 3,
-                    # Once stable detection latches us into CAPTURE, stay there:
-                    # do NOT auto-fall back to SEARCH on target loss.
-                    "latch_capture": True,
+                    # False so losing the target falls back to SEARCH after
+                    # lost_timeout. Required to validate following a MOVING
+                    # target: latched, the robot would stay in CAPTURE driving
+                    # on a stale marker instead of re-acquiring.
+                    "latch_capture": False,
                     # Match the BEST_EFFORT publisher on the targets topic.
                     "qos_reliability": "BEST_EFFORT",
                 }
