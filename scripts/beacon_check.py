@@ -8,11 +8,20 @@ information about whether the hedgehog is actually producing fixes. `hz` on
 those topics reports a healthy 100 Hz for a beacon that has been dead the
 whole run -- six of the ten bags in ~/rosbags are exactly that case.
 
-/mm_all_pos is the one topic published straight from the modem, one message
-per fix, so counting *distinct* `timestamp_ms` per address is the real
-measurement. Three failure modes are distinguished:
+/mm_all_pos is published one message per fix with no timer in between, so
+counting *distinct* `timestamp_ms` per address is the real measurement. Three
+failure modes are distinguished:
 
-  silent    address never appears      -> hedgehog not in the TDMA cycle
+This sees only the addresses the robots' own hedgehogs carry. Each Pi has its
+own hedgehog and a hedgehog reports only its own address (measured 2026-10-09:
+55 s gave addr2 129 msgs / 129 distinct fixes, addr6 138 / 138, i.e. no
+duplicates and so no cross-reporting, and addr5 absent while beacon 5 was alive
+at 2.83 Hz). A beacon with no Pi behind it will read "silent" here however
+healthy it is -- to see the whole TDMA cycle, read the modem on the dev host's
+USB, as scripts/target_bridge.py does.
+
+  silent    address never appears      -> hedgehog not in the TDMA cycle,
+                                          OR no publisher carries that address
   stalled   appears, counter frozen    -> modem forwarding a cached fix
   frozen    counter moves, (x,y) does  -> tracking lost, position held
                                           (seen on RM1 bag 20260926 for 123 s)
@@ -44,9 +53,10 @@ class BeaconCheck(Node):
     def __init__(self, duration):
         super().__init__("beacon_check")
         self.duration = duration
-        # Must match the publisher in marvelmind_obs.py, which uses the
-        # workspace default RELIABLE/KEEP_LAST; BEST_EFFORT here would simply
-        # never connect.
+        # marvelmind_obs publishes RELIABLE/KEEP_LAST (qos_parameters() ignores
+        # its arguments and always returns that). RELIABLE here matches it; a
+        # BEST_EFFORT reader would also connect fine, so switch if the dev
+        # host's WiFi link starts retransmitting.
         qos = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                          history=HistoryPolicy.KEEP_LAST)
         self.create_subscription(HedgePositionAddressed, "/mm_all_pos",
