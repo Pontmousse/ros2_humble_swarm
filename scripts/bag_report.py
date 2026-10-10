@@ -32,6 +32,11 @@ GATES = (0.25, 0.3, 0.5, 1.0)
 
 # position_guidance3.py: influence radius, the distance where the repulsion
 # saturates at max_nbh_force, and chassis contact (2 x robot_radius 0.22).
+# Both radii moved on 2026-10-08 (0.70 -> 1.05, 0.55 -> 0.65). These stay at
+# the old values on purpose: this script only bins separations for comparison
+# across bags, and most of the bags on disk were flown at the old radius, so
+# following the law would make two runs incomparable for no gain. Use
+# bag_damping_check.py --rant when the question is about the law itself.
 R_INFLUENCE = 0.70
 R_SATURATE = 0.55
 R_CONTACT = 0.44

@@ -29,18 +29,29 @@ from pathlib import Path
 from rclpy.serialization import deserialize_message
 from rosidl_runtime_py.utilities import get_message
 
-RANT = 0.70
-GAIN = 0.78
 DAMPING = 2.0
 MAX_FORCE = 1.0
 CONTACT = 0.44
+MASS = 5.0
+
+# Defaults track the law in position_guidance3.py. Bags flown before
+# 2026-10-08 were recorded at Rant = 0.70; reading one of those with 1.05
+# invents an influence radius the robots never had and silently moves the
+# curve every sample is tested against. Pass --rant 0.70 for them.
+DEFAULT_RANT = 1.05
+DEFAULT_GAIN = 0.78
 
 
-def potential(distance):
+def potential(distance, rant, gain):
     """The conservative term alone, in newtons."""
-    if distance >= RANT:
+    if distance >= rant:
         return 0.0
-    return GAIN * (1.0 / distance - 1.0 / RANT) / (distance * distance)
+    return gain * (1.0 / distance - 1.0 / rant) / (distance * distance)
+
+
+def absorbable_ceiling(rant):
+    """Fastest approach any law bounded by MAX_FORCE can stop in this runway."""
+    return math.sqrt(2.0 * (2.0 * MAX_FORCE / MASS) * (rant - CONTACT))
 
 
 def load(bag_dir, wanted):
@@ -80,7 +91,7 @@ def nearest(times, values, t, tolerance=0.08):
     return None if best is None else values[best]
 
 
-def analyse(bag_dir, robot):
+def analyse(bag_dir, robot, rant):
     topics = [
         f"/{robot}/avoidance_wrench",
         f"/{robot}/comms/neighbours",
@@ -110,7 +121,7 @@ def analyse(bag_dir, robot):
         n = valid[0]
         dx, dy = pose.x - n.x, pose.y - n.y
         distance = math.hypot(dx, dy)
-        if distance >= RANT or distance <= 0.0:
+        if distance >= rant or distance <= 0.0:
             continue
 
         own_vx = own_vy = 0.0
@@ -130,8 +141,9 @@ def analyse(bag_dir, robot):
     return rows
 
 
-def report(robot, rows):
-    print(f"\n=== {robot}: {len(rows)} samples inside the influence radius ===")
+def report(robot, rows, rant, gain):
+    print(f"\n=== {robot}: {len(rows)} samples inside Rant={rant:.2f} "
+          f"gain={gain:.2f} ===")
     if not rows:
         print("  nothing inside Rant with exactly one valid neighbour")
         return
@@ -139,7 +151,7 @@ def report(robot, rows):
     # One-sided test: force above the potential curve at the same separation.
     excess = []
     for _, distance, closing, measured in rows:
-        pot = min(potential(distance), MAX_FORCE)
+        pot = min(potential(distance, rant, gain), MAX_FORCE)
         if measured > pot + 0.02:
             excess.append((measured - pot, closing, distance, measured, pot))
 
@@ -159,8 +171,9 @@ def report(robot, rows):
     # What the law predicts, both ways, against what was published.
     err_pot = err_damp = 0.0
     for _, distance, closing, measured in rows:
-        pot = min(potential(distance), MAX_FORCE)
-        damp = min(potential(distance) + DAMPING * max(0.0, closing), MAX_FORCE)
+        bare = potential(distance, rant, gain)
+        pot = min(bare, MAX_FORCE)
+        damp = min(bare + DAMPING * max(0.0, closing), MAX_FORCE)
         err_pot += (measured - pot) ** 2
         err_damp += (measured - damp) ** 2
     n = len(rows)
@@ -171,10 +184,16 @@ def report(robot, rows):
     if closings:
         def pct(f):
             return closings[min(len(closings) - 1, int(f * len(closings)))]
+        # The ceiling is what no law bounded by MAX_FORCE can absorb over this
+        # radius' runway, so samples above it were never going to be stopped by
+        # any amount of tuning -- that count is the case for moving the radius.
+        ceiling = absorbable_ceiling(rant)
+        over = sum(1 for c in closings if c > ceiling)
         print(f"  closing speed (as the guidance saw it, broadcast velocities):")
         print(f"    p50={pct(0.5):.3f}  p90={pct(0.9):.3f}  p99={pct(0.99):.3f}  "
-              f"max={closings[-1]:.3f} m/s   over 0.368: "
-              f"{sum(1 for c in closings if c > 0.368)}")
+              f"max={closings[-1]:.3f} m/s")
+        print(f"    above the {ceiling:.3f} m/s absorbable ceiling: "
+              f"{over}/{len(closings)} ({100.0 * over / len(closings):.1f}%)")
 
     distances = sorted(d for _, d, _, _ in rows)
     contact = sum(1 for d in distances if d < CONTACT)
@@ -185,12 +204,20 @@ def report(robot, rows):
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("bag")
     parser.add_argument("--robots", nargs="+", default=["RM2", "RM6"])
+    parser.add_argument(
+        "--rant", type=float, default=DEFAULT_RANT,
+        help="influence radius the bag was FLOWN at (pre-2026-10-08: 0.70)")
+    parser.add_argument("--gain", type=float, default=DEFAULT_GAIN)
     args = parser.parse_args()
     for robot in args.robots:
-        report(robot, analyse(args.bag, robot))
+        report(robot, analyse(args.bag, robot, args.rant),
+               args.rant, args.gain)
 
 
 if __name__ == "__main__":

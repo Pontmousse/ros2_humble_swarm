@@ -81,12 +81,32 @@ class GuidanceNode(Node):
         # declared in virtual_spacecraft.yaml). Rant was 0.4, i.e. the influence
         # radius sat entirely inside the collision: the repulsion was still
         # exactly 0 N at contact and only reached 1 N once the chassis had
-        # overlapped by 4 cm. 0.70 puts the onset 0.26 m clear of contact.
-        self.Rant = 0.70
+        # overlapped by 4 cm. 0.70 moved the onset 0.26 m clear of contact.
+        #
+        # 0.26 m is still not enough runway, and the reason is a bound rather
+        # than a tuning failure: a brake limited to max_nbh_force can absorb at
+        # most sqrt(2 * (2F/m) * runway) however it is shaped, which is
+        # 0.456 m/s at Rant = 0.70. The 2026-10-07 flight closed faster than
+        # that 11.5% (RM2) / 6.7% (RM6) of the time, peaking at 0.660 m/s, so
+        # no gain and no extra term could have held it. Runway is the only
+        # factor in that bound we can buy cheaply and it enters under a square
+        # root, so 1.05 m -- a 0.61 m runway -- lifts the ceiling to 0.699 m/s
+        # and clears the measured peak.
+        #
+        # The cost is measured on the same bag rather than assumed: separation
+        # fell in the newly-covered [0.70, 1.05) band only 9.7% of the time, so
+        # the force goes from acting 7.2% of the time to 16.8%, and the median
+        # separation (1.88 m) stays far outside it.
+        self.Rant = 1.05
         self.flk_gain = 0.5
-        # Sized so the repulsion reaches max_nbh_force at d = 0.55 m, 0.11 m
-        # before contact -- about one second of warning at the 0.1 m/s design
-        # closing speed.
+        # Left at 0.78 so this change moves one variable. With the wider radius
+        # the same gain saturates at d = 0.65 m instead of 0.55 m, i.e. 0.21 m
+        # before contact rather than 0.11 m. That is the right direction: the
+        # force-times-runway ceiling is derived by holding max_nbh_force across
+        # the whole runway, so saturating earlier is strictly closer to the
+        # bound. Restoring the old 0.55 m saturation point would need 0.35 and
+        # would cost 0.07 m/s of pure-potential critical speed (0.524 -> 0.455)
+        # in exchange for a gentler long-range push.
         self.antflk_gain = 0.78
         # The potential diverges as 1/d^3, so without a cap it reached 18 N at
         # d = 0.15 m. Two things make that unacceptable: the HIL dynamics were
@@ -97,21 +117,24 @@ class GuidanceNode(Node):
         # Dissipative term, F_damp = damping_gain * max(0, closing speed). The
         # potential above is conservative, so the work it can do between Rant
         # and contact is fixed no matter how fast the pair is closing: it has a
-        # single critical speed (0.368 m/s here) and the excess above it is
-        # untouched. Measured 2026-10-07, RM2 and RM6 converged at 0.445 m/s and
-        # touched. Damping removes energy instead of storing it, so it scales
-        # with the actual approach, and it is at full strength the instant a
-        # fast approach crosses Rant -- which is exactly where the potential is
-        # weakest (0.087 N at d = 0.676 m, so the first 0.1 m of the 0.26 m
-        # braking runway was contributing almost nothing).
+        # single critical speed (0.368 m/s at the old Rant = 0.70, 0.524 m/s
+        # now) and the excess above it is untouched. Measured 2026-10-07, RM2
+        # and RM6 converged at 0.445 m/s and touched. Damping removes energy
+        # instead of storing it, so it scales with the actual approach, and it
+        # is at full strength the instant a fast approach crosses Rant -- which
+        # is exactly where the potential is weakest (0.087 N at d = 0.676 m
+        # under the old radius, so the first 0.1 m of that 0.26 m braking
+        # runway was contributing almost nothing).
         #
         # 2.0 is not tuned: two references capped at virtual_spacecraft
         # maximum_speed = 0.25 m/s can close at 0.5 m/s, and 2.0 * 0.5 = 1.0 N
         # spends exactly the validated envelope at that worst case. Raising it
         # buys nothing -- see test_damping_cannot_beat_the_force_times_runway
-        # _ceiling: no law bounded by 1.0 N over this runway absorbs more than
-        # 0.456 m/s, which is still below 0.5. Damping is necessary, not
-        # sufficient; closing the rest needs maximum_speed or Rant to move.
+        # _ceiling: no law bounded by 1.0 N absorbs more than
+        # sqrt(2 * (2F/m) * runway), and with Rant = 1.05 damping already
+        # reaches that bound (0.699 m/s) exactly. At Rant = 0.70 damping was
+        # necessary but not sufficient, capped at 0.456 m/s against a 0.5 m/s
+        # worst case; it was the runway, not the gain, that closed the gap.
         self.damping_gain = 2.0
         self.eps = 1e-4
 
