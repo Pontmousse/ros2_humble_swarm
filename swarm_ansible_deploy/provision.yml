@@ -8,5 +8,8 @@
 
   tasks:
 
+    - name: Configure the RoboMaster USB link
+      ansible.builtin.include_tasks: tasks/robomaster_link.yml
+
     - name: Prepare robot system
       ansible.builtin.include_tasks: tasks/system_setup.yml

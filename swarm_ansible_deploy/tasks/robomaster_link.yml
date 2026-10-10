@@ -1,0 +1,76 @@
+# ================================
+# RNDIS link to the RoboMaster body
+# ================================
+# Under conn_type: rndis the body enumerates as a USB network device and sits
+# at a fixed 192.168.42.2, but nothing on the Pi addresses our end of it, so
+# usb0 comes up unconfigured and the driver cannot reach the robot. Doing it by
+# hand does not survive anything: the interface is destroyed and recreated
+# every time the RoboMaster power-cycles or the USB re-enumerates.
+#
+# Bound to the device unit rather than run at boot, because the body is usually
+# powered on AFTER the Pi -- a boot-time one-shot would run before usb0 exists.
+# systemd creates sys-subsystem-net-devices-usb0.device from udev whenever the
+# interface appears, so WantedBy on it re-runs this on every re-enumeration and
+# BindsTo tears it down with the device.
+#
+# No gateway and no default route: the swarm UDP broadcast and DDS both have to
+# stay on wlan0. The route table preferring usb0 for broadcasts is a failure
+# this stack has already been bitten by -- see state_broadcaster._open_sockets
+# and the directed broadcast address in launch_decentralized_agent.
+
+- name: Mark usb0 unmanaged by NetworkManager
+  ansible.builtin.copy:
+    dest: /etc/NetworkManager/conf.d/10-robomaster-usb0.conf
+    mode: "0644"
+    content: |
+      # usb0 is a point-to-point link to the RoboMaster body, addressed by
+      # robomaster-usb0.service. Left managed, NetworkManager races it with a
+      # DHCP attempt that has no server to answer it.
+      [keyfile]
+      unmanaged-devices=interface-name:usb0
+  # Deliberately not reloading NetworkManager here: these Pis are reached over
+  # the WiFi NetworkManager is holding, and the service below addresses usb0
+  # whether or not the setting has taken effect yet. It applies on the next
+  # boot, which is when the race it prevents would matter.
+  when: conn_type == "rndis"
+
+- name: Install the RoboMaster USB link service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/robomaster-usb0.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Address the RNDIS link to the RoboMaster body
+      BindsTo=sys-subsystem-net-devices-usb0.device
+      After=sys-subsystem-net-devices-usb0.device
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      # "replace" rather than "add": idempotent, so a re-trigger while the
+      # address is already present is not an error.
+      ExecStart=/usr/sbin/ip address replace 192.168.42.3/24 dev usb0
+      ExecStart=/usr/sbin/ip link set usb0 up
+
+      [Install]
+      WantedBy=sys-subsystem-net-devices-usb0.device
+  register: usb0_unit
+  when: conn_type == "rndis"
+
+- name: Enable the RoboMaster USB link service
+  ansible.builtin.systemd:
+    name: robomaster-usb0.service
+    enabled: yes
+    daemon_reload: "{{ usb0_unit is changed }}"
+  when: conn_type == "rndis"
+
+# Covers the usual case: the body is already plugged in and enumerated when
+# this runs, so the device unit exists and nothing would re-trigger the service
+# until the next re-enumeration.
+- name: Address usb0 now if it already exists
+  ansible.builtin.systemd:
+    name: robomaster-usb0.service
+    state: started
+  when:
+    - conn_type == "rndis"
+    - "'usb0' in ansible_interfaces | default([])"

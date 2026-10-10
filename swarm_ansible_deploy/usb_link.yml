@@ -1,0 +1,15 @@
+---
+# Standalone entry point for the RoboMaster USB link, so it can be applied
+# without provision.yml, which reboots the fleet to pick up group changes.
+- name: Configure the RoboMaster USB link
+  hosts: robots
+  become: yes
+  strategy: free
+
+  vars_files:
+    - vars.yml
+
+  tasks:
+
+    - name: Configure the RoboMaster USB link
+      ansible.builtin.include_tasks: tasks/robomaster_link.yml
