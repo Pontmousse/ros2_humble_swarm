@@ -38,6 +38,90 @@ ENV PYTHONPATH=/root/.local/lib/python3.10/site-packages
 RUN python3 -m pip install --no-cache-dir gpiod
 
 # ================================
+# CSI camera stack (libcamera + picamera2)
+#
+# Used ONLY by ext_camera's source=csi backend (Raspberry Pi Camera Module 3 /
+# IMX708). The See3CAM usb path never imports libcamera and ext_camera imports
+# picamera2 lazily, so a failure anywhere in this block cannot affect source=usb
+# at runtime -- the worst case is a failed image build, i.e. you keep shipping
+# the previous image. Built from the Raspberry Pi libcamera *fork* because stock
+# Ubuntu libcamera ships no rpi pipeline handlers; both vc4 (Pi 4) and pisp
+# (Pi 5) are enabled so a single image serves RM2 and RM5. Placed before the
+# workspace COPY below so ordinary .py edits do not rebuild this slow layer.
+#
+# meson/ninja come from pip, not apt: Jammy's apt meson (0.61) is too old for
+# the current libcamera fork. libcap-dev is for picamera2's python-prctl dep.
+# The libcamera python binding installs to the UNVERSIONED
+# /usr/local/lib/python3/dist-packages, which is NOT on the launched process's
+# sys.path -- it is symlinked into the versioned dist-packages dir below.
+# ================================
+RUN python3 -m pip install --no-cache-dir meson ninja
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential pkg-config cmake python3-dev pybind11-dev \
+    libboost-dev libboost-program-options-dev libgnutls28-dev libssl-dev \
+    openssl libtiff-dev libglib2.0-dev libgstreamer-plugins-base1.0-dev \
+    python3-ply python3-yaml python3-jinja2 libexif-dev libdrm-dev \
+    libjpeg-dev libpng-dev libcap-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pin to a known tag rather than a moving main so an upstream break cannot
+# silently fail the fleet image; bump deliberately after testing.
+RUN git clone --depth=1 https://github.com/raspberrypi/libcamera.git /tmp/libcamera && \
+    cd /tmp/libcamera && \
+    meson setup build --buildtype=release \
+      -Dpipelines=rpi/vc4,rpi/pisp \
+      -Dipas=rpi/vc4,rpi/pisp \
+      -Dv4l2=enabled -Dgstreamer=enabled \
+      -Dtest=false -Dlc-compliance=disabled -Dcam=disabled -Dqcam=disabled \
+      -Ddocumentation=disabled -Dpycamera=enabled && \
+    ninja -C build && \
+    ninja -C build install && \
+    ldconfig && \
+    rm -rf /tmp/libcamera
+
+# numpy pinned to the image's existing 1.25 so picamera2's resolver cannot
+# bump it and disturb the other nodes.
+RUN python3 -m pip install --no-cache-dir "numpy==1.25" picamera2
+
+# ================================
+# CSI runtime fixes (verified live on RM2, 2026-10-25)
+#
+# Three defects that only surface at `source=csi` runtime, none of which fail
+# the build, so they must be patched here:
+#
+# 1. libcamera's pycamera binding installs to the UNVERSIONED
+#    /usr/local/lib/python3/dist-packages, which is not on sys.path. Symlink it
+#    into the versioned dist-packages dir that IS searched.
+# 2. picamera2's previews/__init__.py eagerly imports drm_preview + qt_previews,
+#    which need pykms/Qt that this headless image lacks -> ImportError on
+#    `import picamera2`. Make the preview backends optional.
+# 3. picamera2's dma_heap.py only looks for /dev/dma_heap/{vidbuf_cached,linux,cma},
+#    but this Ubuntu-on-Pi kernel names its heaps {reserved,system}. Add them so
+#    DmaHeap() can open a device.
+# ================================
+RUN set -eux; \
+    PV=/usr/local/lib/python3.10/dist-packages; \
+    mkdir -p "$PV"; \
+    ln -sfn /usr/local/lib/python3/dist-packages/libcamera "$PV/libcamera"; \
+    sed -i 's#^heapNames = .*#heapNames = ["/dev/dma_heap/vidbuf_cached", "/dev/dma_heap/linux,cma", "/dev/dma_heap/reserved", "/dev/dma_heap/system"]#' \
+        "$PV/picamera2/dma_heap.py"; \
+    printf '%s\n' \
+'from .null_preview import NullPreview' \
+'try:' \
+'    from .drm_preview import DrmPreview, list_devices' \
+'except Exception:' \
+'    DrmPreview = None' \
+'    def list_devices(*args, **kwargs):' \
+'        return []' \
+'try:' \
+'    from .qt_previews import QtGlPreview, QtGlPreviewDirect, QtGlPreviewWayland, QtGlPreviewWaylandDirect, QtPreview' \
+'except Exception:' \
+'    QtGlPreview = QtGlPreviewDirect = QtGlPreviewWayland = QtGlPreviewWaylandDirect = QtPreview = None' \
+        > "$PV/picamera2/previews/__init__.py"; \
+    python3 -c "import libcamera, picamera2; print('csi stack import OK')"
+
+# ================================
 # Clean inherited v8 workspace
 # ================================
 WORKDIR /

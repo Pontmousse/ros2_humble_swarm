@@ -7,6 +7,7 @@ from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from std_srvs.srv import SetBool
 
 # Custom messages
 from swarm_interfaces.msg import CoordXY, Markers, NeighbourStates
@@ -99,6 +100,14 @@ class GuidanceNode(Node):
         # separation (1.88 m) stays far outside it.
         self.Rant = 1.05
         self.flk_gain = 0.5
+        # Publisher-side cap on the flocking wrench. The spacecraft clamps the
+        # SUM of all four sources to its maximum_force (1.0 N), so this is not a
+        # safety bound -- it is the share of that envelope the flocking layer may
+        # claim before avoidance and box-keeping get theirs. 0.5 N mirrors
+        # bounding_box_search.maximum_force: two opposing contributors each
+        # capped at the full 1.0 N would cancel to ~0 after the resultant clamp,
+        # so neither could ever win (same failure the box force was halved for).
+        self.max_flk_force = 0.5
         # Left at 0.78 so this change moves one variable. With the wider radius
         # the same gain saturates at d = 0.65 m instead of 0.55 m, i.e. 0.21 m
         # before contact rather than 0.11 m. That is the right direction: the
@@ -145,6 +154,15 @@ class GuidanceNode(Node):
         self.vel2 = np.array([0, 0])
         self.step = 1.0
 
+        # ENCAPSULATION gate. vel1 (the landmark flocking potential) is always
+        # computed from the landmark stream, but it is only published as a wrench
+        # while the supervisor has this layer enabled. Starts False so a node
+        # that comes up in SEARCH contributes an explicit zero until landmarks
+        # move it to ENCAPSULATION; the supervisor flips it via encapsulation/
+        # enable. Left as a plain flag (not a parameter) because the mode, not a
+        # launch value, owns it.
+        self.encapsulation_enabled = False
+
         # Forces from neighborhood antiflocking (collision avoidance) for virtual spacecraft
         self.nbh_Fx = 0.0
         self.nbh_Fy = 0.0
@@ -184,8 +202,21 @@ class GuidanceNode(Node):
 
         # Publishers
         self.wrench_nbh_pub = self.create_publisher(Wrench,"avoidance_wrench", 10)
+        # Flocking (landmark APF) wrench, summed by the spacecraft as the
+        # ENCAPSULATION layer. Map frame, same frame as vel1. Gated by
+        # encapsulation_enabled: zero Wrench when disabled so it contributes
+        # nothing rather than dropping out (a published zero keeps the source
+        # fresh and the visualizer honest about the layer being present-but-off).
+        self.wrench_flk_pub = self.create_publisher(Wrench, "flocking_wrench", 10)
         self.pub = self.create_publisher(CoordXY, 'target_position', self.qos_profile_reliable)
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_position)
+
+        # Mode gate. The supervisor calls this to enter/leave ENCAPSULATION; no
+        # other node writes self.encapsulation_enabled. Kept deliberately thin so
+        # the longer-term switch condition (manual trigger, consensus) can live
+        # entirely in the supervisor without touching this node.
+        self.encap_srv = self.create_service(
+            SetBool, "encapsulation/enable", self.set_encapsulation)
         
 
     def pose_callback(self, msg: State):
@@ -225,6 +256,14 @@ class GuidanceNode(Node):
         # Calculate force direction and amplitude
         self.vel1 = self.flocking_potential(self.landmarks)   
 
+
+    def set_encapsulation(self, request, response):
+        self.encapsulation_enabled = request.data
+        response.success = True
+        response.message = (
+            "encapsulation enabled" if request.data else "encapsulation disabled")
+        self.get_logger().info(response.message)
+        return response
 
     def flocking_potential(self, landmarks):
         Fx, Fy = 0.0, 0.0
@@ -366,6 +405,23 @@ class GuidanceNode(Node):
         wmsg.force.x = self.nbh_Fx
         wmsg.force.y = self.nbh_Fy
         self.wrench_nbh_pub.publish(wmsg)
+
+        # Flocking wrench: the same landmark potential vel1, now as a map-frame
+        # force, but published only while ENCAPSULATION is active. Disabled ->
+        # explicit zero (see the publisher comment). Magnitude clamped to
+        # max_flk_force so this layer claims at most its share of the summed
+        # envelope; direction is preserved.
+        fmsg = Wrench()
+        if self.encapsulation_enabled:
+            fx, fy = float(self.vel1[0]), float(self.vel1[1])
+            mag = math.hypot(fx, fy)
+            if mag > self.max_flk_force:
+                scale = self.max_flk_force / mag
+                fx *= scale
+                fy *= scale
+            fmsg.force.x = fx
+            fmsg.force.y = fy
+        self.wrench_flk_pub.publish(fmsg)
 
 def map_frame_velocity(msg):
     """Linear velocity from an Odometry message, rotated into the map frame.

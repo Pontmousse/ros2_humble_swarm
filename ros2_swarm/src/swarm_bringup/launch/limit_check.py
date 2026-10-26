@@ -54,7 +54,8 @@ def main(path):
     vs = block(doc, "/**/virtual_spacecraft")
     bb = block(doc, "/**/bounding_box_search")
     sm = block(doc, "/**/velocity_smoother")
-    viz = block(doc, "/**/bounding_box_visualizer")
+    viz = block(doc, "/**/spacecraft_visualizer") or block(
+        doc, "/**/bounding_box_visualizer")
     cap = block(doc, "/**/chassis_capability")
 
     hw_linear = cap.get("hardware_max_linear", 3.5)

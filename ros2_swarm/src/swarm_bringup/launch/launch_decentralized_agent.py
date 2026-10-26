@@ -285,7 +285,7 @@ def generate_launch_description():
                 # symptom of the latched-CAPTURE runaway (the robot circling
                 # violently drove the gimbal pitch stabilizer to the floor), not
                 # inherent to CHASSIS_LEAD; that runaway is fixed upstream by
-                # capture_supervisor.stop_chassis() zeroing cmd_vel around the
+                # mode_supervisor.stop_chassis() zeroing cmd_vel around the
                 # velocity_smoother PAUSE. FREE (0) was tried but world-fixes the
                 # yaw, so the camera stops facing forward -> rejected.
                 'gimbal_mode': '2'
@@ -487,6 +487,52 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
+    ##############################################################################
+    ######################### - USB (UVC) camera source - ########################
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        ext_camera = Node(
+            package="swarm_aruco",
+            executable="ext_camera",
+            name="ext_camera",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    # Capture backend. Defaults to the Pi Camera Module 3 (csi);
+                    # export CAMERA_SOURCE=usb to use the See3CAM instead. Normal
+                    # runs leave it unset and get csi.
+                    "source": os.getenv("CAMERA_SOURCE", "csi"),
+                    "device": os.getenv("USB_CAM_DEVICE", "/dev/video0"),
+                    # See3CAM_CU30. 640x480 is its lowest mode -- it has no
+                    # 640x360, which is what the stored calibration assumes.
+                    "width": 640,
+                    "height": 480,
+                    # UYVY, not MJPG: luma is a strided copy out of the packed
+                    # 4:2:2 buffer (~1 ms/frame on the Pi 4) against ~25 ms for
+                    # a JPEG decode. Measured 2026-10-19.
+                    "fourcc": "UYVY",
+                    "fps": 30,
+                    # The detectors throttle to detect_max_hz anyway, so
+                    # publishing faster only burns CPU and DDS bandwidth.
+                    "publish_max_hz": 10.0,
+                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
+                }
+            ],
+        )
+
+        # Replaces the RoboMaster's own camera, which stays off ('camera':
+        # 'false' above): the SDK video path cost ~82% of a core in the driver
+        # and delivered 3-5 fps of frequently-corrupt frames over the double-hop
+        # WiFi. Measured on the Pi 4 with robot2 running, the usb path gives 23.8
+        # fps end to end at 35% of the 4-core machine with a 100% detection rate.
+        # The backend (csi default, usb override) is chosen by CAMERA_SOURCE.
+        ld.add_action(ext_camera)
+
+    ##############################################################################
+    ##############################################################################
     for i in range(N):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
@@ -515,11 +561,16 @@ def generate_launch_description():
             ]
         )
 
-        # ld.add_action(landmarks)  # DISABLED: testing search->chase via target_detector (targets topic)
+        ld.add_action(landmarks)
+
 
     ##############################################################################
     ##############################################################################
     for i in range(N):
+        # See the note on targets_filter below: index the list, don't inherit
+        # whatever `robot_name` the previous loop happened to leave behind.
+        robot_name = robot_names[i]
+
         aruco_landmark_filter = Node(
         package="swarm_filter",
         executable="aruco_filter",
@@ -539,7 +590,7 @@ def generate_launch_description():
             ]
         )
 
-        # ld.add_action(aruco_landmark_filter)  # DISABLED: testing search->chase via target path
+        ld.add_action(aruco_landmark_filter) 
 
 
 
@@ -577,15 +628,17 @@ def generate_launch_description():
             ]
         )
 
-        # ld.add_action(targets)  # DISABLED 2026-10-07 with the driver's video:
-        # solvePnP-per-frame was the single largest CPU consumer (~116%) on this
-        # Pi, and with video_raw off it would only ever see an empty topic.
-        # Re-enable together with video_raw '1'; it feeds `targets` so
-        # capture_supervisor can switch SEARCH<->CHASE.
+
+        ld.add_action(targets)
 
     ##############################################################################
     ##############################################################################
     for i in range(N):
+        # robot_names[i], not the bare `robot_name` leaking from the previous
+        # loop -- that put every filter in the LAST robot's namespace. Invisible
+        # while N == 1 (one container per robot), wrong the moment it is not.
+        robot_name = robot_names[i]
+
         targets_filter = Node(
         package="swarm_filter",
         executable="aruco_filter",
@@ -605,8 +658,7 @@ def generate_launch_description():
             ]
         )
 
-        # ld.add_action(targets_filter)  # DISABLED 2026-10-07: its only input is
-        # targets_unf from the now-disabled target_detector.
+        ld.add_action(targets_filter)
 
 
     ##############################################################################
@@ -729,40 +781,45 @@ def generate_launch_description():
         ld.add_action(cp_control)
 
     ##############################################################################
-    ############### - Search <-> Capture handoff supervisor - ####################
+    ####### - Mode supervisor: SEARCH -> ENCAPSULATION -> CAPTURE - ##############
     for i in range(N):
         robot_name = robot_names[i]
 
-        capture_supervisor = Node(
+        mode_supervisor = Node(
             package="swarm_controller",
-            executable="capture_supervisor",
-            name="capture_supervisor",
+            executable="mode_supervisor",
+            name="mode_supervisor",
             namespace=robot_name,
             output="screen",
             emulate_tty=True,
             parameters=[
                 {
-                    # Consecutive detected frames before switching to capture.
+                    # Consecutive detected frames before advancing a mode.
                     "detect_frames": 3,
-                    # Seconds the target may be lost before resuming search.
-                    # Raised 2.0->4.0 to ride through brief detection dropouts
-                    # (low-fps flicker) and stop the CAPTURE<->SEARCH oscillation.
+                    # Seconds a signal may be lost before a backward transition
+                    # (CAPTURE->ENCAP/SEARCH, ENCAP->SEARCH). Raised 2.0->4.0 to
+                    # ride through brief detection dropouts (low-fps flicker) and
+                    # stop CAPTURE<->SEARCH oscillation.
                     "lost_timeout": 4.0,
                     # Empty frames tolerated before the ENTRY streak resets, so a
-                    # steadily-held marker that flickers still reaches CAPTURE.
+                    # steadily-held marker that flickers still advances the mode.
                     "miss_tolerance": 3,
-                    # False so losing the target falls back to SEARCH after
-                    # lost_timeout. Required to validate following a MOVING
-                    # target: latched, the robot would stay in CAPTURE driving
-                    # on a stale marker instead of re-acquiring.
+                    # False so losing the target falls back after lost_timeout.
+                    # Required to validate following a MOVING target: latched,
+                    # the robot would stay in CAPTURE driving on a stale marker
+                    # instead of re-acquiring.
                     "latch_capture": False,
-                    # Match the BEST_EFFORT publisher on the targets topic.
+                    # Mode assumed at startup; launch brings up search-enabled /
+                    # capture-disabled, so SEARCH matches reality with no forced
+                    # service call on boot.
+                    "initial_mode": "search",
+                    # Match the BEST_EFFORT publisher on the detection topics.
                     "qos_reliability": "BEST_EFFORT",
                 }
             ],
         )
 
-        ld.add_action(capture_supervisor)
+        ld.add_action(mode_supervisor)
 
 
     ##############################################################################
@@ -830,7 +887,8 @@ def generate_launch_description():
                     "launch",
                     "launch_virtual_spacecraft.py"
                 )
-            )
+            ),
+        launch_arguments={"enable_guidance_visualization": "true"}.items(),
         )
 
         ld.add_action(virtual_spacecraft_launch)

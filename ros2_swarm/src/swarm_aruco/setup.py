@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'aruco_detector = swarm_aruco.aruco_detector:main',
+            'ext_camera = swarm_aruco.ext_camera:main',
             'video_processor_h264 = swarm_aruco.video_processor_h264:main',
             'video_processor_color = swarm_aruco.video_processor_color:main'
         ],

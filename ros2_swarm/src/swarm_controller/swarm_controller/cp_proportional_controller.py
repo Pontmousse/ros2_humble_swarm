@@ -6,7 +6,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import numpy as np
 
 # Built-in messages
-from geometry_msgs.msg import Twist, Wrench
+from geometry_msgs.msg import Wrench
+from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
 from std_srvs.srv import SetBool
 
@@ -94,9 +95,9 @@ class ControllerNode(Node):
 
         # Approach law gains.
         #
-        # frc_cmd is a VELOCITY in m/s -- it is published straight into
-        # Twist.linear -- so the gain taking a position error in metres to it
-        # has units of s^-1; the loop time constant is 1/approach_gain.
+        # frc_cmd is a VELOCITY in m/s -- it is the v_desired the capture-wrench
+        # velocity servo tracks -- so the gain taking a position error in metres
+        # to it has units of s^-1; the loop time constant is 1/approach_gain.
         # The previous law put the error in CENTIMETRES into that slot, an
         # implicit 100 s^-1, and bound() then clamped it against
         # max_translational_speed: the linear region was 0.5 mm wide in x and
@@ -206,65 +207,62 @@ class ControllerNode(Node):
             "target_velocity_span").value
         self.feedforward_gain = self.get_parameter("feedforward_gain").value
 
-        # Collision avoidance during capture.
+        # Capture-wrench output stage.
         #
-        # capture_supervisor pauses velocity_smoother on entry, and that is the
-        # only node carrying the search-side wrench to the wheels, so while we
-        # hold cmd_vel the whole avoidance chain is disconnected -- two robots
-        # chasing one target would close with nothing between them. Rather than
-        # a second law here, reuse the one position_guidance3 already computes:
-        # it keeps publishing avoidance_wrench at 100 Hz throughout capture
-        # (publish_target_position has no capture gate), tuned and bag-validated
-        # at Rant = 1.05 m, cap 1.0 N, with the closing-rate damping term and
-        # the hold-on-UDP-dropout logic. One law covers search and capture.
+        # The approach law above is unchanged -- it still produces a DESIRED body
+        # velocity (frc_cmd, m/s) and a DESIRED yaw rate (trq_cmd, rad/s). What
+        # changed is where that goes: instead of driving cmd_vel straight to the
+        # chassis, it is turned into a force/torque on the virtual spacecraft,
+        # which the robot then tracks through nav2_pidff like every other phase.
         #
-        # Override rather than sum: the approach law is a velocity command, so
-        # summing a repulsion into it creates a spurious equilibrium wherever
-        # the two cancel -- the robot would park between target and neighbour
-        # under zero command with no reason to leave. Override makes the
-        # precedence explicit and keeps the escape unconditional.
-        # 0.70 N is a distance in disguise. The potential is monotonic in
-        # separation, so thresholding the force thresholds d; with the live
-        # gains (gain 0.78, Rant 1.05) 0.70 N is d = 0.71 m.
+        # This retires the old avoidance override entirely. That override existed
+        # only because capture used to seize cmd_vel and disconnect the avoidance
+        # chain; now capture is one summed wrench source among four, and
+        # position_guidance3's avoidance_wrench is a peer in that same sum. Two
+        # robots chasing one target are kept apart by the spacecraft adding the
+        # capture pull and the avoidance push -- a potential well, not a seized
+        # command -- so there is nothing here to override. cp no longer reads
+        # avoidance_wrench at all.
         #
-        # The ceiling on it is geometric, not dynamic. Two robots holding
-        # station on the same target both sit on a circle of radius
-        # buffer_radius, so they can be at most 2 * buffer_radius = 0.80 m
-        # apart. An override reaching past that can never be satisfied: both
-        # would be permanently repelling, the target approach would never run,
-        # and the pair would oscillate instead of parking on opposite arcs.
-        # Raising buffer_radius raises this ceiling with it; raising this past
-        # 2 * buffer_radius breaks station keeping. The damping term can still
-        # trip the override earlier than 0.71 m on a genuinely fast approach,
-        # which is the intent -- the effective radius grows with closing speed.
+        # Velocity-servo force: F = velocity_force_gain * (v_desired - v_craft),
+        # read against the spacecraft's own body-frame twist. Driving a double
+        # integrator with this makes its velocity track v_desired with time
+        # constant mass / gain, so the tuned velocity law keeps its meaning. The
+        # per-axis velocity caps (max_translational_speed, max_rotational_speed)
+        # still bound v_desired, so the approach-speed envelope is preserved; the
+        # spacecraft's own maximum_speed is the outer backstop.
         #
-        # What the radius does NOT do is make the override fire more often. On
-        # the circle two robots are 2 * r * sin(dtheta / 2) apart, so 0.71 m
-        # corresponds to a wedge of 126 deg at r = 0.40 but only 73 deg at
-        # r = 0.60: the pair has to be angularly CLOSER before anything pushes
-        # them apart. At the antipodal equilibrium the separation goes
-        # 0.80 -> 1.20 m, past Rant = 1.05, so the sub-threshold background
-        # repulsion that used to bias them apart (0.36 N at 0.80 m) now reads
-        # exactly zero. Inter-robot avoidance is strictly less active after
-        # this change, not more; the two robots converging from opposite sides
-        # seen on 2026-10-10 is a station-keeping question, not an avoidance
-        # one, and wants arc allocation rather than a bigger override.
-        self.declare_parameter("avoid_override_force", 0.70)
-        self.declare_parameter("avoid_timeout", 0.75)
-        self.avoid_override_force = self.get_parameter("avoid_override_force").value
-        self.avoid_timeout = self.get_parameter("avoid_timeout").value
+        # maximum_force 0.5 / maximum_torque 0.2 mirror the other gated layers:
+        # the spacecraft clamps the SUM of all sources to 1.0 N, so capping this
+        # layer leaves authority for a saturated avoidance push instead of the
+        # two cancelling to zero after the resultant clamp.
+        self.declare_parameter("velocity_force_gain", 3.0)
+        self.declare_parameter("yaw_rate_torque_gain", 1.0)
+        self.declare_parameter("maximum_force", 0.5)
+        self.declare_parameter("maximum_torque", 0.2)
+        self.velocity_force_gain = self.get_parameter("velocity_force_gain").value
+        self.yaw_rate_torque_gain = self.get_parameter("yaw_rate_torque_gain").value
+        self.maximum_force = self.get_parameter("maximum_force").value
+        self.maximum_torque = self.get_parameter("maximum_torque").value
 
         # Velocity commands
         self.trq_cmd = None
         self.frc_cmd = np.array([None,None])
 
-        # Latest avoidance force (map frame, N) and our heading, for the
-        # map->body rotation. StatePos.theta is in DEGREES.
-        self.avoid = None
-        self.avoid_stamp = None
+        # Our heading, for the map->body rotation of the target-velocity
+        # feedforward. StatePos.theta is in DEGREES.
         self.pose_x = None
         self.pose_y = None
         self.pose_theta = None
+
+        # Spacecraft body-frame velocity, the servo sets v_desired against. The
+        # virtual_spacecraft publishes its twist already in body frame, so these
+        # compare directly to frc_cmd (body) and trq_cmd (yaw rate). None until
+        # the first odom; the servo falls back to v_craft = 0 so a cold start
+        # commands pure open-loop force toward v_desired rather than stalling.
+        self.craft_vx = None
+        self.craft_vy = None
+        self.craft_wz = None
 
         # Map-frame track of the closest target, for the velocity estimate.
         # Pruned by age, not by count: see target_velocity_span.
@@ -280,11 +278,19 @@ class ControllerNode(Node):
                                 reliability=ReliabilityPolicy.BEST_EFFORT,
                                 history=HistoryPolicy.KEEP_LAST)
         self.create_subscription(State, 'pose', self.pose_callback, qos_latest)
-        self.create_subscription(Wrench, 'avoidance_wrench',
-                                 self.avoidance_callback, qos_latest)
+        # The spacecraft's own state, to close the velocity servo. BEST_EFFORT /
+        # depth 1 for the same reason as pose: a retransmitted stale velocity is
+        # worse than a gap.
+        self.create_subscription(Odometry, 'virtual_spacecraft/odom',
+                                 self.spacecraft_callback, qos_latest)
 
         # Publishers
-        self.cmd_pub = self.create_publisher(Twist, 'cmd_vel', self.qos_profile)
+        # Capture wrench, body frame, summed by the virtual_spacecraft as the
+        # CAPTURE layer. Gated by capture_mode: a zero Wrench when disabled so
+        # the source contributes nothing yet stays fresh (same pattern as
+        # flocking_wrench).
+        self.wrench_pub = self.create_publisher(Wrench, 'capture_wrench',
+                                                self.qos_profile)
         self.cmd_pub_timer = self.create_timer(self.timer_frequency, self.publish_cmd)
 
         # Service to control the control mode
@@ -304,40 +310,16 @@ class ControllerNode(Node):
         self.pose_y = msg.y
         self.pose_theta = msg.theta
 
-    def avoidance_callback(self, msg: Wrench):
-        self.avoid = (msg.force.x, msg.force.y)
-        self.avoid_stamp = self.get_clock().now()
+    def spacecraft_callback(self, msg: Odometry):
+        """Store the spacecraft's body-frame velocity for the servo.
 
-    def avoidance_body(self):
-        """Unit escape DIRECTION in body frame, or None if it must not act.
-
-        None means "no override": either we cannot use the force (no heading,
-        no force yet, or it is stale) or the neighbour is far enough that the
-        target approach should keep running.
+        virtual_spacecraft publishes twist in the body (child) frame, so these
+        are directly the v_craft the velocity servo differences v_desired
+        against -- no rotation needed.
         """
-        if self.avoid is None or self.avoid_stamp is None:
-            return None
-        if self.pose_theta is None:
-            return None
-        age = (self.get_clock().now() - self.avoid_stamp).nanoseconds * 1e-9
-        # Same number as position_guidance3.nbh_hold_timeout. It is the same
-        # question -- how long may a force act on news not reconfirmed -- and a
-        # second independent value would only make the ladder inconsistent.
-        if age > self.avoid_timeout:
-            return None
-
-        fx, fy = self.avoid
-        magnitude = float(np.hypot(fx, fy))
-        if magnitude < self.avoid_override_force:
-            return None
-
-        bx, by = self.to_body(fx, fy)
-        # Normalised, because frc_cmd is a velocity in m/s and the wrench is in
-        # newtons. Returning the raw force would push two different units
-        # through one slot and only looked right while bound() saturated
-        # everything. The magnitude has already done its job as the trigger at
-        # avoid_override_force; what survives is the direction.
-        return (bx / magnitude, by / magnitude)
+        self.craft_vx = msg.twist.twist.linear.x
+        self.craft_vy = msg.twist.twist.linear.y
+        self.craft_wz = msg.twist.twist.angular.z
 
     def to_body(self, mx, my):
         """Rotate a map-frame vector into the body frame.
@@ -497,8 +479,8 @@ class ControllerNode(Node):
 
         marker_dir = np.array([orien.x, orien.y])
         # Argument order and sign flip are the tested convention; only the
-        # units below changed. RADIANS, because trq_cmd is published into
-        # Twist.angular and bounded against max_rotational_speed in rad/s.
+        # units below changed. RADIANS, because trq_cmd is the desired yaw RATE
+        # the servo tracks and is bounded against max_rotational_speed in rad/s.
         # It used to be DEGREES against the same bound, so the linear region
         # was 0.2 deg wide and every heading error above that saturated: the
         # same relay as the old approach law, with a 57.3x implicit gain.
@@ -514,56 +496,50 @@ class ControllerNode(Node):
     ######################################################################################################
 
     def publish_cmd(self):
-        # Wait for initialization before triggering the controller
+        # Wait for initialization before producing any wrench.
         now = self.get_clock().now()
         elapsed = (now - self.init_start_time).nanoseconds / 1e9
         if elapsed <= 2 * self.init_duration:
             return
-        #################################################################
-        # Debugg
-        # self.get_logger().warn(f"Force command: {str(self.frc_cmd)}")
-        # self.get_logger().warn(f"Torque command: {str(self.trq_cmd)}")
 
-        if not self.capture_mode:
-            # self.get_logger().info('Encapsulate mode is ON, publishing commands.')
-            return
-        
-        # Checked before the target guards below, so a neighbour closing on us
-        # is still pushed away when no target is in view -- during capture
-        # nothing else writes cmd_vel, so returning early here would leave the
-        # pair to converge uncommanded.
-        avoid = self.avoidance_body()
+        # Gating by zero: outside CAPTURE, or before the first target command,
+        # the layer still publishes a zero Wrench so it contributes nothing to
+        # the spacecraft sum yet stays fresh (and the visualizer shows the layer
+        # as present-but-off rather than dropped). Inter-robot avoidance is no
+        # longer our concern here -- avoidance_wrench is a peer source in the
+        # same sum, so the spacecraft keeps the pair apart with no command from
+        # cp at all.
+        msg = Wrench()
+        if (self.capture_mode and self.trq_cmd is not None
+                and None not in self.frc_cmd):
+            # Desired body velocity / yaw rate from the tuned approach law,
+            # bounded to the capture-approach envelope before the servo.
+            vx_des = bound(self.frc_cmd[0], self.max_translational_speed[0])
+            vy_des = bound(self.frc_cmd[1], self.max_translational_speed[1])
+            wz_des = bound(self.trq_cmd, self.max_rotational_speed)
 
-        if avoid is None and (self.trq_cmd is None or None in self.frc_cmd):
-            return
+            # Spacecraft body velocity; 0 until the first odom so a cold start
+            # commands open-loop force toward v_desired rather than stalling.
+            vx = self.craft_vx if self.craft_vx is not None else 0.0
+            vy = self.craft_vy if self.craft_vy is not None else 0.0
+            wz = self.craft_wz if self.craft_wz is not None else 0.0
 
-        # Keep facing the target while backing off: it costs nothing and leaves
-        # us oriented to re-approach once the neighbour clears.
-        trq = (bound(self.trq_cmd, self.max_rotational_speed)
-               if self.trq_cmd is not None else 0.0)
+            # Velocity-servo force, magnitude-clamped to this layer's share so
+            # the direction is preserved (same clamp shape as flocking_wrench).
+            fx = self.velocity_force_gain * (vx_des - vx)
+            fy = self.velocity_force_gain * (vy_des - vy)
+            fmag = float(np.hypot(fx, fy))
+            if fmag > self.maximum_force:
+                scale = self.maximum_force / fmag
+                fx *= scale
+                fy *= scale
 
-        frc = np.zeros((2,))
-        if avoid is not None:
-            # Escape at the axis caps. They are asymmetric (0.05 vs 0.15), so
-            # this distorts the direction toward body y. It cannot reverse it:
-            # each axis keeps its sign, so the commanded velocity always has a
-            # positive projection on the true escape direction and separation
-            # still grows.
-            for i in range(2):
-                frc[i] = avoid[i] * self.max_translational_speed[i]
-        else:
-            # Still bounded: the approach law tapers to zero on the keep-out
-            # circle, but a target first seen far away commands more than the
-            # chassis can do.
-            for i in range(2):
-                frc[i] = bound(self.frc_cmd[i],
-                               self.max_translational_speed[i])
+            msg.force.x = float(fx)
+            msg.force.y = float(fy)
+            msg.torque.z = bound(self.yaw_rate_torque_gain * (wz_des - wz),
+                                 self.maximum_torque)
 
-        msg = Twist()
-        msg.linear.x = frc[0]
-        msg.linear.y = frc[1]
-        msg.angular.z = trq
-        self.cmd_pub.publish(msg)
+        self.wrench_pub.publish(msg)
 
 
     ######################################################################################################

@@ -22,6 +22,7 @@ setup(
         "console_scripts": [
             "virtual_spacecraft = swarm_spacecraft.virtual_spacecraft_node:main",
             "arm_all = swarm_spacecraft.arm_all:main",
+            "spacecraft_visualizer = swarm_spacecraft.spacecraft_visualizer:main",
         ],
     },
 )

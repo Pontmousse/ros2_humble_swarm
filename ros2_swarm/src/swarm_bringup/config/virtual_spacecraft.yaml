@@ -77,9 +77,24 @@
     # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
     # Add a term by naming it here plus a topic/frame pair; a source that stops
     # publishing simply drops out after wrench_timeout.
-    wrench_sources: ["bounding_box", "avoidance"]
+    # Four contributors, one per behaviour layer. All are summed every step and
+    # the SUM is clamped to maximum_force / maximum_torque, so each layer may
+    # saturate its own publisher-side cap without the total ever exceeding the
+    # validated envelope. The mode_supervisor does not route or mux these: it
+    # only enables/disables the guidance nodes that publish flocking/capture, and
+    # a disabled layer publishes an explicit zero Wrench so it drops to 0 N in
+    # the sum (and, after wrench_timeout, drops out entirely if it stops).
+    #   bounding_box  SEARCH-phase box-keeping burn      (body, always on)
+    #   flocking      ENCAPSULATION landmark APF         (inertial, gated)
+    #   capture       CAPTURE approach/align velocity    (body, gated)
+    #   avoidance     inter-robot anti-flocking          (inertial, always on)
+    wrench_sources: ["bounding_box", "flocking", "capture", "avoidance"]
     wrench_sources.bounding_box.topic: "spacecraft_wrench"
     wrench_sources.bounding_box.frame: "body"
+    wrench_sources.flocking.topic: "flocking_wrench"
+    wrench_sources.flocking.frame: "inertial"
+    wrench_sources.capture.topic: "capture_wrench"
+    wrench_sources.capture.frame: "body"
     wrench_sources.avoidance.topic: "avoidance_wrench"
     wrench_sources.avoidance.frame: "inertial"
 
@@ -220,7 +235,7 @@
     qos_reliability: "RELIABLE"
     qos_history: "KEEP_LAST"
 
-/**/bounding_box_visualizer:
+/**/spacecraft_visualizer:
   ros__parameters:
     timer_frequency: 0.05
     source_timeout: 0.25
@@ -239,6 +254,15 @@
     imu_orientation_timeout: 0.5
     imu_arrow_length: 0.20
     mm_imu_arrow_length: 0.28
+    # Perception overlays: landmarks / targets (+ their normals). Markers arrive
+    # body-frame in centimetres and are lifted to the global frame with the
+    # physical robot's own odometry pose, so they only draw while it is fresh.
+    show_landmarks: true
+    show_targets: true
+    show_marker_normals: true
+    perception_timeout: 0.5
+    marker_point_size: 0.10
+    normal_arrow_length: 0.20
     qos_depth: 10
     qos_reliability: "RELIABLE"
     qos_history: "KEEP_LAST"

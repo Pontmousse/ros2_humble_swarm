@@ -30,3 +30,5 @@
       # property of the deployment rather than of whichever image tag happens
       # to be installed on a given Pi.
       CONN_TYPE:          "{{ conn_type }}"
+      CAMERA_SOURCE:      "{{ camera_source }}"
+      USB_CAM_DEVICE:     "{{ usb_cam_device }}"

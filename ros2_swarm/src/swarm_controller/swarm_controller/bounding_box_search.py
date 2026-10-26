@@ -303,8 +303,8 @@ class BoundingBoxSearchNode(Node):
 
     def update(self) -> None:
         """Publish the current finite firing or an explicit zero wrench."""
-        # Disabled by the supervisor during the capture phase: yield cmd_vel
-        # authority by commanding no wrench.
+        # Disabled by the supervisor outside SEARCH: drop out of the spacecraft
+        # wrench sum by publishing an explicit zero (gating by zero).
         if not self.enabled:
             self.wrench_publisher.publish(Wrench())
             return

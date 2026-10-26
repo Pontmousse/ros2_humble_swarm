@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.1.6"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.2.0"
 swarm_image_repo: "elghaliasri/ros2-humble-swarm"
 
 # Container names used by older revisions of this playbook. Removed on deploy so
@@ -12,22 +12,13 @@ container_config_dir: /ros2_ws/src/swarm_bringup/config
 swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
 
+camera_source: "csi"
+usb_cam_device: "/dev/video1"
+
 ros_domain_id: "0"
 rmw_implementation: "rmw_fastrtps_cpp"
 ros_localhost_only: "0"
 virtual_spacecraft: "true"
 
-# How the Pi reaches the RoboMaster body: rndis (USB, robot fixed at
-# 192.168.42.2) | sta (robot joins the AP) | ap (robot's own hotspot).
-#
-# rndis is the fleet standard. Under sta the camera stream crosses WiFi twice
-# -- robot to AP, AP to Pi -- which is the measured cause of the empty-marker
-# ArUco failures, and it puts the video on the same radio the swarm broadcast
-# needs. USB takes that traffic off the air entirely.
-#
-# Requires the image to be at least the commit that forwards CONN_TYPE into
-# s1.launch *and* resolves the Marvelmind modem by USB identity: RNDIS makes
-# the RoboMaster enumerate a DJI CDC-ACM device that can take /dev/ttyACM0,
-# and an older image would then open the DJI port as the modem and report no
-# fixes at all.
+
 conn_type: "rndis"

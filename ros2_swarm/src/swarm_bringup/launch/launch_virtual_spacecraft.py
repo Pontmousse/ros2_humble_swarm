@@ -98,9 +98,9 @@ def generate_launch_description():
         )
         actions.append(
             Node(
-                package="swarm_controller",
-                executable="bounding_box_visualizer",
-                name="bounding_box_visualizer",
+                package="swarm_spacecraft",
+                executable="spacecraft_visualizer",
+                name="spacecraft_visualizer",
                 namespace=robot_name,
                 output="screen",
                 parameters=[configured_parameters],

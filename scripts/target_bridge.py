@@ -20,7 +20,7 @@ reading it here also removes a WiFi hop from the target measurement.
 
 This node turns that into the one topic the capture chain actually consumes.
 Both consumers read /RMx/targets and nothing else from perception:
-  capture_supervisor.py:85   only len(msg.markers) > 0, to switch SEARCH<->CAPTURE
+  mode_supervisor.py         only len(msg.markers) > 0, to switch into CAPTURE
   cp_proportional_controller.py:69  the coordinates, to drive the approach
 
 Geometry is the exact inverse of position_guidance3.py:214-223, which does
@@ -100,7 +100,7 @@ class TargetBridge(Node):
         qos_in = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                             history=HistoryPolicy.KEEP_LAST)
         # RELIABLE out, which satisfies both consumers: cp_controller subscribes
-        # RELIABLE, capture_supervisor BEST_EFFORT.
+        # RELIABLE, mode_supervisor BEST_EFFORT.
         qos_out = QoSProfile(depth=10, reliability=ReliabilityPolicy.RELIABLE,
                              history=HistoryPolicy.KEEP_LAST)
 
@@ -228,7 +228,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        # Hand back an empty target so capture_supervisor falls out of CAPTURE
+        # Hand back an empty target so mode_supervisor falls out of CAPTURE
         # instead of latching on the last frame this process ever sent.
         if not args.dry_run:
             for pub in node.pubs.values():

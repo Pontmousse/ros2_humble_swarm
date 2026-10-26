@@ -39,5 +39,10 @@
     volumes:
       - "{{ remote_config_dir }}/swarm_config.yaml:{{ container_config_dir }}/swarm_config.yaml:ro"
       - "{{ remote_config_dir }}/virtual_spacecraft.yaml:{{ container_config_dir }}/virtual_spacecraft.yaml:ro"
+      # libcamera (ext_camera source=csi) enumerates the CSI sensor through
+      # udev; privileged already exposes /dev/video*, /dev/media* and
+      # /dev/dma_heap, but udev enumeration fails without this. Harmless to the
+      # usb path.
+      - /run/udev:/run/udev:ro
 
     env: "{{ swarm_env }}"
