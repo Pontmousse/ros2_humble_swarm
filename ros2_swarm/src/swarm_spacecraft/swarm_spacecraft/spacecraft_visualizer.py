@@ -91,6 +91,7 @@ class SpacecraftVisualizerNode(Node):
     INDOOR_GPS_ID = 6
     IMU_HEADING_ID = 7
     MM_IMU_HEADING_ID = 8
+    VIRTUAL_LABEL_ID = 9
     LANDMARKS_ID = 10
     LANDMARK_NORMALS_ID = 11
     TARGETS_ID = 12
@@ -455,6 +456,19 @@ class SpacecraftVisualizerNode(Node):
         ]
         return marker
 
+    def virtual_label_marker(self, odometry: Odometry, stamp) -> Marker:
+        """Create a 'V' text label at the virtual spacecraft, to tell it apart
+        from the physical robot triangle."""
+        marker = self.marker(self.VIRTUAL_LABEL_ID, Marker.TEXT_VIEW_FACING, stamp)
+        marker.text = "V"
+        marker.scale.z = self.triangle_size
+        marker.color.r = marker.color.g = marker.color.b = 1.0
+        marker.color.a = 1.0
+        marker.pose.position.x = odometry.pose.pose.position.x
+        marker.pose.position.y = odometry.pose.pose.position.y
+        marker.pose.position.z = 0.12
+        return marker
+
     def force_marker(self, stamp, odometry: Odometry, force_x, force_y) -> Marker:
         """Create a red force arrow with magnitude-proportional length."""
         marker = self.marker(self.FORCE_ID, Marker.ARROW, stamp)
@@ -654,6 +668,7 @@ class SpacecraftVisualizerNode(Node):
                 self.delete_marker(marker_id, stamp)
                 for marker_id in (
                     self.VIRTUAL_ID,
+                    self.VIRTUAL_LABEL_ID,
                     self.FORCE_ID,
                     self.TORQUE_ARC_ID,
                     self.TORQUE_HEAD_ID,
@@ -670,6 +685,9 @@ class SpacecraftVisualizerNode(Node):
                     1.0,
                     1.0,
                 )
+            )
+            markers.append(
+                self.virtual_label_marker(self.virtual_odometry, stamp)
             )
             wrench_valid = self.source_is_fresh(
                 now.nanoseconds, self.wrench_update_time

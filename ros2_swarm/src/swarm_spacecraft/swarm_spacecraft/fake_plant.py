@@ -16,10 +16,11 @@ validates logic and flow, not controller robustness to actuator behaviour.
 
 import math
 
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TransformStamped, Twist
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
+from tf2_ros import TransformBroadcaster
 
 from swarm_interfaces.msg import StatePos
 
@@ -83,6 +84,9 @@ class FakePlant(Node):
         self.pose_pub = self.create_publisher(StatePos, "pose", qos)
         self.odom_pub = self.create_publisher(Odometry, "localization/odom", qos)
         self.create_subscription(Twist, "cmd_vel", self._on_cmd, qos)
+        # pose_publisher broadcasts swarm_map -> base on hardware; it is gated off
+        # under VIRTUAL_PLANT, so the plant publishes it or RViz has no swarm_map.
+        self.tf_broadcaster = TransformBroadcaster(self)
 
         self.cmd = (0.0, 0.0, 0.0)          # last commanded body twist
         self.cmd_time = None
@@ -158,6 +162,16 @@ class FakePlant(Node):
         odom.twist.twist.linear.y = self.vy
         odom.twist.twist.angular.z = self.yaw_rate
         self.odom_pub.publish(odom)
+
+        tf = TransformStamped()
+        tf.header.stamp = stamp
+        tf.header.frame_id = self.global_frame
+        tf.child_frame_id = self.base_frame
+        tf.transform.translation.x = self.x
+        tf.transform.translation.y = self.y
+        tf.transform.rotation.z = z
+        tf.transform.rotation.w = w
+        self.tf_broadcaster.sendTransform(tf)
 
 
 def main(args=None):
