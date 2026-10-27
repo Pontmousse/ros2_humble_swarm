@@ -29,7 +29,12 @@ the visualization has no build dependency on the controller package.
 import math
 
 from geometry_msgs.msg import Point, Wrench
-from marvelmind_ros2_msgs.msg import HedgePositionAddressed
+try:
+    from marvelmind_ros2_msgs.msg import HedgePositionAddressed
+except ImportError:
+    # Absent on hardware-free dev machines (and under VIRTUAL_PLANT there is no
+    # Marvelmind to publish mm_pos_unf anyway); the raw-fix overlay is skipped.
+    HedgePositionAddressed = None
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
@@ -229,12 +234,13 @@ class SpacecraftVisualizerNode(Node):
             self.wrench_callback,
             qos_profile,
         )
-        self.create_subscription(
-            HedgePositionAddressed,
-            "mm_pos_unf",
-            self.indoor_gps_callback,
-            qos_profile,
-        )
+        if HedgePositionAddressed is not None:
+            self.create_subscription(
+                HedgePositionAddressed,
+                "mm_pos_unf",
+                self.indoor_gps_callback,
+                qos_profile,
+            )
         if self.show_imu_orientations:
             self.create_subscription(
                 Odometry,

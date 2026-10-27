@@ -122,7 +122,8 @@ class ArucoDetectorNode(Node):
                 f"cx={K[0][2]:.1f} cy={K[1][2]:.1f}")
 
         # use H.264 image format, compressed, lighter in bandwidth and faster refresh rate and same quality
-        self.use_h264 = False
+        self.declare_parameter("use_h264", False)
+        self.use_h264 = bool(self.get_parameter("use_h264").value)
         self.get_logger().info(f"Using H.264 video stream: {self.use_h264}")
 
         # Subscribe to video stream

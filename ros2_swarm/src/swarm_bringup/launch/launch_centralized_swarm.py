@@ -40,6 +40,32 @@ if calibrate_camera == 1:
     print("CALIBRATE_CAMERA=1 -- landmark_detector will capture chessboard "
           "photos instead of detecting markers.")
 
+# VIRTUAL_TARGET=1 replaces the four camera nodes (landmark/target detectors and
+# filters) with one global virtual_target/virtual_scene node that publishes the
+# final landmarks/targets topics from a geometric world + sensor model, so the
+# centralized stack runs with no camera. SCENE_FILE overrides the default scene.
+virtual_target_on = os.environ.get("VIRTUAL_TARGET", "").lower() in ("1", "true", "yes", "on")
+if virtual_target_on:
+    print("VIRTUAL_TARGET=1 -- camera detectors replaced by virtual_scene.")
+    if calibrate_camera == 1:
+        print("WARNING: CALIBRATE_CAMERA needs a real camera; ignored under "
+              "VIRTUAL_TARGET.")
+
+# VIRTUAL_PLANT=1 replaces the robot + localization chain (robomaster driver,
+# marvelmind, pose_publisher) with one kinematic fake_plant per robot that
+# integrates cmd_vel and republishes pose + localization/odom, so the full
+# mission loop runs on the dev machine with no hardware. Intended with
+# VIRTUAL_TARGET=1 (no camera) and VIRTUAL_SPACECRAFT=1 (the loop that makes it move).
+virtual_plant_on = os.environ.get("VIRTUAL_PLANT", "").lower() in ("1", "true", "yes", "on")
+if virtual_plant_on:
+    print("VIRTUAL_PLANT=1 -- robot + localization replaced by fake_plant.")
+    if not virtual_target_on:
+        print("WARNING: VIRTUAL_PLANT without VIRTUAL_TARGET -- the real camera "
+              "path needs the driver, which is now gated off; set VIRTUAL_TARGET=1.")
+    if os.environ.get("VIRTUAL_SPACECRAFT", "").lower() not in ("1", "true", "yes", "on"):
+        print("WARNING: VIRTUAL_PLANT without VIRTUAL_SPACECRAFT -- nothing will "
+              "produce cmd_vel, so the plant will sit still; set VIRTUAL_SPACECRAFT=1.")
+
 def load_swarm_config():
 
     # Original configuration (order matters!)
@@ -87,6 +113,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
+    env_idx = '6'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -218,6 +245,9 @@ def generate_launch_description():
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
+        # Centralized launches from the dev machine over WiFi.
+        conn_type = os.getenv("CONN_TYPE", "sta")
+
         name_arg = DeclareLaunchArgument(f'name_{i}', default_value=robot_name)
         serial_arg = DeclareLaunchArgument(f'serial_number_{i}', default_value=serial_number)
         robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ips[i])
@@ -225,26 +255,6 @@ def generate_launch_description():
         enable_speaker_arg = DeclareLaunchArgument(f'enable_speaker_{i}', default_value='true')
         enable_chassis_arg = DeclareLaunchArgument(f'enable_chassis_{i}', default_value='true')
         twist_to_wheel_speeds_arg = DeclareLaunchArgument(f'twist2wheel_{i}', default_value='true')
-
-        path = os.path.join(
-            get_package_share_directory('robomaster_ros'),
-            'launch',
-            's1.launch'
-        )
-
-        s1 = IncludeLaunchDescription(
-            XMLLaunchDescriptionSource(path),
-            launch_arguments={
-                'name': LaunchConfiguration(f'name_{i}'),
-                'serial_number': LaunchConfiguration(f'serial_number_{i}'),
-                'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
-                'diagnostics': diagnostics,
-                'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
-                'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
-                'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
-                'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}')
-            }.items()
-        )
 
         ld.add_action(name_arg)
         ld.add_action(serial_arg)
@@ -254,43 +264,81 @@ def generate_launch_description():
         ld.add_action(enable_chassis_arg)
         ld.add_action(twist_to_wheel_speeds_arg)
 
-        if diagnostics == 'verbose' and preflight_action is not None:
-            # verbose preflight binds UDP 40927 itself (passive SN-broadcast
-            # listen), the same port the driver's own discovery needs. Starting
-            # both at once races for the port and the driver sees a spurious
-            # "Address already in use". Delay the driver until preflight exits.
-            ld.add_action(RegisterEventHandler(
-                OnProcessExit(target_action=preflight_action, on_exit=[s1])))
-        else:
-            ld.add_action(s1)
+        # Hardware driver + its LED/speaker greetings. Skipped under VIRTUAL_PLANT
+        # (no robot to drive, and the action send_goal would hang on an absent
+        # server); fake_plant replaces the robot further down. The robomaster_ros
+        # package is only present on the robots, so its share lookup must stay
+        # inside this guard or the dev-machine fake run can't even load the file.
+        if not virtual_plant_on:
+            path = os.path.join(
+                get_package_share_directory('robomaster_ros'),
+                'launch',
+                's1.launch'
+            )
 
-        ##############################################################################
+            # Camera wiring, set explicitly instead of inheriting driver defaults.
+            #  VIRTUAL_TARGET=1 -> unload the module (no camera, saves bandwidth);
+            #  real run (=0)    -> h264 ON_DEMAND decoded client-side by the detectors,
+            #                      raw + ffmpeg streams killed as unused footguns.
+            if virtual_target_on:
+                camera_args = {'camera': 'false', 'vision_targets': '[]'}
+            else:
+                camera_args = {'camera': 'true', 'video_h264': '2',
+                               'video_raw': '-1', 'video_ffmpeg': '-1'}
 
-        topic = '/'+robot_name+'/leds/color'
-        led = ExecuteProcess(
-            cmd=[
-                'ros2', 'topic', 'pub', '--once',
-                topic,
-                'std_msgs/msg/ColorRGBA',
-                '{r: 0.4, g: 0.4, b: 0.0, a: 1.0}'
-            ]
-        )
-        
-        ld.add_action(led)
+            s1 = IncludeLaunchDescription(
+                XMLLaunchDescriptionSource(path),
+                launch_arguments={
+                    'name': LaunchConfiguration(f'name_{i}'),
+                    'serial_number': LaunchConfiguration(f'serial_number_{i}'),
+                    'conn_type': conn_type,
+                    'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
+                    'diagnostics': diagnostics,
+                    'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
+                    'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
+                    'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
+                    'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}'),
+                    **camera_args,
+                }.items()
+            )
 
-        ##############################################################################
+            if diagnostics == 'verbose' and preflight_action is not None:
+                # verbose preflight binds UDP 40927 itself (passive SN-broadcast
+                # listen), the same port the driver's own discovery needs. Starting
+                # both at once races for the port and the driver sees a spurious
+                # "Address already in use". Delay the driver until preflight exits.
+                ld.add_action(RegisterEventHandler(
+                    OnProcessExit(target_action=preflight_action, on_exit=[s1])))
+            else:
+                ld.add_action(s1)
 
-        action = '/'+robot_name+'/play'
-        speaker = ExecuteProcess(
-            cmd=[
-                'ros2', 'action', 'send_goal',
-                action,
-                'robomaster_msgs/action/PlaySound',
-                '{sound_id: 5, times: 1}'
-            ]
-        )
-        
-        ld.add_action(speaker)
+            ##############################################################################
+
+            topic = '/'+robot_name+'/leds/color'
+            led = ExecuteProcess(
+                cmd=[
+                    'ros2', 'topic', 'pub', '--once',
+                    topic,
+                    'std_msgs/msg/ColorRGBA',
+                    '{r: 0.4, g: 0.4, b: 0.0, a: 1.0}'
+                ]
+            )
+
+            ld.add_action(led)
+
+            ##############################################################################
+
+            action = '/'+robot_name+'/play'
+            speaker = ExecuteProcess(
+                cmd=[
+                    'ros2', 'action', 'send_goal',
+                    action,
+                    'robomaster_msgs/action/PlaySound',
+                    '{sound_id: 5, times: 1}'
+                ]
+            )
+
+            ld.add_action(speaker)
 
 
     ##############################################################################
@@ -319,6 +367,8 @@ def generate_launch_description():
     if calibrate_camera == 1:
         print("CALIBRATE_CAMERA=1 -- skipping marvelmind_obs (log spam would "
               "bury the photo countdown).")
+    elif virtual_plant_on:
+        print("VIRTUAL_PLANT=1 -- skipping marvelmind_obs (fake_plant provides pose).")
     else:
         ld.add_action(mm)
 
@@ -348,14 +398,48 @@ def generate_launch_description():
 
         # hedgehog_obs only consumes marvelmind_obs output, which is not
         # running during calibration. Silent either way; skipped for tidiness.
-        if calibrate_camera != 1:
+        # Also skipped under VIRTUAL_PLANT (no beacon, fake_plant provides pose).
+        if calibrate_camera != 1 and not virtual_plant_on:
             ld.add_action(hedge)
+
+    ##############################################################################
+    ########################## - UDP state broadcast - ###########################
+    # Sole publisher of comms/neighbours, which motion_planner's avoidance law
+    # consumes. On one dev host the instances co-bind via SO_REUSEADDR and each
+    # receives the subnet broadcast.
+    comms_broadcast_address = os.getenv("SWARM_BROADCAST_ADDR", "192.168.50.255")
+    comms_bind_device = os.getenv("SWARM_BROADCAST_IFACE", "")
+
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        comms = Node(
+            package="swarm_comms",
+            executable="state_broadcaster",
+            name="state_broadcaster",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                    {
+                        "robot_id": beacon_addresses[i],
+                        "broadcast_address": comms_broadcast_address,
+                        "bind_device": comms_bind_device,
+                        "broadcast_rate": 10.0,
+                        "receive_rate": 50.0,
+                        "stale_timeout": 0.5,
+                        "drop_timeout": 5.0,
+                    }
+                ]
+            )
+
+        ld.add_action(comms)
 
     ##############################################################################
     ##############################################################################
     for i in range(N):
         robot_name = robot_names[i]
-        
+
         mm_filtered = Node(
         package="swarm_filter",
         executable="mm_filtered",
@@ -371,7 +455,9 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(mm_filtered)
+        # mm_filtered fuses Marvelmind; nothing feeds it under VIRTUAL_PLANT.
+        if not virtual_plant_on:
+            ld.add_action(mm_filtered)
 
     ##############################################################################
     ##############################################################################
@@ -406,11 +492,36 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(pose)
+        if virtual_plant_on:
+            # Kinematic stand-in for the robot + localization: integrates cmd_vel
+            # and republishes pose + localization/odom. Robots start on a y-row so
+            # they don't overlap, all facing +x toward the default scene object.
+            fake_plant = Node(
+                package="swarm_spacecraft",
+                executable="fake_plant",
+                name="fake_plant",
+                namespace=robot_name,
+                output="screen",
+                emulate_tty=True,
+                parameters=[
+                        {
+                            "init_pose": [0.0, float(i) * 0.6, 0.0],
+                            "timer_frequency": 0.02,
+                            "global_frame_id": "swarm_map",
+                            **qos_parameters(depth=10, reliability='RELIABLE')
+                        }
+                    ]
+                )
+            ld.add_action(fake_plant)
+        else:
+            ld.add_action(pose)
 
     ##############################################################################
     ##############################################################################
-    for i in range(N):
+    # Camera detectors/filters are skipped when VIRTUAL_TARGET is on; the virtual
+    # scene below publishes landmarks/targets directly instead.
+    n_cam = 0 if virtual_target_on else N
+    for i in range(n_cam):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
@@ -433,6 +544,7 @@ def generate_launch_description():
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": calibrate_camera,
                     "strict_calibration": strict_calibration,
+                    "use_h264": True,  # decode the driver's h264 stream client-side
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
@@ -442,7 +554,7 @@ def generate_launch_description():
     
     ##############################################################################
     ##############################################################################
-    for i in range(N):
+    for i in range(n_cam):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
@@ -471,7 +583,7 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
-    for i in range(N):
+    for i in range(n_cam):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
@@ -498,6 +610,7 @@ def generate_launch_description():
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,
                     "strict_calibration": strict_calibration,
+                    "use_h264": True,  # decode the driver's h264 stream client-side
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
@@ -507,7 +620,7 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
-    for i in range(N):
+    for i in range(n_cam):
         robot_name = robot_names[i]
 
         targets_filter = Node(
@@ -531,6 +644,36 @@ def generate_launch_description():
 
         ld.add_action(targets_filter)
 
+    ##############################################################################
+    ##############################################################################
+    # One global virtual perception source replacing the cameras. Publishes
+    # /<ns>/landmarks and /<ns>/targets for every selected robot, plus the
+    # /virtual_scene/markers RViz ground-truth (frame swarm_map).
+    if virtual_target_on:
+        scene_file = os.getenv("SCENE_FILE") or os.path.join(
+            get_package_share_directory("virtual_target"),
+            "config", "default_scene.yaml")
+        virtual_scene = Node(
+            package="virtual_target",
+            executable="virtual_scene",
+            name="virtual_scene",
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    "robot_names": robot_names,
+                    "scene_file": scene_file,
+                    "publish_rate": 10.0,
+                    "max_range": 1.0,
+                    "half_fov_deg": 40.0,
+                    "max_incidence_deg": 70.0,
+                    "camera_yaw_offset_deg": 0.0,
+                    "noise_std_cm": 0.0,
+                    "global_frame_id": "swarm_map",
+                }
+            ]
+        )
+        ld.add_action(virtual_scene)
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################
@@ -580,10 +723,10 @@ def generate_launch_description():
         ###################################
         ##### - Encapsulation Phase - #####
 
-        ep_translation_planner = Node(
+        ep_motion_planner = Node(
             package="swarm_controller",
             executable="position_guidance3",
-            name="translation_planner",
+            name="motion_planner",
             namespace=robot_name,
             output="screen",
             emulate_tty=True,
@@ -595,7 +738,8 @@ def generate_launch_description():
                     }
                 ]
             )
-        # ld.add_action(ep_translation_planner)
+        # Sole publisher of avoidance_wrench.
+        ld.add_action(ep_motion_planner)
 
 
     ##############################################################################
@@ -614,12 +758,43 @@ def generate_launch_description():
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,
+                        "approach_gain": 0.9,
+                        "align_gain": 0.05,
+                        "heading_gain": 1.0,
+                        "target_velocity_span": 5.25,
+                        "feedforward_gain": 1.0,
                         **qos_parameters(depth=1, reliability='RELIABLE')
                     }
                 ]
             )
 
-        # ld.add_action(cp_control)
+        ld.add_action(cp_control)
+
+    ##############################################################################
+    ####### - Mode supervisor: SEARCH -> ENCAPSULATION -> CAPTURE - ##############
+    for i in range(N):
+        robot_name = robot_names[i]
+
+        mode_supervisor = Node(
+            package="swarm_controller",
+            executable="mode_supervisor",
+            name="mode_supervisor",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    "detect_frames": 3,
+                    "lost_timeout": 4.0,
+                    "miss_tolerance": 3,
+                    "latch_capture": False,
+                    "initial_mode": "search",
+                    "qos_reliability": "BEST_EFFORT",
+                }
+            ],
+        )
+
+        ld.add_action(mode_supervisor)
 
 
     ##############################################################################
@@ -667,6 +842,29 @@ def generate_launch_description():
     #     )
 
     #     ld.add_action(consensus_node)
+
+
+    ##############################################################################
+    ###################### - Virtual Spacecraft Launch - #########################
+    ##############################################################################
+
+    enable_virtual_spacecraft = os.environ.get(
+        "VIRTUAL_SPACECRAFT", "false"
+    ).lower() in ("true", "1", "yes", "on")
+
+    if enable_virtual_spacecraft:
+        virtual_spacecraft_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory("swarm_bringup"),
+                    "launch",
+                    "launch_virtual_spacecraft.py"
+                )
+            ),
+            launch_arguments={"enable_guidance_visualization": "true"}.items(),
+        )
+
+        ld.add_action(virtual_spacecraft_launch)
 
 
 

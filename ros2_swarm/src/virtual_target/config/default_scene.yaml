@@ -1,0 +1,37 @@
+# Virtual perception world. Poses are in the map frame (metres, degrees).
+# Each object is ONE physical body with a 2D boundary. Both point sets live on
+# that same perimeter:
+#   landmarks      -- dense outline samples (encapsulation surrounds the object),
+#   capture points -- a few auto-placed attachment points on edge interiors, away
+#                     from corners (the capture controller docks to one).
+# Each point carries an outward normal. Geometry (the outline) is defined once;
+# landmark density and capture placement are independent of it.
+#
+# shape: square | rectangle | circle | polygon   (or give explicit vertices)
+#   square     -> size: [side]           (or [side, side])
+#   rectangle  -> size: [width, height]
+#   circle     -> size: [radius]
+#   vertices   -> [[x,y], ...]           body frame, closed implicitly
+# landmark_points_per_m sets the dense sample density along the outline.
+# captures: auto | none
+#   per-edge rule (default): one point per edge midpoint, skipping edges shorter
+#     than 2*corner_margin_m; captures_per_edge > 1 spreads several per edge.
+#   capture_count: N overrides to N points spread evenly by arc length (use this
+#     for circles/curves, which have no natural edges).
+#
+# Default: one 0.30 m square, near edge ~0.85 m from the origin. With max_range
+# 1.0 / target_max_range 0.5 (set on the node), a robot near the origin facing +x
+# sees the landmarks immediately (SEARCH -> ENCAPSULATION) and the four edge-
+# midpoint captures only after closing to 0.5 m (-> CAPTURE). Retune com/size and
+# the sensor params to match your start pose and printed sheet.
+objects:
+  - shape: square
+    size: [0.30, 0.30]
+    com: [1.0, 0.0]
+    yaw_deg: 0.0
+    vel: [0.0, 0.0]
+    omega_deg: 0.0
+    landmark_points_per_m: 20.0
+    captures: auto
+    captures_per_edge: 1
+    corner_margin_m: 0.03
