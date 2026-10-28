@@ -88,7 +88,8 @@
     #   flocking      ENCAPSULATION landmark APF         (inertial, gated)
     #   capture       CAPTURE approach/align velocity    (body, gated)
     #   avoidance     inter-robot anti-flocking          (inertial, always on)
-    wrench_sources: ["bounding_box", "flocking", "capture", "avoidance"]
+    #   pointing      heading-hold torque                (inertial, always on)
+    wrench_sources: ["bounding_box", "flocking", "capture", "avoidance", "pointing"]
     wrench_sources.bounding_box.topic: "spacecraft_wrench"
     wrench_sources.bounding_box.frame: "body"
     wrench_sources.flocking.topic: "flocking_wrench"
@@ -97,6 +98,8 @@
     wrench_sources.capture.frame: "body"
     wrench_sources.avoidance.topic: "avoidance_wrench"
     wrench_sources.avoidance.frame: "inertial"
+    wrench_sources.pointing.topic: "pointing_wrench"
+    wrench_sources.pointing.frame: "inertial"
 
     qos_depth: 10
     qos_reliability: "RELIABLE"

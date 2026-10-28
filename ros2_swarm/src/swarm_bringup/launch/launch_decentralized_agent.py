@@ -704,7 +704,8 @@ def generate_launch_description():
                     }
                 ]
             )
-        # ld.add_action(ep_pointing_planner)
+        # Publishes pointing_wrench (heading-hold torque) to the virtual spacecraft.
+        ld.add_action(ep_pointing_planner)
 
         ###################################
         ##### - Encapsulation Phase - #####
@@ -809,6 +810,9 @@ def generate_launch_description():
                     # the robot would stay in CAPTURE driving on a stale marker
                     # instead of re-acquiring.
                     "latch_capture": False,
+                    # Manual capture: detection only cycles SEARCH<->ENCAP;
+                    # publish `/mode_cmd` "capture" to trigger all robots at once.
+                    "auto_capture": False,
                     # Mode assumed at startup; launch brings up search-enabled /
                     # capture-disabled, so SEARCH matches reality with no forced
                     # service call on boot.

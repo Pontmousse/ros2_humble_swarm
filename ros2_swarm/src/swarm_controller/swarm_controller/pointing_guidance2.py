@@ -5,9 +5,11 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 import math, numpy as np
 
 # Custom messages
-from swarm_interfaces.msg import StatePos as State 
+from swarm_interfaces.msg import StatePos as State
 from swarm_interfaces.msg import Markers
 from std_msgs.msg import Float64
+from geometry_msgs.msg import Wrench
+from nav_msgs.msg import Odometry
 
 class GuidanceNode(Node):
     def __init__(self):
@@ -23,6 +25,15 @@ class GuidanceNode(Node):
         self.declare_parameter("timer_frequency", 0.01)
         self.timer_frequency = self.get_parameter("timer_frequency").value
         self.get_logger().info(f"Timer frequency: {self.timer_frequency} seconds")
+
+        # Attitude PD -> torque wrench. Budget mirrors the other gated layers so
+        # no single layer can saturate the spacecraft clamp on its own.
+        self.declare_parameter("heading_torque_gain", 0.2)   # Nm/rad, P on heading error
+        self.declare_parameter("yaw_damping_gain", 0.05)     # Nm/(rad/s), D on craft yaw rate
+        self.declare_parameter("maximum_torque", 0.2)        # publisher-side cap
+        self.heading_torque_gain = self.get_parameter("heading_torque_gain").value
+        self.yaw_damping_gain = self.get_parameter("yaw_damping_gain").value
+        self.maximum_torque = self.get_parameter("maximum_torque").value
 
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
         # For QoS
@@ -55,18 +66,26 @@ class GuidanceNode(Node):
         self.pose = np.array([None, None, None])  # x, y, theta
         self.lc = np.array([None, None])          # landmark centroid
         self.target_lcd = None                    # direction (deg)
-        
+        self.craft_wz = None                      # spacecraft yaw rate (rad/s)
+
         # Subscribers
         self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile)
         self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile)
+        self.create_subscription(Odometry, 'localization/odom', self.odom_callback, self.qos_profile)
 
         # Publishers
         self.pub = self.create_publisher(Float64, 'target_orientation', self.qos_profile)
+        self.wrench_pub = self.create_publisher(Wrench, 'pointing_wrench', self.qos_profile)
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_orientation)
  
 
     def pose_callback(self, msg: State):
         self.pose = np.array([msg.x, msg.y, msg.theta])
+
+
+    def odom_callback(self, msg: Odometry):
+        # Yaw rate is frame-invariant, so the body-frame twist is used as-is.
+        self.craft_wz = msg.twist.twist.angular.z
 
 
 
@@ -118,11 +137,30 @@ class GuidanceNode(Node):
             return
 
         if self.target_lcd == None:
+            self.wrench_pub.publish(Wrench())   # idle: zero torque, stays fresh
             return
 
         msg = Float64()
         msg.data = self.target_lcd
         self.pub.publish(msg)
+
+        # Attitude torque wrench (always-on; zero until landmarks seen above).
+        wmsg = Wrench()
+        if None not in self.pose:
+            err = math.radians(wrap_deg(self.target_lcd - self.pose[2]))
+            wz = self.craft_wz if self.craft_wz is not None else 0.0
+            wmsg.torque.z = bound(
+                self.heading_torque_gain * err - self.yaw_damping_gain * wz,
+                self.maximum_torque)
+        self.wrench_pub.publish(wmsg)
+
+
+def bound(input, limit):
+    return max(min(input, limit), -limit)
+
+
+def wrap_deg(angle):
+    return (angle + 180.0) % 360.0 - 180.0
 
 
 def make_array(landmarks):

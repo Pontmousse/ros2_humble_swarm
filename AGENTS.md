@@ -37,6 +37,11 @@
 - Do not edit generated `build/`, `install/`, or `log/` directories.
 - Keep ROS node, topic, frame, parameter, and executable names backward
   compatible unless a rename is explicitly requested.
+- Keep the per-robot controller/node wiring identical in both
+  `launch_centralized_swarm.py` and `launch_decentralized_agent.py`. They share
+  the same node blocks; decentralized is the production target (one per PI),
+  centralized is the sim finalizer, and they must stay behaviourally identical.
+  Any enable/disable, parameter, or node change in one must be mirrored in the other.
 - When adding a Python ROS node, update the package's `setup.py` entry points
   and dependencies in `package.xml` as needed.
 - When adding messages or services, update the relevant `CMakeLists.txt` and

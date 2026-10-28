@@ -728,7 +728,8 @@ def generate_launch_description():
                     }
                 ]
             )
-        # ld.add_action(ep_pointing_planner)
+        # Publishes pointing_wrench (heading-hold torque) to the virtual spacecraft.
+        ld.add_action(ep_pointing_planner)
 
         ###################################
         ##### - Encapsulation Phase - #####
@@ -798,6 +799,9 @@ def generate_launch_description():
                     "lost_timeout": 4.0,
                     "miss_tolerance": 3,
                     "latch_capture": False,
+                    # Manual capture: detection only cycles SEARCH<->ENCAP;
+                    # publish `/mode_cmd` "capture" to trigger all robots at once.
+                    "auto_capture": False,
                     "initial_mode": "search",
                     "qos_reliability": "BEST_EFFORT",
                 }

@@ -117,6 +117,9 @@ class ModeSupervisor(Node):
         # Sticky capture: once latched into CAPTURE, never auto-fall-back on
         # target loss. Kills CAPTURE<->SEARCH oscillation from low-fps flicker.
         self.declare_parameter("latch_capture", True)
+        # When False, detection never auto-promotes to CAPTURE; capture is reached
+        # only via a mode_cmd override (manual go-signal now, swarm consensus later).
+        self.declare_parameter("auto_capture", True)
         # Mode the node assumes it starts in. The launch is expected to bring up
         # search-enabled / capture-disabled, so SEARCH matches reality without
         # the supervisor forcing any service call at startup.
@@ -127,6 +130,7 @@ class ModeSupervisor(Node):
         miss_tolerance = int(self.get_parameter("miss_tolerance").value)
         self.lost_timeout = float(self.get_parameter("lost_timeout").value)
         self.latch_capture = bool(self.get_parameter("latch_capture").value)
+        self.auto_capture = bool(self.get_parameter("auto_capture").value)
         reliability = str(self.get_parameter("qos_reliability").value)
         self.mode = _MODE_ALIASES.get(
             str(self.get_parameter("initial_mode").value).lower()) or Mode.SEARCH
@@ -175,6 +179,10 @@ class ModeSupervisor(Node):
         )
         self.create_subscription(
             String, "mode_cmd", self.on_mode_cmd, override_qos)
+        # Absolute twin: one `/mode_cmd` publish triggers every robot at once
+        # (manual go-signal for simultaneous capture), same callback/QoS.
+        self.create_subscription(
+            String, "/mode_cmd", self.on_mode_cmd, override_qos)
 
         # Evaluate the policy at 5 Hz. Detection gates are updated in the topic
         # callbacks; this timer only decides + actuates.
@@ -216,8 +224,9 @@ class ModeSupervisor(Node):
 
         now = self.get_clock().now()
 
-        # A stable target always wins -- go straight to CAPTURE from any mode.
-        if self.targets.stable:
+        # A stable target wins -- go straight to CAPTURE from any mode. Disabled
+        # by auto_capture=False, which reserves CAPTURE for the mode_cmd override.
+        if self.auto_capture and self.targets.stable:
             return Mode.CAPTURE
 
         if self.mode == Mode.SEARCH:
