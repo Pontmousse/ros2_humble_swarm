@@ -26,8 +26,8 @@
 # the sensor params to match your start pose and printed sheet.
 objects:
   - shape: square
-    size: [0.30, 0.30]
-    com: [1.0, 0.0]
+    size: [0.75, 0.75]
+    com: [-2.6, -2.5]
     yaw_deg: 0.0
     vel: [0.0, 0.0]
     omega_deg: 0.0

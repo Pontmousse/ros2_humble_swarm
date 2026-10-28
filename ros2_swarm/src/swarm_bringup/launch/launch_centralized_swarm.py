@@ -113,7 +113,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '6'
+    env_idx = '5,6'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -494,8 +494,16 @@ def generate_launch_description():
 
         if virtual_plant_on:
             # Kinematic stand-in for the robot + localization: integrates cmd_vel
-            # and republishes pose + localization/odom. Robots start on a y-row so
-            # they don't overlap, all facing +x toward the default scene object.
+            # and republishes pose + localization/odom. Robots start clustered on
+            # ONE side of the box, same heading, so the encapsulation controller
+            # (flocking + avoidance) has to spread them around it -- that is the
+            # behaviour under test, so they are NOT pre-distributed. Accel limits
+            # cut to 1/3 of default to mimic a laggy chassis response.
+            # -1.5 sits just inside the search region (x_max -1.0, boundary_margin
+            # 0.4 -> margin edge -1.4) so robots start clear of the rebound band.
+            cluster_x, cluster_y, heading_deg = -1.5, -2.5, 180.0
+            spacing = 0.4
+            init_y = cluster_y + (i - (N - 1) / 2.0) * spacing
             fake_plant = Node(
                 package="swarm_spacecraft",
                 executable="fake_plant",
@@ -505,9 +513,11 @@ def generate_launch_description():
                 emulate_tty=True,
                 parameters=[
                         {
-                            "init_pose": [0.0, float(i) * 0.6, 0.0],
+                            "init_pose": [cluster_x, init_y, heading_deg],
                             "timer_frequency": 0.02,
                             "global_frame_id": "swarm_map",
+                            "max_linear_accel": 0.167,
+                            "max_yaw_accel": 0.333,
                             **qos_parameters(depth=10, reliability='RELIABLE')
                         }
                     ]
@@ -853,6 +863,9 @@ def generate_launch_description():
     ).lower() in ("true", "1", "yes", "on")
 
     if enable_virtual_spacecraft:
+        # Hand the include the robot set we already resolved (ROBOT_NAME wins over
+        # ROBOT_IDX in its env lookup) so both halves agree instead of re-reading.
+        os.environ["ROBOT_NAME"] = ",".join(robot_names)
         virtual_spacecraft_launch = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(

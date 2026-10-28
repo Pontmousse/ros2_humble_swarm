@@ -96,6 +96,7 @@ class SpacecraftVisualizerNode(Node):
     LANDMARK_NORMALS_ID = 11
     TARGETS_ID = 12
     TARGET_NORMALS_ID = 13
+    PHYSICAL_LABEL_ID = 14
 
     # RGB triples for the perception overlays.
     LANDMARK_COLOR = (0.2, 1.0, 0.3)
@@ -104,6 +105,9 @@ class SpacecraftVisualizerNode(Node):
 
     def __init__(self):
         super().__init__("spacecraft_visualizer")
+        # Robot number from the namespace (e.g. "/RM6" -> "6") for the V#/R# labels.
+        ns = self.get_namespace().strip("/")
+        self.robot_label = "".join(c for c in ns if c.isdigit()) or ns
         self.declare_parameter("timer_frequency", 0.05)
         self.declare_parameter("source_timeout", 0.25)
         self.declare_parameter("global_frame_id", "swarm_map")
@@ -457,16 +461,28 @@ class SpacecraftVisualizerNode(Node):
         return marker
 
     def virtual_label_marker(self, odometry: Odometry, stamp) -> Marker:
-        """Create a 'V' text label at the virtual spacecraft, to tell it apart
+        """Create a 'V<id>' text label at the virtual spacecraft, to tell it apart
         from the physical robot triangle."""
         marker = self.marker(self.VIRTUAL_LABEL_ID, Marker.TEXT_VIEW_FACING, stamp)
-        marker.text = "V"
+        marker.text = f"V{self.robot_label}"
         marker.scale.z = self.triangle_size
         marker.color.r = marker.color.g = marker.color.b = 1.0
         marker.color.a = 1.0
         marker.pose.position.x = odometry.pose.pose.position.x
         marker.pose.position.y = odometry.pose.pose.position.y
         marker.pose.position.z = 0.12
+        return marker
+
+    def physical_label_marker(self, odometry: Odometry, stamp) -> Marker:
+        """Create a white 'R<id>' text label at the physical robot/plant triangle."""
+        marker = self.marker(self.PHYSICAL_LABEL_ID, Marker.TEXT_VIEW_FACING, stamp)
+        marker.text = f"R{self.robot_label}"
+        marker.scale.z = self.triangle_size
+        marker.color.r = marker.color.g = marker.color.b = 1.0
+        marker.color.a = 1.0
+        marker.pose.position.x = odometry.pose.pose.position.x
+        marker.pose.position.y = odometry.pose.pose.position.y
+        marker.pose.position.z = 0.10
         return marker
 
     def force_marker(self, stamp, odometry: Odometry, force_x, force_y) -> Marker:
@@ -727,8 +743,12 @@ class SpacecraftVisualizerNode(Node):
                     0.45,
                 )
             )
+            markers.append(
+                self.physical_label_marker(self.physical_odometry, stamp)
+            )
         else:
             markers.append(self.delete_marker(self.PHYSICAL_ID, stamp))
+            markers.append(self.delete_marker(self.PHYSICAL_LABEL_ID, stamp))
 
         indoor_gps_valid = (
             self.show_indoor_gps
