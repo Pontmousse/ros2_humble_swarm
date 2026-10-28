@@ -17,5 +17,5 @@ git commit -m "$COMMIT_MSG"
 echo ""
 
 echo "=== Pushing to remote ==="
-git push
+git push origin main
 echo ""
