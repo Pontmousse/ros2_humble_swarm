@@ -518,8 +518,10 @@ def generate_launch_description():
                             "init_pose": [cluster_x, init_y, heading_deg],
                             "timer_frequency": 0.02,
                             "global_frame_id": "swarm_map",
-                            "max_linear_accel": 0.167,
-                            "max_yaw_accel": 0.333,
+                            "max_linear_accel": 50.0,
+                            "max_yaw_accel": 50.0,
+                            "max_speed": 50.0,
+                            "max_yaw_rate": 50.0,
                             **qos_parameters(depth=10, reliability='RELIABLE')
                         }
                     ]

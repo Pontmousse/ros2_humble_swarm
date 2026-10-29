@@ -77,7 +77,7 @@ class GuidanceNode(Node):
 
 
         # Control gains
-        self.Rflk = 0.4
+        self.Rflk = 0.6
         # Two robots touch at 0.44 m centre-to-centre (2 x the robot_radius 0.22
         # declared in virtual_spacecraft.yaml). Rant was 0.4, i.e. the influence
         # radius sat entirely inside the collision: the repulsion was still
@@ -99,7 +99,11 @@ class GuidanceNode(Node):
         # the force goes from acting 7.2% of the time to 16.8%, and the median
         # separation (1.88 m) stays far outside it.
         self.Rant = 1.05
-        self.flk_gain = 1.5
+        self.flk_gain = 2.5
+        # D term for the flocking spring, sized near critical damping
+        # (2*zeta*sqrt(k*m), zeta~0.7, m=5.0) to kill the translation ringing
+        # seen once flk_gain was raised live.
+        self.flk_damping_gain = 5.0
         # Publisher-side cap on the flocking wrench. The spacecraft clamps the
         # SUM of all four sources to its maximum_force (1.0 N), so this is not a
         # safety bound -- it is the share of that envelope the flocking layer may
@@ -116,7 +120,7 @@ class GuidanceNode(Node):
         # bound. Restoring the old 0.55 m saturation point would need 0.35 and
         # would cost 0.07 m/s of pure-potential critical speed (0.524 -> 0.455)
         # in exchange for a gentler long-range push.
-        self.antflk_gain = 0.78
+        self.antflk_gain = 0.38
         # The potential diverges as 1/d^3, so without a cap it reached 18 N at
         # d = 0.15 m. Two things make that unacceptable: the HIL dynamics were
         # only validated to 1.0 N / 0.2 Nm (2026-09-09 bag), and publish_target_position
@@ -268,18 +272,21 @@ class GuidanceNode(Node):
     def flocking_potential(self, landmarks):
         Fx, Fy = 0.0, 0.0
         x, y = self.pose[0], self.pose[1]
-        
+        v = self.own_velocity()
+
         for i in range(len(landmarks)):
             xp, yp = landmarks[i, 0], landmarks[i, 1]
             dx = xp - x
             dy = yp - y
             distance = np.hypot(dx, dy) + self.eps
+            ux, uy = dx / distance, dy / distance
 
-            # Spring-like attractive/repulsive force
-            force_magnitude = self.flk_gain * (distance - self.Rflk)  # Attract if > Rflk, repel if < Rflk
+            # Spring-like attractive/repulsive force, damped by closing speed
+            closing = 0.0 if v is None else (v[0] * ux + v[1] * uy)
+            force_magnitude = self.flk_gain * (distance - self.Rflk) - self.flk_damping_gain * closing
 
-            Fx += force_magnitude * (dx / distance)
-            Fy += force_magnitude * (dy / distance)
+            Fx += force_magnitude * ux
+            Fy += force_magnitude * uy
 
         return np.array([Fx, Fy])
 
