@@ -499,9 +499,11 @@ def generate_launch_description():
             # (flocking + avoidance) has to spread them around it -- that is the
             # behaviour under test, so they are NOT pre-distributed. Accel limits
             # cut to 1/3 of default to mimic a laggy chassis response.
-            # -1.5 sits just inside the search region (x_max -1.0, boundary_margin
-            # 0.4 -> margin edge -1.4) so robots start clear of the rebound band.
-            cluster_x, cluster_y, heading_deg = -1.5, -2.5, 180.0
+            # Robots cluster on the LEFT of the target (com x -2.6, left edge
+            # -2.975) facing +x toward it; -3.7 sits inside the search region
+            # (x_min -4.5, boundary_margin 0.4 -> margin edge -4.1), clear of the
+            # rebound band.
+            cluster_x, cluster_y, heading_deg = -3.7, -2.5, 0.0
             spacing = 0.4
             init_y = cluster_y + (i - (N - 1) / 2.0) * spacing
             fake_plant = Node(

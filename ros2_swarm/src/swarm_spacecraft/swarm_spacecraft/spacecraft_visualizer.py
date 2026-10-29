@@ -97,11 +97,24 @@ class SpacecraftVisualizerNode(Node):
     TARGETS_ID = 12
     TARGET_NORMALS_ID = 13
     PHYSICAL_LABEL_ID = 14
+    # World-frame lab infrastructure (static, drawn in a shared "world_anchors" ns).
+    AXIS_X_ID = 15
+    AXIS_Y_ID = 16
+    AXIS_X_LABEL_ID = 17
+    AXIS_Y_LABEL_ID = 18
+    ANCHOR_SPHERE_BASE = 20   # 20, 21, 22
+    ANCHOR_LABEL_BASE = 23    # 23, 24, 25
+    ARENA_ID = 26
 
     # RGB triples for the perception overlays.
     LANDMARK_COLOR = (0.2, 1.0, 0.3)
     TARGET_COLOR = (1.0, 0.2, 0.2)
     TARGET_NORMAL_COLOR = (1.0, 0.55, 0.0)
+
+    # Marvelmind anchors (address, x, y) and the arena corner loop, in swarm_map.
+    # Hand-transcribed lab layout; see plot_rm2_region.py / virtual_spacecraft.yaml.
+    WORLD_ANCHORS = (("13", 0.0, 0.0), ("15", -5.610, 0.042), ("14", 0.360, -5.022))
+    ARENA_CORNERS = ((0.0, 0.0), (-5.610, 0.042), (-5.6, -5.0), (0.360, -5.022))
 
     def __init__(self):
         super().__init__("spacecraft_visualizer")
@@ -137,6 +150,9 @@ class SpacecraftVisualizerNode(Node):
         self.declare_parameter("perception_timeout", 0.5)
         self.declare_parameter("marker_point_size", 0.10)
         self.declare_parameter("normal_arrow_length", 0.20)
+        # Static lab-frame overlay: X/Y axes + Marvelmind anchors + arena outline.
+        self.declare_parameter("show_world_anchors", True)
+        self.declare_parameter("world_axis_length", 1.0)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -192,6 +208,12 @@ class SpacecraftVisualizerNode(Node):
         )
         self.normal_arrow_length = float(
             self.get_parameter("normal_arrow_length").value
+        )
+        self.show_world_anchors = bool(
+            self.get_parameter("show_world_anchors").value
+        )
+        self.world_axis_length = float(
+            self.get_parameter("world_axis_length").value
         )
         self.validate_parameters()
 
@@ -295,6 +317,7 @@ class SpacecraftVisualizerNode(Node):
             self.perception_timeout,
             self.marker_point_size,
             self.normal_arrow_length,
+            self.world_axis_length,
         )
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Visualizer parameters must be finite")
@@ -316,6 +339,7 @@ class SpacecraftVisualizerNode(Node):
             self.perception_timeout,
             self.marker_point_size,
             self.normal_arrow_length,
+            self.world_axis_length,
         )
         if not all(value > 0.0 for value in positive):
             raise ValueError("Visualizer timing, sizes, and limits must be positive")
@@ -394,6 +418,81 @@ class SpacecraftVisualizerNode(Node):
         marker.action = Marker.ADD
         marker.pose.orientation.w = 1.0
         return marker
+
+    def world_marker(self, marker_id: int, marker_type: int, stamp) -> Marker:
+        """Create a marker in the shared, robot-independent world ns.
+
+        Same as marker() but ns="world_anchors" so every robot's visualizer
+        writes the static lab overlay into one ns+id slot instead of a
+        per-namespace one.
+        """
+        marker = self.marker(marker_id, marker_type, stamp)
+        marker.ns = "world_anchors"
+        return marker
+
+    def build_world_markers(self, stamp):
+        """Static lab-frame overlay: X/Y axes, numbered anchors, arena outline."""
+        length = self.world_axis_length
+        markers = []
+
+        axes = (
+            (self.AXIS_X_ID, (length, 0.0), (1.0, 0.1, 0.1)),
+            (self.AXIS_Y_ID, (0.0, length), (0.1, 1.0, 0.1)),
+        )
+        for marker_id, (tip_x, tip_y), (red, green, blue) in axes:
+            axis = self.world_marker(marker_id, Marker.ARROW, stamp)
+            axis.scale.x = 0.03
+            axis.scale.y = 0.09
+            axis.scale.z = 0.12
+            axis.color.r, axis.color.g, axis.color.b, axis.color.a = red, green, blue, 1.0
+            axis.points = [self.point(0.0, 0.0, 0.02), self.point(tip_x, tip_y, 0.02)]
+            markers.append(axis)
+
+        labels = (
+            (self.AXIS_X_LABEL_ID, "X", length, 0.0),
+            (self.AXIS_Y_LABEL_ID, "Y", 0.0, length),
+        )
+        for marker_id, text, lx, ly in labels:
+            label = self.world_marker(marker_id, Marker.TEXT_VIEW_FACING, stamp)
+            label.text = text
+            label.scale.z = 0.25
+            label.color.r = label.color.g = label.color.b = 1.0
+            label.color.a = 1.0
+            label.pose.position.x = lx
+            label.pose.position.y = ly
+            label.pose.position.z = 0.15
+            markers.append(label)
+
+        for offset, (address, ax, ay) in enumerate(self.WORLD_ANCHORS):
+            sphere = self.world_marker(
+                self.ANCHOR_SPHERE_BASE + offset, Marker.CYLINDER, stamp)
+            sphere.scale.x = sphere.scale.y = 0.12
+            sphere.scale.z = 0.05
+            sphere.color.r, sphere.color.g, sphere.color.b, sphere.color.a = 0.1, 0.8, 1.0, 1.0
+            sphere.pose.position.x = ax
+            sphere.pose.position.y = ay
+            sphere.pose.position.z = 0.025
+            markers.append(sphere)
+
+            tag = self.world_marker(
+                self.ANCHOR_LABEL_BASE + offset, Marker.TEXT_VIEW_FACING, stamp)
+            tag.text = address
+            tag.scale.z = 0.3
+            tag.color.r, tag.color.g, tag.color.b, tag.color.a = 1.0, 0.85, 0.1, 1.0
+            tag.pose.position.x = ax
+            tag.pose.position.y = ay
+            tag.pose.position.z = 0.2
+            markers.append(tag)
+
+        arena = self.world_marker(self.ARENA_ID, Marker.LINE_STRIP, stamp)
+        arena.scale.x = 0.02
+        arena.color.r = arena.color.g = arena.color.b = 0.6
+        arena.color.a = 1.0
+        arena.points = [self.point(cx, cy) for cx, cy in self.ARENA_CORNERS]
+        arena.points.append(self.point(*self.ARENA_CORNERS[0]))
+        markers.append(arena)
+
+        return markers
 
     @staticmethod
     def point(x: float, y: float, z: float = 0.0) -> Point:
@@ -849,6 +948,9 @@ class SpacecraftVisualizerNode(Node):
             else:
                 markers.append(self.delete_marker(points_id, stamp))
                 markers.append(self.delete_marker(normals_id, stamp))
+
+        if self.show_world_anchors:
+            markers.extend(self.build_world_markers(stamp))
 
         message = MarkerArray()
         message.markers = markers
