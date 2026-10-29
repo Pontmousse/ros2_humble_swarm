@@ -28,7 +28,7 @@ class GuidanceNode(Node):
 
         # Attitude PD -> torque wrench. Budget mirrors the other gated layers so
         # no single layer can saturate the spacecraft clamp on its own.
-        self.declare_parameter("heading_torque_gain", 0.2)   # Nm/rad, P on heading error
+        self.declare_parameter("heading_torque_gain", 0.6)   # Nm/rad, P on heading error
         self.declare_parameter("yaw_damping_gain", 0.05)     # Nm/(rad/s), D on craft yaw rate
         self.declare_parameter("maximum_torque", 0.2)        # publisher-side cap
         self.heading_torque_gain = self.get_parameter("heading_torque_gain").value

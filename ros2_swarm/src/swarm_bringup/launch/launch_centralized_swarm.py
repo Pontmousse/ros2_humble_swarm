@@ -662,30 +662,19 @@ def generate_launch_description():
     # /<ns>/landmarks and /<ns>/targets for every selected robot, plus the
     # /virtual_scene/markers RViz ground-truth (frame swarm_map).
     if virtual_target_on:
-        scene_file = os.getenv("SCENE_FILE") or os.path.join(
-            get_package_share_directory("virtual_target"),
-            "config", "default_scene.yaml")
-        virtual_scene = Node(
-            package="virtual_target",
-            executable="virtual_scene",
-            name="virtual_scene",
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                {
-                    "robot_names": robot_names,
-                    "scene_file": scene_file,
-                    "publish_rate": 10.0,
-                    "max_range": 1.0,
-                    "half_fov_deg": 40.0,
-                    "max_incidence_deg": 70.0,
-                    "camera_yaw_offset_deg": 0.0,
-                    "noise_std_cm": 0.0,
-                    "global_frame_id": "swarm_map",
-                }
-            ]
+        # Export ROBOT_NAME so the included launch targets the same robots we
+        # launched (it falls back to ROBOT_IDX when run standalone on the dev PC).
+        os.environ["ROBOT_NAME"] = ",".join(robot_names)
+        virtual_target_launch = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    get_package_share_directory("swarm_bringup"),
+                    "launch",
+                    "launch_virtual_target.py"
+                )
+            )
         )
-        ld.add_action(virtual_scene)
+        ld.add_action(virtual_target_launch)
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################

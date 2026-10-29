@@ -99,7 +99,7 @@ class GuidanceNode(Node):
         # the force goes from acting 7.2% of the time to 16.8%, and the median
         # separation (1.88 m) stays far outside it.
         self.Rant = 1.05
-        self.flk_gain = 0.5
+        self.flk_gain = 1.5
         # Publisher-side cap on the flocking wrench. The spacecraft clamps the
         # SUM of all four sources to its maximum_force (1.0 N), so this is not a
         # safety bound -- it is the share of that envelope the flocking layer may
@@ -107,7 +107,7 @@ class GuidanceNode(Node):
         # bounding_box_search.maximum_force: two opposing contributors each
         # capped at the full 1.0 N would cancel to ~0 after the resultant clamp,
         # so neither could ever win (same failure the box force was halved for).
-        self.max_flk_force = 0.5
+        self.max_flk_force = 1.0
         # Left at 0.78 so this change moves one variable. With the wider radius
         # the same gain saturates at d = 0.65 m instead of 0.55 m, i.e. 0.21 m
         # before contact rather than 0.11 m. That is the right direction: the

@@ -129,6 +129,9 @@ class SpacecraftVisualizerNode(Node):
         self.declare_parameter("y_min", -1.0)
         self.declare_parameter("y_max", 1.0)
         self.declare_parameter("triangle_size", 0.12)
+        # Real RoboMaster footprint (m): 0.40 long x 0.24 wide.
+        self.declare_parameter("robot_length", 0.40)
+        self.declare_parameter("robot_width", 0.24)
         self.declare_parameter("maximum_force", 1.0)
         self.declare_parameter("maximum_torque", 0.2)
         self.declare_parameter("force_arrow_max_length", 1.0)
@@ -167,6 +170,8 @@ class SpacecraftVisualizerNode(Node):
         self.y_min = float(self.get_parameter("y_min").value)
         self.y_max = float(self.get_parameter("y_max").value)
         self.triangle_size = float(self.get_parameter("triangle_size").value)
+        self.robot_length = float(self.get_parameter("robot_length").value)
+        self.robot_width = float(self.get_parameter("robot_width").value)
         self.maximum_force = float(self.get_parameter("maximum_force").value)
         self.maximum_torque = float(self.get_parameter("maximum_torque").value)
         self.force_arrow_max_length = float(
@@ -318,6 +323,8 @@ class SpacecraftVisualizerNode(Node):
             self.marker_point_size,
             self.normal_arrow_length,
             self.world_axis_length,
+            self.robot_length,
+            self.robot_width,
         )
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Visualizer parameters must be finite")
@@ -340,6 +347,8 @@ class SpacecraftVisualizerNode(Node):
             self.marker_point_size,
             self.normal_arrow_length,
             self.world_axis_length,
+            self.robot_length,
+            self.robot_width,
         )
         if not all(value > 0.0 for value in positive):
             raise ValueError("Visualizer timing, sizes, and limits must be positive")
@@ -543,11 +552,13 @@ class SpacecraftVisualizerNode(Node):
         yaw = yaw_from_quaternion(odometry.pose.pose.orientation)
         cosine = math.cos(yaw)
         sine = math.sin(yaw)
+        half_length = 0.5 * self.robot_length
+        half_width = 0.5 * self.robot_width
         local_points = (
-            (self.triangle_size, 0.0),
-            (-0.65 * self.triangle_size, 0.6 * self.triangle_size),
-            (-0.65 * self.triangle_size, -0.6 * self.triangle_size),
-            (self.triangle_size, 0.0),
+            (half_length, 0.0),
+            (-half_length, half_width),
+            (-half_length, -half_width),
+            (half_length, 0.0),
         )
         marker.points = [
             self.point(
