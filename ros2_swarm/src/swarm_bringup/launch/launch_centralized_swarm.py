@@ -113,7 +113,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '1,2,3,4,5,6'
+    env_idx = '1,3,6'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
