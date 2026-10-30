@@ -37,6 +37,7 @@ setup(
             'pointing_controller = swarm_controller.pointing_controller:main',
             'ep_proportional_controller = swarm_controller.ep_proportional_controller:main',
             'cp_proportional_controller = swarm_controller.cp_proportional_controller:main',
+            'cp_proportional_controller2 = swarm_controller.cp_proportional_controller2:main',
 
             #########################################################################
 

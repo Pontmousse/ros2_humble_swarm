@@ -103,7 +103,7 @@ class GuidanceNode(Node):
         # D term for the flocking spring, sized near critical damping
         # (2*zeta*sqrt(k*m), zeta~0.7, m=5.0) to kill the translation ringing
         # seen once flk_gain was raised live.
-        self.flk_damping_gain = 5.0
+        self.flk_damping_gain = 15.0
         # Publisher-side cap on the flocking wrench. The spacecraft clamps the
         # SUM of all four sources to its maximum_force (1.0 N), so this is not a
         # safety bound -- it is the share of that envelope the flocking layer may
@@ -287,6 +287,9 @@ class GuidanceNode(Node):
 
             Fx += force_magnitude * ux
             Fy += force_magnitude * uy
+
+        Fx /= len(landmarks)
+        Fy /= len(landmarks)
 
         return np.array([Fx, Fy])
 

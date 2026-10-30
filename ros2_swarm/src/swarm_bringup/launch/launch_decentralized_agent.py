@@ -155,6 +155,13 @@ def generate_launch_description():
     # 'off' (default), 'on', or 'verbose'. See rm_preflight.py and
     # robomaster_ros/diagnostics.py.
     diagnostics = os.environ.get('RM_DIAGNOSTICS', 'off').lower()
+    # When set, cp_controller becomes the sole writer of cmd_vel and muxes the
+    # nav chain through it (velocity_smoother is remapped to cmd_vel_nav inside
+    # launch_virtual_spacecraft.py, which reads the same env). Must match the
+    # reads in launch_centralized_swarm.py and launch_virtual_spacecraft.py.
+    direct_cmd_vel = os.environ.get("DIRECT_CMD_VEL", "").lower() in (
+        "1", "true", "yes", "on"
+    )
     preflight_action = None
     if diagnostics != 'off':
         preflight_action = rm_preflight(robot_ips, verbose=(diagnostics == 'verbose'))
@@ -774,6 +781,16 @@ def generate_launch_description():
                         # proportional law.
                         "target_velocity_span": 5.25,
                         "feedforward_gain": 1.0,
+                        # Contact equilibrium, metres from the robot centre --
+                        # half the 0.40 m RoboMaster length, matching the
+                        # contact_distance used by fake_plant.py's geometric
+                        # gate on the centralized/virtual side.
+                        "contact_distance": 0.20,
+                        # True bypasses virtual_spacecraft/nav2_pidff and
+                        # publishes straight to cmd_vel for real-hardware
+                        # bench testing; do not also run velocity_smoother on
+                        # cmd_vel at the same time.
+                        "direct_cmd_vel": direct_cmd_vel,
                         **qos_parameters(depth=1, reliability='RELIABLE')
                     }
                 ]

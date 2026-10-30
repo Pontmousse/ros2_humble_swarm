@@ -24,6 +24,14 @@ def robot_names_from_environment():
 
 def generate_launch_description():
     """Create namespaced spacecraft simulator and tracker nodes."""
+    # In direct_cmd_vel capture, cp_controller is the sole writer of cmd_vel and
+    # muxes the nav chain through it; the smoother must publish cmd_vel_nav instead
+    # so the two publishers don't fight over cmd_vel. Must match the same env read
+    # in launch_centralized_swarm.py.
+    direct_cmd_vel = os.environ.get("DIRECT_CMD_VEL", "").lower() in (
+        "1", "true", "yes", "on"
+    )
+    smoother_output = "cmd_vel_nav" if direct_cmd_vel else "cmd_vel"
     default_parameters = os.path.join(
         get_package_share_directory("swarm_bringup"),
         "config",
@@ -168,7 +176,7 @@ def generate_launch_description():
                 parameters=[configured_parameters],
                 remappings=[
                     ("cmd_vel", "cmd_vel_raw"),
-                    ("cmd_vel_smoothed", "cmd_vel"),
+                    ("cmd_vel_smoothed", smoother_output),
                 ],
             )
         )

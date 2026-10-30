@@ -32,10 +32,17 @@ Actuation (2026-10): each mode maps to exactly one SetBool wrench gate --
   SEARCH        -> `search/enable`        (bounding_box_search -> spacecraft_wrench)
   ENCAPSULATION -> `encapsulation/enable` (position_guidance3  -> flocking_wrench)
   CAPTURE       -> `toggle_controller`    (cp_controller       -> capture_wrench)
-All three servers exist. `avoidance_wrench` is NOT gated here -- it is an
+  DOCK          -> `toggle_dock`          (cp_controller       -> freeze, zero wrench)
+All four servers exist. `avoidance_wrench` is NOT gated here -- it is an
 always-on peer source summed by the spacecraft in every mode, so inter-robot
 avoidance never depends on which mode is active. Calls are fire-and-forget and
 only warn if a server is briefly absent at startup.
+
+DOCK is entered from CAPTURE once `contact_detected` (std_msgs/Bool) goes
+True. That topic is a PLANT-layer signal -- published by fake_plant.py under
+VIRTUAL_PLANT, or by a future physical end-of-course-sensor node on real
+hardware -- so this supervisor and cp_controller never need to know which one
+is active. DOCK is terminal for now: only a mode_cmd override leaves it.
 """
 
 from enum import Enum
@@ -44,7 +51,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import SetBool
-from std_msgs.msg import String
+from std_msgs.msg import Bool, String
 from swarm_interfaces.msg import Markers
 
 
@@ -52,6 +59,7 @@ class Mode(Enum):
     SEARCH = "search"
     ENCAPSULATION = "encapsulation"
     CAPTURE = "capture"
+    DOCK = "dock"
 
 
 # Accept a few aliases on mode_cmd so a human override is forgiving.
@@ -63,6 +71,7 @@ _MODE_ALIASES = {
     "ep": Mode.ENCAPSULATION,
     "capture": Mode.CAPTURE,
     "cp": Mode.CAPTURE,
+    "dock": Mode.DOCK,
 }
 
 
@@ -147,6 +156,12 @@ class ModeSupervisor(Node):
         self.landmarks = DetectionGate(detect_frames, miss_tolerance)
         self.targets = DetectionGate(detect_frames, miss_tolerance)
 
+        # Plant-layer contact signal (see module docstring). Plain bool, not
+        # a DetectionGate -- the debouncing already happens at the source
+        # (fake_plant.py / the future hardware node), and DOCK's own
+        # stickiness in decide() is what makes the transition terminal.
+        self.contact = False
+
         # Manual / consensus override. None -> detection policy is in charge.
         self.mode_override = None
 
@@ -155,19 +170,23 @@ class ModeSupervisor(Node):
         #  - search/enable          : bounding_box_search wrench (SEARCH)
         #  - encapsulation/enable   : flocking wrench           (ENCAPSULATION)
         #  - toggle_controller      : cp_controller capture wrench (CAPTURE)
+        #  - toggle_dock            : cp_controller freeze         (DOCK)
         self.search_client = self.create_client(SetBool, "search/enable")
         self.encap_client = self.create_client(SetBool, "encapsulation/enable")
         self.capture_client = self.create_client(SetBool, "toggle_controller")
+        self.dock_client = self.create_client(SetBool, "toggle_dock")
         # One client per mode, keyed so apply_mode is a two-line toggle.
         self.mode_clients = {
             Mode.SEARCH: self.search_client,
             Mode.ENCAPSULATION: self.encap_client,
             Mode.CAPTURE: self.capture_client,
+            Mode.DOCK: self.dock_client,
         }
 
         # Detection inputs.
         self.create_subscription(Markers, "landmarks", self.on_landmarks, qos)
         self.create_subscription(Markers, "targets", self.on_targets, qos)
+        self.create_subscription(Bool, "contact_detected", self.on_contact, qos)
 
         # Mode override channel (manual trigger / consensus). Latched so a
         # single `ros2 topic pub --once` (or a late consensus message) sticks.
@@ -199,6 +218,9 @@ class ModeSupervisor(Node):
     def on_targets(self, msg: Markers):
         self.targets.update(len(msg.markers) > 0, self.get_clock().now())
 
+    def on_contact(self, msg: Bool):
+        self.contact = bool(msg.data)
+
     def on_mode_cmd(self, msg: String):
         key = msg.data.strip().lower()
         if key not in _MODE_ALIASES:
@@ -222,6 +244,17 @@ class ModeSupervisor(Node):
         if self.mode_override is not None:
             return self.mode_override
 
+        # DOCK is terminal for now -- checked before everything else so a
+        # still-visible/stable target can never pull a docked robot back into
+        # CAPTURE. Only a mode_cmd override leaves DOCK.
+        if self.mode == Mode.DOCK:
+            return Mode.DOCK
+
+        # Contact while capturing -> DOCK, above the auto_capture short-circuit
+        # below so a still-stable target can't keep a touching robot in CAPTURE.
+        if self.mode == Mode.CAPTURE and self.contact:
+            return Mode.DOCK
+
         now = self.get_clock().now()
 
         # A stable target wins -- go straight to CAPTURE from any mode. Disabled
@@ -240,7 +273,7 @@ class ModeSupervisor(Node):
                 return Mode.SEARCH
             return Mode.ENCAPSULATION
 
-        # CAPTURE
+        # CAPTURE (contact -> DOCK is handled at the top, above the override).
         if self.latch_capture:
             return Mode.CAPTURE
         if self.targets.age(now) > self.lost_timeout:

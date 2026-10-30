@@ -66,6 +66,21 @@ if virtual_plant_on:
         print("WARNING: VIRTUAL_PLANT without VIRTUAL_SPACECRAFT -- nothing will "
               "produce cmd_vel, so the plant will sit still; set VIRTUAL_SPACECRAFT=1.")
 
+# Single source of truth for the CAPTURE approach-law equilibrium --
+# see cp_proportional_controller.py / fake_plant.py docstrings.
+CONTACT_DISTANCE = 0.20
+# The approach law parks the robot exactly at CONTACT_DISTANCE, so the contact
+# gate must sit slightly beyond it or a settled robot reads a hair outside and
+# never latches the debounce. Detection threshold = equilibrium + this margin.
+CONTACT_MARGIN = 0.05
+
+# DIRECT_CMD_VEL=1 lets virtual_spacecraft and direct capture run together:
+# cp_controller becomes the sole cmd_vel writer and muxes the nav chain
+# (remapped to cmd_vel_nav, see launch_virtual_spacecraft.py) against its own
+# capture command. Must match on both this node and the smoother, so it is a
+# single env flag read in both launch files.
+DIRECT_CMD_VEL = os.environ.get("DIRECT_CMD_VEL", "").lower() in ("1", "true", "yes", "on")
+
 def load_swarm_config():
 
     # Original configuration (order matters!)
@@ -113,7 +128,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '1,3,6'
+    env_idx = '1,2,3'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -522,6 +537,9 @@ def generate_launch_description():
                             "max_yaw_accel": 50.0,
                             "max_speed": 50.0,
                             "max_yaw_rate": 50.0,
+                            "contact_distance": CONTACT_DISTANCE + CONTACT_MARGIN,
+                            "contact_heading_tolerance": 0.26,
+                            "contact_debounce_frames": 3,
                             **qos_parameters(depth=10, reliability='RELIABLE')
                         }
                     ]
@@ -767,6 +785,8 @@ def generate_launch_description():
                         "heading_gain": 1.0,
                         "target_velocity_span": 5.25,
                         "feedforward_gain": 1.0,
+                        "contact_distance": CONTACT_DISTANCE,
+                        "direct_cmd_vel": DIRECT_CMD_VEL,
                         **qos_parameters(depth=1, reliability='RELIABLE')
                     }
                 ]
