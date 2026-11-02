@@ -558,7 +558,7 @@ def generate_launch_description():
                 {
                     "timer_frequency": 0.05,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_6X6_250",
+                    "aruco_type": "DICT_4X4_50",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": 0,

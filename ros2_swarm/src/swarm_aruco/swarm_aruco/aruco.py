@@ -44,7 +44,17 @@ class ArucoMarker():
             max_marker =  maximum number of markers a camera can detect
         '''
         self.aruco_type = aruco_type
-        self.marker_size = int(aruco_type.split("_")[-1])
+        # The trailing token is the dictionary COUNT for the grid dicts
+        # (DICT_6X6_250 -> 250) and is reused by generate_markers() as the
+        # output image side length in px. The AprilTag/MIP families end in a
+        # non-numeric tag (DICT_ARUCO_MIP_36h12 -> "36h12"), which is not a
+        # size at all -- fall back to a sane default so construction does not
+        # crash. marker_size is NOT used in detection or pose, only in
+        # generate_markers().
+        try:
+            self.marker_size = int(aruco_type.split("_")[-1])
+        except ValueError:
+            self.marker_size = 200
         self.max_marker = 25
         self.aruco_marker_side_length = aruco_marker_side_length
 
@@ -65,8 +75,10 @@ class ArucoMarker():
         "DICT_7X7_100": cv2.aruco.DICT_7X7_100,
         "DICT_7X7_250": cv2.aruco.DICT_7X7_250,
         "DICT_7X7_1000": cv2.aruco.DICT_7X7_1000,
-        "DICT_ARUCO_ORIGINAL": cv2.aruco.DICT_ARUCO_ORIGINAL
-        } 
+        "DICT_ARUCO_ORIGINAL": cv2.aruco.DICT_ARUCO_ORIGINAL,
+        
+        "DICT_ARUCO_MIP_36h12": cv2.aruco.DICT_ARUCO_MIP_36h12,
+        }
 
         self.sn = sn
         self.marker_num = 0

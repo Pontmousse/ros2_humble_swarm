@@ -114,9 +114,33 @@ class ExtCamera(Node):
             raise RuntimeError(
                 f"unsupported fourcc {self.fourcc}; use UYVY, YUYV or MJPG")
 
-        cap = cv2.VideoCapture(self.device, cv2.CAP_V4L2)
-        if not cap.isOpened():
-            raise RuntimeError(f"could not open {self.device}")
+        # The UVC device number is not stable across reboots/replugs -- the same
+        # camera shows up as /dev/video0 sometimes and /dev/video1 others. Try
+        # the configured device first, then fall back to the other low-numbered
+        # V4L2 nodes rather than crashing the whole launch.
+        candidates = [self.device]
+        for i in range(10):
+            dev = f"/dev/video{i}"
+            if dev not in candidates:
+                candidates.append(dev)
+
+        # isOpened() is not enough: a UVC camera exposes a second metadata node
+        # that opens cleanly but never yields a frame. Require an actual grab so
+        # we skip it and land on the node that really streams.
+        cap = None
+        for dev in candidates:
+            probe = cv2.VideoCapture(dev, cv2.CAP_V4L2)
+            if probe.isOpened() and probe.read()[0]:
+                cap = probe
+                if dev != self.device:
+                    self.get_logger().warn(
+                        f"{self.device} unavailable; opened {dev} instead")
+                self.device = dev
+                break
+            probe.release()
+        if cap is None:
+            raise RuntimeError(
+                f"no streaming camera on {self.device} or /dev/video0-9")
 
         # Order matters: the pixel format has to be selected before the frame
         # size, otherwise the driver negotiates the size against the default

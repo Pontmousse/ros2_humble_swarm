@@ -56,7 +56,11 @@
     images: true
     images_filters:
       dangling: false
+    timeout: 300
   register: prune_result
+  # Cleanup is best-effort: a slow SD-card prune must never fail the deploy or
+  # block the validation step that runs after it.
+  ignore_errors: true
   tags: [prune]
 
 - name: Report reclaimed image space

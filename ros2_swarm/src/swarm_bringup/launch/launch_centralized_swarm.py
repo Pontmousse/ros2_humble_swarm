@@ -128,7 +128,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '1,2,3'
+    env_idx = '2'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -571,7 +571,7 @@ def generate_launch_description():
                 {
                     "timer_frequency": timer_frequency,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_6X6_250",
+                    "aruco_type": "DICT_4X4_50",
                     "aruco_size": 3.556,
                     "aruco_scale": (1.5, 0.8),
                     "calibrate_camera": calibrate_camera,

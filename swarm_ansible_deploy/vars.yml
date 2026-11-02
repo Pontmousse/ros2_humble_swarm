@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.2.0"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.3.0"
 swarm_image_repo: "elghaliasri/ros2-humble-swarm"
 
 # Container names used by older revisions of this playbook. Removed on deploy so
@@ -12,8 +12,8 @@ container_config_dir: /ros2_ws/src/swarm_bringup/config
 swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
 
-camera_source: "csi"
-usb_cam_device: "/dev/video1"
+camera_source: "usb"
+usb_cam_device: "/dev/video2"
 
 ros_domain_id: "0"
 rmw_implementation: "rmw_fastrtps_cpp"
