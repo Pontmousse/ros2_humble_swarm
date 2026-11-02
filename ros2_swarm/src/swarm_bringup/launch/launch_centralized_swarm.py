@@ -518,7 +518,7 @@ def generate_launch_description():
             # -2.975) facing +x toward it; -3.7 sits inside the search region
             # (x_min -4.5, boundary_margin 0.4 -> margin edge -4.1), clear of the
             # rebound band.
-            cluster_x, cluster_y, heading_deg = -3.7, -2.5, 0.0
+            cluster_x, cluster_y, heading_deg = -4.7, -2.5, 0.0
             spacing = 0.4
             init_y = cluster_y + (i - (N - 1) / 2.0) * spacing
             fake_plant = Node(

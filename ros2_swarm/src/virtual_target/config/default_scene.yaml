@@ -24,13 +24,35 @@
 # sees the landmarks immediately (SEARCH -> ENCAPSULATION) and the four edge-
 # midpoint captures only after closing to 0.5 m (-> CAPTURE). Retune com/size and
 # the sensor params to match your start pose and printed sheet.
+
+
+
+# objects:
+#   - shape: circle
+#     size: [0.5]
+#     com: [-2.6, -2.5]
+#     yaw_deg: 0.0
+#     vel: [0.005, 0.005]
+#     omega_deg: 0.2
+#     landmark_points_per_m: 20.0
+#     captures: auto
+#     captures_per_edge: 1
+#     capture_count: 6
+#     corner_margin_m: 0.03
+
+
+
 objects:
-  - shape: square
-    size: [0.75, 0.75]
-    com: [-2.6, -2.5]
+  - vertices:
+      - [-0.75, -0.50]
+      - [ 0.75, -0.50]
+      - [ 1.00,  0.25]
+      - [ 0.00,  0.875]
+      - [-0.875, 0.375]
+    com: [-3.0, -2.5]
     yaw_deg: 0.0
-    vel: [0.005, 0.005]
-    omega_deg: 0.2
+    vel: [0.005, 0.01]
+    omega_deg: 0.3
     landmark_points_per_m: 20.0
     captures: auto
     captures_per_edge: 1

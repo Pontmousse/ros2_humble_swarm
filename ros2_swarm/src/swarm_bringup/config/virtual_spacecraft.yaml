@@ -43,11 +43,22 @@
     # 0.5 -- 8% of authority left to close a 1.26 m error, so the error could
     # not converge.
     #
-    # Held at half the tracker's limits (0.5 m/s, 1.0 rad/s), leaving 2x the
-    # reference speed as catch-up authority. Raise only together with the
-    # nav2_pidff limits, and never above them.
-    maximum_speed: 0.25
-    maximum_yaw_rate: 0.5
+    # Held at half the tracker's limits, leaving 2x the reference speed as
+    # catch-up authority. Raise only together with the nav2_pidff limits, and
+    # never above them.
+    #
+    # 2026-11-02: velocity ladder lifted 2x (0.25->0.5, 0.5->1.0). The chassis
+    # was over-constrained -- RM2 sat near the target with nav2_pidff logging
+    # continuous "Physical velocity command is saturated", i.e. the tracker was
+    # clipping its own corrections. The RoboMaster can render far more than
+    # 0.5 m/s, so the whole speed ladder (this + nav2_pidff + velocity_smoother)
+    # was doubled uniformly to keep the <= invariant and the 2x catch-up ratio.
+    # The FORCE/TORQUE envelope (maximum_force/maximum_torque above) is NOT
+    # touched here: a_max = force/mass is unchanged, so this only lets the
+    # reference coast and the tracker catch faster, not push harder. Raising
+    # force needs the safe-area revalidation on hardware.
+    maximum_speed: 0.5
+    maximum_yaw_rate: 1.0
 
     # Planar Clohessy-Wiltshire relative dynamics, added on top of the clamped
     # wrench because orbital mechanics is environment and must not consume
@@ -153,13 +164,19 @@
     # Yaw: PID + angular-rate feedforward
     yaw_gain: 1.5
     yaw_integral_gain: 0.08
-    yaw_rate_error_gain: 0.25
+    yaw_rate_error_gain: 1.0
 
     # Give feedback controller some recovery authority. Keep these at or below
     # velocity_smoother.max_velocity: the smoother is downstream and its limits
     # are invisible to this node's anti-windup, so the tighter cap belongs here.
-    maximum_speed: 0.5
-    maximum_yaw_rate: 1.0
+    #
+    # 2026-11-02: lifted 2x (0.5->1.0, 1.0->2.0) as the tracker rung of the
+    # ladder. This is the cap whose breach logs "Physical velocity command is
+    # saturated"; at 0.5 it was clipping continuously near the target. Stays
+    # 2x the reference (virtual_spacecraft.maximum_speed 0.5) and == the
+    # velocity_smoother.max_velocity 1.0 below, so the invariant chain holds.
+    maximum_speed: 1.0
+    maximum_yaw_rate: 2.0
 
     # 0.3 (was 0.25). update() publishes a zero Twist and wipes the integral
     # whenever either input is older than this, so the value is not a safety
@@ -446,16 +463,22 @@
     # enough left over to close position error; at 0.5 the margin over a 0.4
     # m/s^2 reference was 20% and the burn transient dominated tracking error.
 
-    # max_velocity: [1.0, 1.0, 2.0]
-    # min_velocity: [-1.0, -1.0, -2.0]
-    # max_accel: [1.5, 1.5, 3.0]
-    # max_decel: [-2.0, -2.0, -4.0]
+    # 2026-11-02: lifted to the wider block as the downstream rung of the
+    # ladder (velocity 2x, accel ~3x). Must stay >= nav2_pidff.maximum_speed
+    # (1.0) so the tracker's own cap is the binding one. The accel bump also
+    # gives the chassis more margin to out-accelerate the reference's a_max,
+    # which the old 0.5 accel left at only ~20%.
+    max_velocity: [1.0, 1.0, 2.0]
+    min_velocity: [-1.0, -1.0, -2.0]
+    max_accel: [1.5, 1.5, 3.0]
+    max_decel: [-2.0, -2.0, -4.0]
 
 
-    max_velocity: [0.5, 0.5, 1.0]
-    min_velocity: [-0.5, -0.5, -1.0]
-    max_accel: [0.5, 0.5, 0.8]
-    max_decel: [-0.5, -0.5, -0.8]
+    # Previous conservative block, kept for quick A/B revert:
+    # max_velocity: [0.5, 0.5, 1.0]
+    # min_velocity: [-0.5, -0.5, -1.0]
+    # max_accel: [0.5, 0.5, 0.8]
+    # max_decel: [-0.5, -0.5, -0.8]
 
 
     
