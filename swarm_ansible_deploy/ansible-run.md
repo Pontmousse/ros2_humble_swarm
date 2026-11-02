@@ -113,6 +113,22 @@ ssh-copy-id robomaster1@192.168.50.104
 # Reinstall SSH key
 
 
+############################################################
+# 11) CLEANING PI IMAGES INSTRUCTIONS
+############################################################
+
+cd swarm_ansible_deploy
+
+# Normal deploy — prunes old images automatically (default)
+ansible-playbook -i inventory.ini deploy.yml
+
+# Deploy WITHOUT pruning (e.g. during rapid iterate/rollback cycles)
+ansible-playbook -i inventory.ini deploy.yml --skip-tags prune
+
+# Just run the cleanup on its own, nothing else, across all robots
+ansible-playbook -i inventory.ini deploy.yml --tags prune
+
+
 
 ############################################################
 # THAT’S IT.

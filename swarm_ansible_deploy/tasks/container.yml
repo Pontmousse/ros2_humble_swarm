@@ -46,3 +46,20 @@
       - /run/udev:/run/udev:ro
 
     env: "{{ swarm_env }}"
+
+# Runs after the container is on the new image, so the running image is always
+# protected (dangling:false removes only images no container references). Build
+# cache is deliberately left untouched so native rebuilds stay incremental.
+# Disable with: --skip-tags prune
+- name: Prune unused swarm images to free Pi disk
+  community.docker.docker_prune:
+    images: true
+    images_filters:
+      dangling: false
+  register: prune_result
+  tags: [prune]
+
+- name: Report reclaimed image space
+  ansible.builtin.debug:
+    msg: "Pruned {{ prune_result.images | default([]) | length }} images, freed {{ prune_result.images_space_reclaimed | default(0) }} bytes"
+  tags: [prune]
