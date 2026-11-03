@@ -371,7 +371,7 @@ class ArucoDetectorNode(Node):
                 z_axis *= -1
 
             # Project the marker z-axis to the robot/camera motion plane (x-z) and normalize
-            projected_vec = np.array([z_axis[0], z_axis[2]])
+            projected_vec = np.array([-z_axis[2], z_axis[0]])
             norm = np.linalg.norm(projected_vec)
             if norm > 1e-6:
                 projected_vec /= norm
