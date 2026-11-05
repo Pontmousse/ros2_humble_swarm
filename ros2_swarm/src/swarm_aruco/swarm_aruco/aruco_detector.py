@@ -25,7 +25,7 @@ class ArucoDetectorNode(Node):
         self.declare_parameter("serial_number", 'sn')
         self.declare_parameter("aruco_type", 'DICT_5X5_100')
         self.declare_parameter("aruco_size", 2.5)  # in cm
-        self.declare_parameter("aruco_scale", (1.5, 0.8))
+        self.declare_parameter("aruco_scale", (1.0, 1.0))
 
         self.aruco_type = self.get_parameter("aruco_type").value
         self.aruco_size = self.get_parameter("aruco_size").value
@@ -76,7 +76,7 @@ class ArucoDetectorNode(Node):
         # than this are dropped BEFORE cv_bridge conversion + detection, so we
         # skip the whole decode-image->gray->solvePnP cost on skipped frames.
         # <= 0 disables the throttle (process every frame).
-        self.declare_parameter("detect_max_hz", 5.0)
+        self.declare_parameter("detect_max_hz", 50.0)
         detect_max_hz = float(self.get_parameter("detect_max_hz").value)
         self.detect_min_interval = (1.0 / detect_max_hz) if detect_max_hz > 0.0 else 0.0
         self.last_detect_time = 0.0
@@ -371,7 +371,7 @@ class ArucoDetectorNode(Node):
                 z_axis *= -1
 
             # Project the marker z-axis to the robot/camera motion plane (x-z) and normalize
-            projected_vec = np.array([-z_axis[2], z_axis[0]])
+            projected_vec = np.array([z_axis[0], z_axis[2]])
             norm = np.linalg.norm(projected_vec)
             if norm > 1e-6:
                 projected_vec /= norm

@@ -13,7 +13,7 @@ swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swa
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
 
 camera_source: "usb"
-usb_cam_device: "/dev/video2"
+usb_cam_device: "/dev/video1"
 
 ros_domain_id: "0"
 rmw_implementation: "rmw_fastrtps_cpp"

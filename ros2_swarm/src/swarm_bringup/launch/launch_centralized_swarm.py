@@ -112,7 +112,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    init_orientations = [0.0, 180.0, 0.0, 0.0, 0.0, 0.0]
 
 
 
@@ -222,6 +222,12 @@ def rm_preflight(robot_ips, verbose=False):
 def generate_launch_description():
     init_period = 2.0 # in seconds
     alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
+    # Separate, heavier smoothing for the capture target only. alpha=0.9 is
+    # near-passthrough, so raw solvePnP depth jitter (amplified 1.5x by
+    # aruco_scale) reached the capture law and made the real robot lurch toward
+    # the target in steps. 0.25 trades ~80-120 ms of lag for a smooth setpoint.
+    # Kept distinct from `alpha` so landmark_filter / mm_filtered are unchanged.
+    target_alpha = 0.25
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
     timer_frequency = 0.01 # in seconds
@@ -571,9 +577,9 @@ def generate_launch_description():
                 {
                     "timer_frequency": timer_frequency,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_4X4_50",
-                    "aruco_size": 3.556,
-                    "aruco_scale": (1.5, 0.8),
+                    "aruco_type": "DICT_4X4_100",
+                    "aruco_size": 3.56,
+                    "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": calibrate_camera,
                     "strict_calibration": strict_calibration,
                     "use_h264": True,  # decode the driver's h264 stream client-side
@@ -633,13 +639,13 @@ def generate_launch_description():
                 {
                     "timer_frequency": timer_frequency,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_5X5_100",
-                    "aruco_size": 3.556,
+                    "aruco_type": "DICT_5X5_50",
+                    "aruco_size": 5.76,
                     # Deliberately NOT wired to CALIBRATE_CAMERA: this node
                     # shares the camera and the photo output folder with
                     # landmark_detector, and two capturers overwrite each
                     # other's photos.
-                    "aruco_scale": (1.5, 0.8),
+                    "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": 0,
                     "strict_calibration": strict_calibration,
                     "use_h264": True,  # decode the driver's h264 stream client-side
@@ -669,7 +675,7 @@ def generate_launch_description():
         parameters=[
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "alpha": alpha,  # Filter coefficient
+                    "alpha": target_alpha,  # heavier smoothing, see target_alpha
                 }
             ]
         )
@@ -784,7 +790,7 @@ def generate_launch_description():
                         "align_gain": 0.05,
                         "heading_gain": 1.0,
                         "target_velocity_span": 5.25,
-                        "feedforward_gain": 1.0,
+                        "feedforward_gain": 0.0,
                         "contact_distance": CONTACT_DISTANCE,
                         "direct_cmd_vel": DIRECT_CMD_VEL,
                         **qos_parameters(depth=1, reliability='RELIABLE')

@@ -18,6 +18,7 @@
   ROS-capable environment. -->
 
 - Prefer concise, compact code when it remains clear and readable.
+- Do not over-comment every event, every heuristic, every empirical test. Just change the lilnes of code with brief explanation if needed.
 - Do not expand simple logic across many lines purely for aesthetics or formatting.
 - Simple functions, callbacks, conditionals, and expressions may be written as one-liners when their intent is immediately obvious.
 - Avoid excessive vertical spacing, unnecessary intermediate variables, and needless helper functions.

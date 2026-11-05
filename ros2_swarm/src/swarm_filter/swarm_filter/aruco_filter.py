@@ -39,9 +39,23 @@ class ArucoFilterNode(Node):
         self.declare_parameter('alpha', 0.1)
         self.alpha = float(self.get_parameter('alpha').value)
 
+        # Hold-last on a detection gap. The upstream detector emits an EMPTY
+        # Markers on any frame where solvePnP finds nothing, so a 1-2 frame
+        # ArUco dropout used to flicker the capture setpoint to empty. Within
+        # hold_timeout we instead re-emit the last good filtered constellation;
+        # past it we emit empty, so a genuine loss still clears and the robot
+        # does not chase a stale ghost.
+        self.declare_parameter('hold_timeout', 0.3)   # seconds
+        self.hold_timeout = float(self.get_parameter('hold_timeout').value)
+
         # State: last filtered centroid & normal
         self._filtered_pos: CoordXY | None = None
         self._filtered_norm: CoordXY | None = None
+
+        # Last non-empty output we published, and when a real detection last
+        # arrived, for the hold-last bridge above.
+        self._last_good_out: Markers | None = None
+        self._last_good_time = None
 
         # Sub + Pub
         self.sub = self.create_subscription(
@@ -52,12 +66,15 @@ class ArucoFilterNode(Node):
         self.get_logger().info(f'ArucoFilter started (alpha={self.alpha:.3f})')
 
     def cb_markers(self, msg: Markers):
-        # If no detections, just re-publish previous filtered constellation
+        # If no detections, bridge brief gaps by re-publishing the last good
+        # constellation; only emit empty once the gap exceeds hold_timeout.
         if not msg.markers:
-            if self._filtered_pos is None:
-                return
+            if self._last_good_out is not None and self._last_good_time is not None:
+                gap = (self.get_clock().now() - self._last_good_time).nanoseconds * 1e-9
+                if gap <= self.hold_timeout:
+                    self.pub.publish(self._last_good_out)
+                    return
             out = Markers()
-            # replicate last filtered constellation size (empty here)
             out.markers = []
             out.markers_normals = []
             self.pub.publish(out)
@@ -119,6 +136,10 @@ class ArucoFilterNode(Node):
 
             out.markers.append(m)
             out.markers_normals.append(nmsg)
+
+        # Remember this as the last good output for the hold-last bridge.
+        self._last_good_out = out
+        self._last_good_time = self.get_clock().now()
 
         self.pub.publish(out)
 

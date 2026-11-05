@@ -141,6 +141,12 @@ def rm_preflight(robot_ips, verbose=False):
 def generate_launch_description():
     init_period = 2.0 # in seconds
     alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
+    # Separate, heavier smoothing for the capture target only. alpha=0.9 is
+    # near-passthrough, so raw solvePnP depth jitter (amplified 1.5x by
+    # aruco_scale) reached the capture law and made the real robot lurch toward
+    # the target in steps. 0.25 trades ~80-120 ms of lag for a smooth setpoint.
+    # Kept distinct from `alpha` so landmark_filter / mm_filtered are unchanged.
+    target_alpha = 0.25
 
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
     timer_frequency = 0.05 # 20 Hz - drives cp_controller + hedgehog_obs
@@ -558,11 +564,11 @@ def generate_launch_description():
                 {
                     "timer_frequency": 0.05,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_4X4_50",
-                    "aruco_size": 3.556,
-                    "aruco_scale": (1.5, 0.8),
+                    "aruco_type": "DICT_4X4_100",
+                    "aruco_size": 3.56,
+                    "aruco_scale": (1.0, 1.0),
                     "calibrate_camera": 0,
-                    "detect_max_hz": 5.0,  # see target_detector note
+                    "detect_max_hz": 15.0,  # see target_detector note
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
@@ -621,15 +627,15 @@ def generate_launch_description():
                 {
                     "timer_frequency": 0.05,
                     "serial_number": serial_number,
-                    "aruco_type": "DICT_5X5_100",
-                    "aruco_size": 3.556,
-                    "aruco_scale": (1.5, 0.8),
+                    "aruco_type": "DICT_5X5_50",
+                    "aruco_size": 5.76,
+                    "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": 0,
                     # Cap ArUco detection at 5 Hz. solvePnP-per-frame was the #1
                     # CPU consumer (~116%) on the Pi; dropping frames before
                     # conversion/detection frees ~a core. publish_markers keeps
                     # republishing the last markers, so downstream rate is kept.
-                    "detect_max_hz": 5.0,
+                    "detect_max_hz": 15.0,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
@@ -660,7 +666,7 @@ def generate_launch_description():
         parameters=[
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "alpha": alpha,  # Filter coefficient
+                    "alpha": target_alpha,  # heavier smoothing, see target_alpha
                 }
             ]
         )

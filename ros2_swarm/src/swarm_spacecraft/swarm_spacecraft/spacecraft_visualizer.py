@@ -757,8 +757,8 @@ class SpacecraftVisualizerNode(Node):
                 magnitude = math.hypot(normal.x, normal.y)
                 if magnitude <= 1.0e-6:
                     continue
-                unit_x = normal.x / magnitude
-                unit_y = normal.y / magnitude
+                unit_x = -normal.y / magnitude
+                unit_y = normal.x / magnitude
                 global_x = cosine * unit_x - sine * unit_y
                 global_y = sine * unit_x + cosine * unit_y
                 normals.points.append(self.point(world_x, world_y, 0.03))

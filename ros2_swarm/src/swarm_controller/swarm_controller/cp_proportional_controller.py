@@ -147,6 +147,17 @@ class ControllerNode(Node):
         # Map-frame track of the closest target, for the velocity estimate.
         self.target_track = deque()
 
+        # Diagnostic state for the [dbg] log: last body-frame target (for the
+        # per-frame jump metric), the worst jump seen since the last print, and
+        # the time of the last print (self-throttle). Purely observational.
+        self._dbg_prev_target = None
+        self._dbg_max_jump = 0.0
+        self._dbg_last_log = 0.0
+
+        self.declare_parameter("target_hold_timeout", 0.4)   # seconds
+        self.target_hold_timeout = float(self.get_parameter("target_hold_timeout").value)
+        self.last_target_time = None
+
         # Subscribers
         self.create_subscription(Markers, 'targets', self.target_callback, self.qos_profile)
         qos_latest = QoSProfile(depth=1,
@@ -249,9 +260,16 @@ class ControllerNode(Node):
                          ]) / spread
 
     def target_callback(self, msg: Markers):
+        now = self.get_clock().now()
         if len(msg.markers) == 0:
-            self.frc_cmd = np.array([None, None])
+            if (self.last_target_time is None or
+                    (now - self.last_target_time).nanoseconds * 1e-9
+                    > self.target_hold_timeout):
+                self.frc_cmd = np.array([None, None])
+                self.trq_cmd = None
+                self.target_track.clear()
             return
+        self.last_target_time = now
 
         ######################################################
         # Finding the closest target
@@ -273,6 +291,7 @@ class ControllerNode(Node):
         self.track_target(target)
         distance = float(np.linalg.norm(target))
 
+        v_target = None  # set in the else branch; kept defined for the [dbg] log
         if distance < 1e-3:
             self.frc_cmd[0] = 0.0
             self.frc_cmd[1] = 0.0
@@ -305,6 +324,7 @@ class ControllerNode(Node):
         angle = -float(np.arctan2(marker_dir[0], marker_dir[1]))
         heading_error = (angle + np.pi) % (2.0 * np.pi) - np.pi
         self.trq_cmd = self.heading_gain * heading_error
+
 
     ######################################################################################################
 
