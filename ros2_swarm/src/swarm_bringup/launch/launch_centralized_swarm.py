@@ -112,7 +112,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [0.0, 180.0, 0.0, 0.0, 0.0, 0.0]
+    init_orientations = [180.0, 180.0, 0.0, 0.0, 0.0, 0.0]
 
 
 
@@ -611,6 +611,7 @@ def generate_launch_description():
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
                     "alpha": alpha,  # Filter coefficient
+                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
                 }
             ]
         )
@@ -676,6 +677,7 @@ def generate_launch_description():
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
                     "alpha": target_alpha,  # heavier smoothing, see target_alpha
+                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
                 }
             ]
         )

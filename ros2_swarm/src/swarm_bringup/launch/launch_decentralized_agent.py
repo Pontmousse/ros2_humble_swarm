@@ -599,6 +599,7 @@ def generate_launch_description():
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
                     "alpha": alpha,  # Filter coefficient
+                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
                 }
             ]
         )
@@ -667,6 +668,7 @@ def generate_launch_description():
                 {
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
                     "alpha": target_alpha,  # heavier smoothing, see target_alpha
+                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
                 }
             ]
         )
