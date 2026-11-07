@@ -78,6 +78,14 @@ def generate_launch_description():
             f'/{robot_name}/targets_unf',
             f'/{robot_name}/targets',
 
+            # Landmark/target estimator: map-frame memory clouds (not
+            # reconstructable offline without the estimator's internal state; the
+            # target instance remaps its viz to target_memory/markers) and the
+            # visualizer overlay (estimated + raw) for offline RViz replay.
+            f'/{robot_name}/landmark_memory/markers',
+            f'/{robot_name}/target_memory/markers',
+            f'/{robot_name}/spacecraft_visualizer/markers',
+
             # Velocity commands: before and after Nav2 velocity smoother
             f'/{robot_name}/cmd_vel_raw',
             f'/{robot_name}/cmd_vel',

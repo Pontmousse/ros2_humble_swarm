@@ -7,3 +7,10 @@
 std_msgs/Header header
 CoordXY[] markers
 CoordXY[] markers_normals
+
+# ArUco marker IDs, parallel to markers[] / markers_normals[] (same length and
+# order). Carries the fiducial identity through the pipeline so a landmark
+# estimator can do ID-based data association. Empty when the source has no
+# identity (older detectors, or a producer that does not fill it) -- consumers
+# that ignore the field keep working unchanged.
+int32[] ids

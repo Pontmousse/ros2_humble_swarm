@@ -41,7 +41,7 @@ if calibrate_camera == 1:
           "photos instead of detecting markers.")
 
 # VIRTUAL_TARGET=1 replaces the four camera nodes (landmark/target detectors and
-# filters) with one global virtual_target/virtual_scene node that publishes the
+# filters) with one global swarm_target/virtual_scene node that publishes the
 # final landmarks/targets topics from a geometric world + sensor model, so the
 # centralized stack runs with no camera. SCENE_FILE overrides the default scene.
 virtual_target_on = os.environ.get("VIRTUAL_TARGET", "").lower() in ("1", "true", "yes", "on")
@@ -50,6 +50,17 @@ if virtual_target_on:
     if calibrate_camera == 1:
         print("WARNING: CALIBRATE_CAMERA needs a real camera; ignored under "
               "VIRTUAL_TARGET.")
+
+# TARGET_ESTIMATOR=1 inserts the landmark_estimator between perception and the
+# controllers in place of aruco_filter: it keeps a map-frame memory keyed by
+# ArUco ID and republishes the whole remembered cloud at a steady rate, so the
+# controller reference persists even when markers leave the FOV (killing the
+# perception-starvation yaw limit cycle). Under VIRTUAL_TARGET it also switches
+# virtual_scene into raw-observation mode (noisy/dropped/starved *_unf streams
+# with ground-truth IDs) so the estimator is tested before hardware.
+estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
+if estimator_on:
+    print("TARGET_ESTIMATOR=1 -- landmark_estimator replaces aruco_filter.")
 
 # VIRTUAL_PLANT=1 replaces the robot + localization chain (robomaster driver,
 # marvelmind, pose_publisher) with one kinematic fake_plant per robot that
@@ -140,7 +151,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '2'
+    env_idx = '1,2'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -690,7 +701,10 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(aruco_landmark_filter)
+        # TARGET_ESTIMATOR=1 replaces aruco_filter with the landmark_estimator
+        # (added in its own loop below), so the raw filter is gated off here.
+        if not estimator_on:
+            ld.add_action(aruco_landmark_filter)
 
 
 
@@ -756,7 +770,77 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(targets_filter)
+        if not estimator_on:
+            ld.add_action(targets_filter)
+
+    ##############################################################################
+    ##############################################################################
+    # TARGET_ESTIMATOR=1: the landmark_estimator in place of both aruco_filter
+    # instances. Generic single-stream node instantiated twice via remappings
+    # (landmark + target); it keeps a map-frame memory keyed by ArUco ID and
+    # republishes the whole remembered cloud at publish_rate projected through the
+    # live pose, so the controller reference persists through FOV loss. QoS mirrors
+    # the aruco_filter it replaces, so controllers are untouched. Runs for all
+    # robots: the *_unf input comes from real detectors (VIRTUAL_TARGET=0) or from
+    # virtual_scene's raw-observation mode (VIRTUAL_TARGET=1).
+    if estimator_on:
+        for i in range(N):
+            robot_name = robot_names[i]
+
+            landmark_estimator = Node(
+                package="swarm_target",
+                executable="landmark_estimator",
+                name="landmark_estimator",
+                namespace=robot_name,
+                output="screen",
+                remappings=[
+                    ('markers_unf', 'landmarks_unf'),
+                    ('markers', 'landmarks'),
+                ],
+                emulate_tty=True,
+                parameters=[
+                    {
+                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                        "estimator_type": "averaging",
+                        "publish_rate": 15.0,
+                        "min_observations": 2,
+                        "forget_timeout": 0.0,
+                        "output_fov_gate": False,
+                        "camera_yaw_offset_deg": 0.0,
+                        "global_frame_id": "swarm_map",
+                    }
+                ]
+            )
+            ld.add_action(landmark_estimator)
+
+            target_estimator = Node(
+                package="swarm_target",
+                executable="landmark_estimator",
+                name="target_estimator",
+                namespace=robot_name,
+                output="screen",
+                remappings=[
+                    ('markers_unf', 'targets_unf'),
+                    ('markers', 'targets'),
+                    # Distinct memory-viz topic so the two instances in this
+                    # namespace do not collide (rosbag records both).
+                    ('landmark_memory/markers', 'target_memory/markers'),
+                ],
+                emulate_tty=True,
+                parameters=[
+                    {
+                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                        "estimator_type": "averaging",
+                        "publish_rate": 15.0,
+                        "min_observations": 2,
+                        "forget_timeout": 0.0,
+                        "output_fov_gate": False,
+                        "camera_yaw_offset_deg": 0.0,
+                        "global_frame_id": "swarm_map",
+                    }
+                ]
+            )
+            ld.add_action(target_estimator)
 
     ##############################################################################
     ##############################################################################

@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>virtual_target</name>
+  <name>swarm_target</name>
   <version>0.0.0</version>
-  <description>Geometric perception simulator: publishes virtual landmarks/targets for centralized testing with no camera.</description>
+  <description>Target/landmark providers: the virtual_scene geometric simulator and the ArUco-fused landmark/target memory estimator that feed the controllers' landmarks/targets contract.</description>
   <maintainer email="elghali@todo.todo">elghali</maintainer>
   <license>TODO: License declaration</license>
 

@@ -105,11 +105,23 @@ class SpacecraftVisualizerNode(Node):
     ANCHOR_SPHERE_BASE = 20   # 20, 21, 22
     ANCHOR_LABEL_BASE = 23    # 23, 24, 25
     ARENA_ID = 26
+    # Raw (pre-estimator) perception overlay -- the *_unf observations drawn as a
+    # secondary style beneath the estimated landmarks/targets (ids 10-13).
+    RAW_LANDMARKS_ID = 27
+    RAW_LANDMARK_NORMALS_ID = 28
+    RAW_LANDMARK_CONTOUR_ID = 29
+    RAW_TARGETS_ID = 30
+    RAW_TARGET_NORMALS_ID = 31
+    RAW_TARGET_CONTOUR_ID = 32
 
     # RGB triples for the perception overlays.
     LANDMARK_COLOR = (0.2, 1.0, 0.3)
     TARGET_COLOR = (1.0, 0.2, 0.2)
     TARGET_NORMAL_COLOR = (1.0, 0.55, 0.0)
+    # Raw observations: brighter tint than the estimated cloud so they read as the
+    # noisy source feeding the estimator.
+    RAW_LANDMARK_COLOR = (0.4, 1.0, 0.4)
+    RAW_TARGET_COLOR = (1.0, 0.4, 0.4)
 
     # Marvelmind anchors (address, x, y) and the arena corner loop, in swarm_map.
     # Hand-transcribed lab layout; see plot_rm2_region.py / virtual_spacecraft.yaml.
@@ -153,6 +165,13 @@ class SpacecraftVisualizerNode(Node):
         self.declare_parameter("perception_timeout", 0.5)
         self.declare_parameter("marker_point_size", 0.10)
         self.declare_parameter("normal_arrow_length", 0.20)
+        # Raw (pre-estimator) observation overlay: the *_unf streams drawn as a
+        # secondary style -- smaller, more transparent, brighter, with an optional
+        # contour ring -- so the estimated cloud (primary) reads on top of them.
+        self.declare_parameter("show_raw_observations", True)
+        self.declare_parameter("raw_point_size", 0.05)
+        self.declare_parameter("raw_alpha", 0.35)
+        self.declare_parameter("show_raw_contour", True)
         # Static lab-frame overlay: X/Y axes + Marvelmind anchors + arena outline.
         self.declare_parameter("show_world_anchors", True)
         self.declare_parameter("world_axis_length", 1.0)
@@ -214,6 +233,14 @@ class SpacecraftVisualizerNode(Node):
         self.normal_arrow_length = float(
             self.get_parameter("normal_arrow_length").value
         )
+        self.show_raw_observations = bool(
+            self.get_parameter("show_raw_observations").value
+        )
+        self.raw_point_size = float(self.get_parameter("raw_point_size").value)
+        self.raw_alpha = float(self.get_parameter("raw_alpha").value)
+        self.show_raw_contour = bool(
+            self.get_parameter("show_raw_contour").value
+        )
         self.show_world_anchors = bool(
             self.get_parameter("show_world_anchors").value
         )
@@ -238,6 +265,10 @@ class SpacecraftVisualizerNode(Node):
         self.landmarks_update_time = None
         self.targets_msg = None
         self.targets_update_time = None
+        self.landmarks_unf_msg = None
+        self.landmarks_unf_update_time = None
+        self.targets_unf_msg = None
+        self.targets_unf_update_time = None
 
         qos_profile = qos_profile_from_parameters(self)
         # Perception streams are read BEST_EFFORT so the subscription connects to
@@ -293,6 +324,17 @@ class SpacecraftVisualizerNode(Node):
         if self.show_targets:
             self.create_subscription(
                 Markers, "targets", self.targets_callback, perception_qos
+            )
+        # Raw pre-estimator streams, drawn as the secondary overlay.
+        if self.show_raw_observations and self.show_landmarks:
+            self.create_subscription(
+                Markers, "landmarks_unf", self.landmarks_unf_callback,
+                perception_qos
+            )
+        if self.show_raw_observations and self.show_targets:
+            self.create_subscription(
+                Markers, "targets_unf", self.targets_unf_callback,
+                perception_qos
             )
         self.marker_publisher = self.create_publisher(
             MarkerArray, "spacecraft_visualizer/markers", qos_profile
@@ -379,6 +421,16 @@ class SpacecraftVisualizerNode(Node):
         """Store the latest target detections (body-frame cm)."""
         self.targets_msg = message
         self.targets_update_time = self.get_clock().now().nanoseconds
+
+    def landmarks_unf_callback(self, message: Markers) -> None:
+        """Store the latest raw (pre-estimator) landmark observations."""
+        self.landmarks_unf_msg = message
+        self.landmarks_unf_update_time = self.get_clock().now().nanoseconds
+
+    def targets_unf_callback(self, message: Markers) -> None:
+        """Store the latest raw (pre-estimator) target observations."""
+        self.targets_unf_msg = message
+        self.targets_unf_update_time = self.get_clock().now().nanoseconds
 
     def orientation_yaw(self, message: Odometry):
         """Extract a global-frame yaw from a comparison odometry source."""
@@ -771,6 +823,84 @@ class SpacecraftVisualizerNode(Node):
                 )
         return points, normals
 
+    def raw_perception_markers(
+        self, stamp, source: Markers, px, py, yaw, points_id, normals_id,
+        contour_id, point_color, normal_color,
+    ):
+        """Secondary style for the raw (pre-estimator) *_unf observations.
+
+        Same body->global lift as perception_markers, but smaller, more
+        transparent spheres in a brighter tint, plus an optional per-point
+        contour ring (RViz spheres have no native outline, so we approximate one
+        with a LINE_LIST polygon around each point) to distinguish the raw cloud
+        from the estimated one drawn on top of it.
+        """
+        cosine = math.cos(yaw)
+        sine = math.sin(yaw)
+
+        points = self.marker(points_id, Marker.SPHERE_LIST, stamp)
+        points.scale.x = self.raw_point_size
+        points.scale.y = self.raw_point_size
+        points.scale.z = self.raw_point_size
+        points.color.r, points.color.g, points.color.b = point_color
+        points.color.a = self.raw_alpha
+
+        normals = self.marker(normals_id, Marker.LINE_LIST, stamp)
+        normals.scale.x = 0.01
+        normals.color.r, normals.color.g, normals.color.b = normal_color
+        normals.color.a = self.raw_alpha
+
+        contour = self.marker(contour_id, Marker.LINE_LIST, stamp)
+        contour.scale.x = 0.006
+        contour.color.r, contour.color.g, contour.color.b = point_color
+        contour.color.a = min(1.0, self.raw_alpha + 0.35)
+
+        ring_radius = 0.6 * self.raw_point_size
+        ring_segments = 10
+        ring = []
+        for k in range(ring_segments):
+            a0 = 2.0 * math.pi * k / ring_segments
+            a1 = 2.0 * math.pi * (k + 1) / ring_segments
+            ring.append((math.cos(a0), math.sin(a0),
+                         math.cos(a1), math.sin(a1)))
+
+        have_normals = (
+            self.show_marker_normals
+            and len(source.markers_normals) == len(source.markers)
+        )
+        for i, point in enumerate(source.markers):
+            body_x = point.x / 100.0
+            body_y = point.y / 100.0
+            world_x = px + cosine * body_x - sine * body_y
+            world_y = py + sine * body_x + cosine * body_y
+            points.points.append(self.point(world_x, world_y, 0.02))
+
+            if self.show_raw_contour:
+                for c0x, c0y, c1x, c1y in ring:
+                    contour.points.append(self.point(
+                        world_x + ring_radius * c0x,
+                        world_y + ring_radius * c0y, 0.02))
+                    contour.points.append(self.point(
+                        world_x + ring_radius * c1x,
+                        world_y + ring_radius * c1y, 0.02))
+
+            if have_normals:
+                normal = source.markers_normals[i]
+                magnitude = math.hypot(normal.x, normal.y)
+                if magnitude <= 1.0e-6:
+                    continue
+                unit_x = -normal.y / magnitude
+                unit_y = normal.x / magnitude
+                global_x = cosine * unit_x - sine * unit_y
+                global_y = sine * unit_x + cosine * unit_y
+                normals.points.append(self.point(world_x, world_y, 0.02))
+                normals.points.append(self.point(
+                    world_x + self.normal_arrow_length * global_x,
+                    world_y + self.normal_arrow_length * global_y,
+                    0.02,
+                ))
+        return points, normals, contour
+
     def delete_marker(self, marker_id: int, stamp) -> Marker:
         """Delete a previously published dynamic marker."""
         marker = self.marker(marker_id, Marker.LINE_STRIP, stamp)
@@ -959,6 +1089,54 @@ class SpacecraftVisualizerNode(Node):
             else:
                 markers.append(self.delete_marker(points_id, stamp))
                 markers.append(self.delete_marker(normals_id, stamp))
+
+        # Raw (pre-estimator) overlay -- the *_unf observations drawn beneath the
+        # estimated cloud above, in the smaller/transparent/brighter style.
+        raw_perception = (
+            (
+                self.show_raw_observations and self.show_landmarks,
+                self.landmarks_unf_msg,
+                self.landmarks_unf_update_time,
+                self.RAW_LANDMARKS_ID,
+                self.RAW_LANDMARK_NORMALS_ID,
+                self.RAW_LANDMARK_CONTOUR_ID,
+                self.RAW_LANDMARK_COLOR,
+                self.RAW_LANDMARK_COLOR,
+            ),
+            (
+                self.show_raw_observations and self.show_targets,
+                self.targets_unf_msg,
+                self.targets_unf_update_time,
+                self.RAW_TARGETS_ID,
+                self.RAW_TARGET_NORMALS_ID,
+                self.RAW_TARGET_CONTOUR_ID,
+                self.RAW_TARGET_COLOR,
+                self.RAW_TARGET_COLOR,
+            ),
+        )
+        for (show, message, update_time, points_id, normals_id, contour_id,
+                pcol, ncol) in raw_perception:
+            valid = (
+                show
+                and physical_pose_valid
+                and message is not None
+                and len(message.markers) > 0
+                and self.source_is_fresh(
+                    now.nanoseconds, update_time, self.perception_timeout
+                )
+            )
+            if valid:
+                points, normals, contour = self.raw_perception_markers(
+                    stamp, message, px, py, yaw, points_id, normals_id,
+                    contour_id, pcol, ncol,
+                )
+                markers.append(points)
+                markers.append(normals)
+                markers.append(contour)
+            else:
+                markers.append(self.delete_marker(points_id, stamp))
+                markers.append(self.delete_marker(normals_id, stamp))
+                markers.append(self.delete_marker(contour_id, stamp))
 
         if self.show_world_anchors:
             markers.extend(self.build_world_markers(stamp))

@@ -20,6 +20,7 @@ class ArucoDetectorNode(Node):
         self.get_logger().info(f"Aruco_detector has been started.")
         self.markers = []
         self.markers_normals = []
+        self.marker_ids = []
         # Validity stamp of the current detection. Frozen when detect_arucos
         # stops running, so a stalled pipeline ages out instead of looking live.
         self.markers_stamp = None
@@ -387,6 +388,10 @@ class ArucoDetectorNode(Node):
 
         self.markers = p
         self.markers_normals = q
+        # Carry the ArUco IDs alongside positions/normals (same order) so a
+        # downstream estimator can associate observations by marker identity.
+        ids = self.aruco.ids
+        self.marker_ids = [int(v) for v in ids] if ids is not None else []
         # Stamp the moment this detection was produced. publish_markers freezes
         # this stamp onto every republish, so downstream age == time since the
         # detector last actually ran (zero markers included: a live camera that
@@ -405,6 +410,7 @@ class ArucoDetectorNode(Node):
             msg.header.stamp = self.markers_stamp
         msg.markers = self.markers
         msg.markers_normals = self.markers_normals
+        msg.ids = list(self.marker_ids)
         self.marker_pub.publish(msg)
 
 

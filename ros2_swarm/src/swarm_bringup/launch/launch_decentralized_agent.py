@@ -18,6 +18,14 @@ gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 # consumers are unchanged. Default off. See pose_kf.py.
 kf_on = os.environ.get("KF_LOCALIZATION", "").lower() in ("1", "true", "yes", "on")
 
+# TARGET_ESTIMATOR=1 inserts the landmark_estimator between the ArUco detectors
+# and the controllers in place of aruco_filter: a map-frame memory keyed by ArUco
+# ID, republished as a steady body-frame cloud through the live pose, so the
+# controller reference persists when markers leave the FOV (killing the
+# perception-starvation yaw limit cycle). Same landmarks/targets output contract
+# and QoS as aruco_filter, so controllers are untouched. Default off.
+estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
+
 def _split_env(name, cast=str):
     val = os.getenv(name)
     if val is None:
@@ -646,7 +654,10 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(aruco_landmark_filter) 
+        # TARGET_ESTIMATOR=1 replaces aruco_filter with landmark_estimator (added
+        # in its own loop below), so the raw filter is gated off here.
+        if not estimator_on:
+            ld.add_action(aruco_landmark_filter)
 
 
 
@@ -715,7 +726,75 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(targets_filter)
+        if not estimator_on:
+            ld.add_action(targets_filter)
+
+    ##############################################################################
+    ##############################################################################
+    # TARGET_ESTIMATOR=1: landmark_estimator in place of both aruco_filter
+    # instances. Generic single-stream node instantiated twice via remappings
+    # (landmark + target); keeps a map-frame memory keyed by ArUco ID and
+    # republishes the whole remembered cloud at publish_rate through the live pose,
+    # so the controller reference persists through FOV loss. QoS mirrors the
+    # aruco_filter it replaces, so controllers are untouched.
+    if estimator_on:
+        for i in range(N):
+            robot_name = robot_names[i]
+
+            landmark_estimator = Node(
+                package="swarm_target",
+                executable="landmark_estimator",
+                name="landmark_estimator",
+                namespace=robot_name,
+                output="screen",
+                remappings=[
+                    ('markers_unf', 'landmarks_unf'),
+                    ('markers', 'landmarks'),
+                ],
+                emulate_tty=True,
+                parameters=[
+                    {
+                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                        "estimator_type": "averaging",
+                        "publish_rate": 15.0,
+                        "min_observations": 2,
+                        "forget_timeout": 0.0,
+                        "output_fov_gate": False,
+                        "camera_yaw_offset_deg": 0.0,
+                        "global_frame_id": "swarm_map",
+                    }
+                ]
+            )
+            ld.add_action(landmark_estimator)
+
+            target_estimator = Node(
+                package="swarm_target",
+                executable="landmark_estimator",
+                name="target_estimator",
+                namespace=robot_name,
+                output="screen",
+                remappings=[
+                    ('markers_unf', 'targets_unf'),
+                    ('markers', 'targets'),
+                    # Distinct memory-viz topic so the two instances in this
+                    # namespace do not collide (rosbag records both).
+                    ('landmark_memory/markers', 'target_memory/markers'),
+                ],
+                emulate_tty=True,
+                parameters=[
+                    {
+                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                        "estimator_type": "averaging",
+                        "publish_rate": 15.0,
+                        "min_observations": 2,
+                        "forget_timeout": 0.0,
+                        "output_fov_gate": False,
+                        "camera_yaw_offset_deg": 0.0,
+                        "global_frame_id": "swarm_map",
+                    }
+                ]
+            )
+            ld.add_action(target_estimator)
 
 
     ##############################################################################

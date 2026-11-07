@@ -51,8 +51,8 @@ objects:
       - [-0.875, 0.375]
     com: [-3.0, -2.5]
     yaw_deg: 0.0
-    vel: [0.005, 0.01]
-    omega_deg: 0.3
+    vel: [0.00, 0.0]
+    omega_deg: 0.0
     landmark_points_per_m: 20.0
     captures: auto
     captures_per_edge: 1

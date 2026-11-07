@@ -22,6 +22,8 @@
       ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"
       VIRTUAL_SPACECRAFT: "{{ virtual_spacecraft }}"
       DIRECT_CMD_VEL:     "{{ direct_cmd_vel }}"
+      KF_LOCALIZATION:    "{{ kf_localization }}"
+      TARGET_ESTIMATOR:   "{{ target_estimator }}"
       # Set explicitly, never left to an implicit default. The launch file's
       # fallback changed between image versions -- v9.1.5 passed no conn_type
       # to s1.launch at all, so the driver's own "sta" default won, while HEAD

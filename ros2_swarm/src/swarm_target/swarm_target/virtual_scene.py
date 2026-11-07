@@ -252,6 +252,17 @@ class VirtualScene(Node):
         self.declare_parameter("noise_std_cm", 0.0)
         self.declare_parameter("global_frame_id", "swarm_map")
 
+        # -- raw-observation sim mode (feeds the landmark_estimator) ----------
+        # When emit_raw_observations is on, publish hardware-like noisy / dropped
+        # / starved detections on the *_unf topics (the estimator's input), with
+        # STABLE per-point ArUco-style IDs tied to ground truth. publish_fused
+        # keeps the clean landmarks/targets for the legacy no-estimator path.
+        self.declare_parameter("emit_raw_observations", False)
+        self.declare_parameter("publish_fused", True)
+        self.declare_parameter("normal_noise_std", 0.0)       # unit-vector jitter
+        self.declare_parameter("observation_dropout_prob", 0.0)  # per-marker skip
+        self.declare_parameter("obs_update_rate", 6.0)        # Hz of genuine fixes
+
         names = list(self.get_parameter("robot_names").value)
         self.robot_names = [n for n in names if n]
         scene_file = str(self.get_parameter("scene_file").value)
@@ -268,7 +279,35 @@ class VirtualScene(Node):
         self.noise_std = float(self.get_parameter("noise_std_cm").value)
         self.frame_id = str(self.get_parameter("global_frame_id").value)
 
+        self.emit_raw = bool(self.get_parameter("emit_raw_observations").value)
+        self.publish_fused = bool(self.get_parameter("publish_fused").value)
+        self.normal_noise_std = float(
+            self.get_parameter("normal_noise_std").value)
+        self.dropout_prob = float(
+            self.get_parameter("observation_dropout_prob").value)
+        obs_rate = float(self.get_parameter("obs_update_rate").value)
+        self._obs_period = 1.0 / max(obs_rate, 1e-6)
+        self._last_obs_time = None          # None -> first tick is a genuine fix
+        self._raw_hold = {}                 # name -> (landmarks_msg, targets_msg)
+
         self.objects = self._load_scene(scene_file)
+
+        # Stable ground-truth IDs, one per world landmark / capture point, in the
+        # same concatenation order tick() builds world_landmarks / world_captures.
+        # Landmarks and targets are independent streams, so their IDs may overlap
+        # safely; keep distinct bases anyway for readable debugging.
+        self.landmark_ids = []
+        lid = 10
+        for o in self.objects:
+            for _ in o.landmark_points:
+                self.landmark_ids.append(lid)
+                lid += 1
+        self.capture_ids = []
+        cid = 1000
+        for o in self.objects:
+            for _ in o.capture_points:
+                self.capture_ids.append(cid)
+                cid += 1
 
         # Publisher QoS == aruco_filter's effective QoS, so this is a drop-in
         # replacement compatible with every (BEST_EFFORT or RELIABLE) subscriber.
@@ -287,11 +326,20 @@ class VirtualScene(Node):
         self.poses = {}          # robot name -> (x, y, theta_deg)
         self.landmark_pubs = {}
         self.target_pubs = {}
+        self.landmark_unf_pubs = {}
+        self.target_unf_pubs = {}
         for name in self.robot_names:
             self.landmark_pubs[name] = self.create_publisher(
                 Markers, f"/{name}/landmarks", pub_qos)
             self.target_pubs[name] = self.create_publisher(
                 Markers, f"/{name}/targets", pub_qos)
+            if self.emit_raw:
+                # RELIABLE publisher is compatible with the estimator's
+                # subscription whether it is configured RELIABLE or BEST_EFFORT.
+                self.landmark_unf_pubs[name] = self.create_publisher(
+                    Markers, f"/{name}/landmarks_unf", pub_qos)
+                self.target_unf_pubs[name] = self.create_publisher(
+                    Markers, f"/{name}/targets_unf", pub_qos)
             self.create_subscription(
                 StatePos, f"/{name}/pose",
                 lambda msg, n=name: self._on_pose(n, msg), sub_qos)
@@ -302,11 +350,14 @@ class VirtualScene(Node):
         self.last_time = self.get_clock().now()
         self.create_timer(1.0 / max(rate, 1e-6), self.tick)
 
+        mode = ("raw->*_unf" if self.emit_raw else "") + \
+               (" + fused" if self.publish_fused else "")
         self.get_logger().info(
             f"virtual_scene: {len(self.objects)} objects, robots "
             f"{self.robot_names}, landmark_range={self.max_range} m, "
             f"target_range={self.target_max_range} m, "
-            f"half_fov={math.degrees(self.half_fov):.0f} deg.")
+            f"half_fov={math.degrees(self.half_fov):.0f} deg, "
+            f"mode=[{mode.strip() or 'fused'}].")
 
     # -- setup ------------------------------------------------------------
     def _load_scene(self, path):
@@ -339,30 +390,66 @@ class VirtualScene(Node):
             world_landmarks.extend(o.world_landmarks())
             world_captures.extend(o.world_captures())
 
-        for name in self.robot_names:
-            pose = self.poses.get(name)
-            if pose is None:
-                continue  # skip until the first pose arrives
-            self.landmark_pubs[name].publish(
-                self._gate(pose, world_landmarks, self.max_range))
-            self.target_pubs[name].publish(
-                self._gate(pose, world_captures, self.target_max_range))
+        # Clean fused output (legacy no-estimator path): always fresh stamp.
+        if self.publish_fused:
+            for name in self.robot_names:
+                pose = self.poses.get(name)
+                if pose is None:
+                    continue  # skip until the first pose arrives
+                self.landmark_pubs[name].publish(self._gate(
+                    pose, world_landmarks, self.landmark_ids, self.max_range))
+                self.target_pubs[name].publish(self._gate(
+                    pose, world_captures, self.capture_ids,
+                    self.target_max_range))
+
+        # Raw hardware-like observations feeding the estimator: noisy / dropped,
+        # and STARVED -- a genuine fix mints a new stamp at obs_update_rate, while
+        # the timer keeps re-publishing the held frame with that FROZEN stamp in
+        # between, reproducing the real detector's ~0.3 Hz true-detection rate and
+        # exercising the estimator's fresh-gate.
+        if self.emit_raw:
+            genuine = (self._last_obs_time is None or
+                       (now - self._last_obs_time).nanoseconds * 1e-9
+                       >= self._obs_period)
+            if genuine:
+                self._last_obs_time = now
+            for name in self.robot_names:
+                pose = self.poses.get(name)
+                if pose is None:
+                    continue
+                if genuine:
+                    lm = self._gate(pose, world_landmarks, self.landmark_ids,
+                                    self.max_range, raw=True)
+                    tg = self._gate(pose, world_captures, self.capture_ids,
+                                    self.target_max_range, raw=True)
+                    self._raw_hold[name] = (lm, tg)
+                else:
+                    held = self._raw_hold.get(name)
+                    if held is None:
+                        continue  # no genuine fix yet to hold
+                    lm, tg = held  # re-publish with its FROZEN stamp
+                self.landmark_unf_pubs[name].publish(lm)
+                self.target_unf_pubs[name].publish(tg)
 
         self.viz_pub.publish(self._viz())
 
-    def _gate(self, pose, world_pts, max_range):
-        """Apply range/FOV/facing for one robot; return a Markers (cm, body)."""
+    def _gate(self, pose, world_pts, ids, max_range, raw=False):
+        """Apply range/FOV/facing for one robot; return a Markers (cm, body).
+
+        `ids` is parallel to `world_pts` (stable ground-truth IDs); the surviving
+        markers carry their IDs in msg.ids. When `raw`, inject position + normal
+        noise and per-marker dropout to emulate the hardware detector.
+        """
         rx, ry, theta_deg = pose
         th = math.radians(theta_deg) + self.cam_offset
         c, s = math.cos(th), math.sin(th)
         r2 = max_range * max_range
 
         msg = Markers()
-        # Sim is ground truth and regenerated every tick -> always fresh. Stamp
-        # now() (not a frozen detection time) so the downstream freshness guard
-        # never trips on legitimately static sim landmarks.
+        # Fresh stamp when built: clean fused output is always fresh; a genuine
+        # raw fix mints a new stamp here, then tick() freezes it between fixes.
         msg.header.stamp = self.get_clock().now().to_msg()
-        for (px, py), (nx, ny) in world_pts:
+        for idx, ((px, py), (nx, ny)) in enumerate(world_pts):
             dx, dy = px - rx, py - ry
             if dx * dx + dy * dy > r2:                      # range gate
                 continue
@@ -376,22 +463,33 @@ class VirtualScene(Node):
                 continue
             if (nx * (-dx) + ny * (-dy)) / dist < self.cos_incidence:  # facing
                 continue
+            if raw and self.dropout_prob > 0.0 and \
+                    random.random() < self.dropout_prob:    # detector dropout
+                continue
 
             # Normal into body frame, then the published [right, fwd] convention
             # with forward component forced positive (aruco flip).
             nfx = c * nx + s * ny
             nfy = -s * nx + c * ny
+            if raw and self.normal_noise_std > 0.0:
+                nfx += random.gauss(0.0, self.normal_noise_std)
+                nfy += random.gauss(0.0, self.normal_noise_std)
+                mag = math.hypot(nfx, nfy)
+                if mag > 1e-9:
+                    nfx, nfy = nfx / mag, nfy / mag
             if nfx < 0.0:
                 nfx, nfy = -nfx, -nfy
 
             pos = CoordXY()
-            pos.x = bx * 100.0 + self._noise()
-            pos.y = by * 100.0 + self._noise()
+            pos.x = bx * 100.0 + (self._noise() if raw else 0.0)
+            pos.y = by * 100.0 + (self._noise() if raw else 0.0)
             nrm = CoordXY()
             nrm.x = -nfy          # X_cam (right) = -left
             nrm.y = nfx           # Z_cam (forward)
             msg.markers.append(pos)
             msg.markers_normals.append(nrm)
+            if idx < len(ids):
+                msg.ids.append(int(ids[idx]))
         return msg
 
     def _noise(self):

@@ -19,10 +19,11 @@ ros_domain_id: "0"
 rmw_implementation: "rmw_fastrtps_cpp"
 ros_localhost_only: "0"
 virtual_spacecraft: "true"
-# When "true", cp_controller is the sole cmd_vel writer and muxes the nav chain
-# (velocity_smoother remapped to cmd_vel_nav); capture drives the chassis
-# directly. Keep "false" for the normal wrench/virtual_spacecraft path.
 direct_cmd_vel: "false"
+
+
+kf_localization: "true"
+target_estimator: "true"
 
 
 conn_type: "rndis"

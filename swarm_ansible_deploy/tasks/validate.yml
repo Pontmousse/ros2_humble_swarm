@@ -42,6 +42,8 @@
       - "'BEACON_ADDR=' ~ swarm_env.BEACON_ADDR in container_info.container.Config.Env"
       - "'ROBOT_SERIAL=' ~ swarm_env.ROBOT_SERIAL in container_info.container.Config.Env"
       - "'VIRTUAL_SPACECRAFT=' ~ swarm_env.VIRTUAL_SPACECRAFT in container_info.container.Config.Env"
+      - "'KF_LOCALIZATION=' ~ swarm_env.KF_LOCALIZATION in container_info.container.Config.Env"
+      - "'TARGET_ESTIMATOR=' ~ swarm_env.TARGET_ESTIMATOR in container_info.container.Config.Env"
       - "'ROS_DOMAIN_ID=' ~ swarm_env.ROS_DOMAIN_ID in container_info.container.Config.Env"
       - "'RMW_IMPLEMENTATION=' ~ swarm_env.RMW_IMPLEMENTATION in container_info.container.Config.Env"
       - "'ROS_LOCALHOST_ONLY=' ~ swarm_env.ROS_LOCALHOST_ONLY in container_info.container.Config.Env"

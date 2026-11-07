@@ -85,6 +85,7 @@ class ArucoMarker():
 
         self.tvecs = None
         self.rvecs = None
+        self.ids = None   # ArUco IDs parallel to tvecs/rvecs (identity for data association)
         self.scalex = scale[0]
         self.scaley = scale[1]
 
@@ -447,6 +448,9 @@ class ArucoMarker():
             self.marker_num = len(ids)
             self.tvecs = np.zeros([self.marker_num,2])
             self.rvecs = np.zeros([self.marker_num,3])
+            # Keep the fiducial IDs aligned 1:1 and in-order with tvecs/rvecs so
+            # downstream consumers can associate observations by marker identity.
+            self.ids = np.asarray(ids, dtype=int).reshape(-1)
 
             for i in range(0, len(ids)):
 
@@ -472,6 +476,7 @@ class ArucoMarker():
         else:
             self.tvecs = np.zeros([0,2])
             self.rvecs = np.zeros([0,3])
+            self.ids = np.zeros([0], dtype=int)
 
         return frame
 

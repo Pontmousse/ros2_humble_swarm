@@ -3,7 +3,7 @@ from glob import glob
 
 from setuptools import find_packages, setup
 
-package_name = 'virtual_target'
+package_name = 'swarm_target'
 
 setup(
     name=package_name,
@@ -20,12 +20,14 @@ setup(
     zip_safe=True,
     maintainer='elghali',
     maintainer_email='elghali@todo.todo',
-    description='Geometric perception simulator for centralized testing with no camera.',
+    description='Target/landmark providers: virtual scene simulator and the '
+               'ArUco-fused landmark/target memory estimator.',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'virtual_scene = virtual_target.virtual_scene:main',
+            'virtual_scene = swarm_target.virtual_scene:main',
+            'landmark_estimator = swarm_target.landmark_estimator:main',
         ],
     },
 )
