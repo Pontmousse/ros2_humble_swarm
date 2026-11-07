@@ -20,6 +20,9 @@ class ArucoDetectorNode(Node):
         self.get_logger().info(f"Aruco_detector has been started.")
         self.markers = []
         self.markers_normals = []
+        # Validity stamp of the current detection. Frozen when detect_arucos
+        # stops running, so a stalled pipeline ages out instead of looking live.
+        self.markers_stamp = None
 
         # Parameters
         self.declare_parameter("serial_number", 'sn')
@@ -384,12 +387,22 @@ class ArucoDetectorNode(Node):
 
         self.markers = p
         self.markers_normals = q
+        # Stamp the moment this detection was produced. publish_markers freezes
+        # this stamp onto every republish, so downstream age == time since the
+        # detector last actually ran (zero markers included: a live camera that
+        # sees nothing is fresh-but-empty, a frozen camera ages out).
+        self.markers_stamp = self.get_clock().now().to_msg()
 
 
     ########################################################################################
 
     def publish_markers(self):
         msg = Markers()
+        # Freeze the detection stamp (NOT now()): republishing at the 100 Hz
+        # timer rate must not refresh age, or a stalled detector would look
+        # live. Zero stamp until the first detection -> consumers treat as stale.
+        if self.markers_stamp is not None:
+            msg.header.stamp = self.markers_stamp
         msg.markers = self.markers
         msg.markers_normals = self.markers_normals
         self.marker_pub.publish(msg)

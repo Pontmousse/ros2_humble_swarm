@@ -358,6 +358,10 @@ class VirtualScene(Node):
         r2 = max_range * max_range
 
         msg = Markers()
+        # Sim is ground truth and regenerated every tick -> always fresh. Stamp
+        # now() (not a frozen detection time) so the downstream freshness guard
+        # never trips on legitimately static sim landmarks.
+        msg.header.stamp = self.get_clock().now().to_msg()
         for (px, py), (nx, ny) in world_pts:
             dx, dy = px - rx, py - ry
             if dx * dx + dy * dy > r2:                      # range gate

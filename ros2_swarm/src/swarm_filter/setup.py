@@ -9,7 +9,7 @@ setup(
     data_files=[
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
-        ('share/' + package_name, ['package.xml']),
+        ('share/' + package_name, ['package.xml', 'layout.xml']),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -22,6 +22,7 @@ setup(
         'console_scripts': [
         	"kalman_filter = swarm_filter.kalman_filter:main",
             "pose_publisher = swarm_filter.pose_publisher:main",
+            "pose_kf = swarm_filter.pose_kf:main",
             "mm_filtered = swarm_filter.mm_filtered:main",
             "aruco_filter = swarm_filter.aruco_filter:main",
         ],

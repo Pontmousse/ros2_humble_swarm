@@ -62,9 +62,15 @@ def generate_launch_description():
             f'/{robot_name}/virtual_spacecraft/odom',
             f'/{robot_name}/virtual_spacecraft/applied_wrench',
 
-            # Forces going into virtual-spacecraft dynamics
+            # Forces going into virtual-spacecraft dynamics. spacecraft_wrench
+            # (bounding box) and avoidance_wrench are already captured; the
+            # remaining additive contributors below carry the torque, so without
+            # them a yaw issue is unattributable from the bag.
             f'/{robot_name}/spacecraft_wrench',
             f'/{robot_name}/avoidance_wrench',
+            f'/{robot_name}/flocking_wrench',
+            f'/{robot_name}/capture_wrench',
+            f'/{robot_name}/pointing_wrench',
 
             # ArUco perception
             f'/{robot_name}/landmarks_unf',
@@ -80,6 +86,13 @@ def generate_launch_description():
             f'/{robot_name}/mm_pos_unf',
             f'/{robot_name}/localization/imu_odom',
             f'/{robot_name}/localization/mm_imu_odom',
+
+            # Raw gyro feeds the pose_kf heading filter consumes directly
+            # (namespace-relative imu/mm_imu). /mm_all_imu above is the
+            # pre-split absolute feed and imu_odom/mm_imu_odom are derived;
+            # recording these lets the KF be replayed input-for-input offline.
+            f'/{robot_name}/imu',
+            f'/{robot_name}/mm_imu',
 
             # Fused pose actually consumed by the guidance laws. Without it a
             # bag records the avoidance_wrench but not the state it was

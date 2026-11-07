@@ -66,6 +66,18 @@ if virtual_plant_on:
         print("WARNING: VIRTUAL_PLANT without VIRTUAL_SPACECRAFT -- nothing will "
               "produce cmd_vel, so the plant will sit still; set VIRTUAL_SPACECRAFT=1.")
 
+# KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
+# linear Kalman filters: heading [theta, omega] + planar [x, y, vx, vy]). It
+# runs in place of pose_publisher on hardware, and -- under VIRTUAL_PLANT -- is
+# driven by fake_plant's simulated noisy raw sensors (emit_raw_sensors) instead
+# of its zero-noise fused output, so the estimator is tested before hardware.
+# Default off: nothing changes. See pose_kf.py.
+kf_on = os.environ.get("KF_LOCALIZATION", "").lower() in ("1", "true", "yes", "on")
+if kf_on:
+    print("KF_LOCALIZATION=1 -- pose_kf replaces pose_publisher"
+          + (" (fed by fake_plant raw sensors)." if virtual_plant_on
+             else " (fed by Marvelmind + driver odom/imu)."))
+
 # Single source of truth for the CAPTURE approach-law equilibrium --
 # see cp_proportional_controller.py / fake_plant.py docstrings.
 CONTACT_DISTANCE = 0.20
@@ -84,7 +96,7 @@ DIRECT_CMD_VEL = os.environ.get("DIRECT_CMD_VEL", "").lower() in ("1", "true", "
 def load_swarm_config():
 
     # Original configuration (order matters!)
-    beacon_addresses = [1, 2, 3, 4, 5, 6]
+    beacon_addresses = [1, 3, 2, 4, 5, 6]
 
     robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5", "RM6"]
 
@@ -249,10 +261,20 @@ def generate_launch_description():
 
     ##############################################################################
     ##############################################################################
+    # Pre-load the saved KF debug layout (installed into swarm_filter's share
+    # dir via its setup.py: estimate vs ground_truth vs raw sensors). -n skips
+    # the startup dialog; -l restores the tabs + topic subscriptions, like an
+    # rviz config, so the debug view no longer has to be rebuilt each launch.
     plot_juggler = Node(
         package="plotjuggler",
         executable="plotjuggler",
-        name="plot_juggler"
+        name="plot_juggler",
+        arguments=[
+            "-n",
+            "-l",
+            os.path.join(
+                get_package_share_directory("swarm_filter"), "layout.xml"),
+        ],
     )
 
     # ld.add_action(plot_juggler)
@@ -486,6 +508,16 @@ def generate_launch_description():
         robot_name = robot_names[i]
         init_orientation = init_orientations[i]
 
+        # Virtual-plant start geometry. Computed here (not just inside the
+        # if virtual_plant_on block) because the KF's init_orientation must
+        # match fake_plant's true sim heading -- otherwise the estimator seeds
+        # a different heading than the simulated ground truth and the whole
+        # map-frame cloud is rotated. heading_deg is the sim heading; on
+        # hardware the KF falls back to init_orientation (per-robot boot yaw).
+        cluster_x, cluster_y, heading_deg = -4.7, -2.5, 0.0
+        spacing = 0.4
+        init_y = cluster_y + (i - (N - 1) / 2.0) * spacing
+
         pose = Node(
         package="swarm_filter",
 
@@ -513,6 +545,45 @@ def generate_launch_description():
             ]
         )
 
+        # Kalman-filter localization (KF_LOCALIZATION=1). Same output contract
+        # as pose_publisher (pose + localization/odom + swarm_map->odom TF), so
+        # every downstream consumer is unchanged. Runs on hardware and, under
+        # VIRTUAL_PLANT, on fake_plant's simulated raw sensors.
+        pose_kf = Node(
+            package="swarm_filter",
+            executable="pose_kf",
+            name="pose_kf",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    "init_period": init_period,
+                    "timer_frequency": timer_frequency,
+                    "init_orientation": heading_deg if virtual_plant_on else init_orientation,
+                    "global_frame_id": "swarm_map",
+                    "gps_timeout": 0.25,
+                    "odometry_timeout": 0.25,
+                    "gyro_timeout": 0.25,
+                    "gps_position_variance": 0.01,
+                    "command_tau": 0.25,
+                    "q_pos": 1.0e-4,
+                    "q_vel": 0.005,
+                    "q_theta": 1.0e-4,
+                    "q_omega": 0.005,
+                    "r_odom_vel": 0.001,
+                    "r_yaw": 0.01,
+                    "r_gyro": 0.01,
+                    "innovation_gate_chi2": 9.0,
+                    "require_mm_for_init": True,
+                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                }
+            ]
+        )
+
+        if kf_on:
+            ld.add_action(pose_kf)
+
         if virtual_plant_on:
             # Kinematic stand-in for the robot + localization: integrates cmd_vel
             # and republishes pose + localization/odom. Robots start clustered on
@@ -523,10 +594,8 @@ def generate_launch_description():
             # Robots cluster on the LEFT of the target (com x -2.6, left edge
             # -2.975) facing +x toward it; -3.7 sits inside the search region
             # (x_min -4.5, boundary_margin 0.4 -> margin edge -4.1), clear of the
-            # rebound band.
-            cluster_x, cluster_y, heading_deg = -4.7, -2.5, 0.0
-            spacing = 0.4
-            init_y = cluster_y + (i - (N - 1) / 2.0) * spacing
+            # rebound band. cluster_x / cluster_y / heading_deg / init_y are
+            # computed above the pose_kf Node so the KF seeds the same heading.
             fake_plant = Node(
                 package="swarm_spacecraft",
                 executable="fake_plant",
@@ -546,12 +615,17 @@ def generate_launch_description():
                             "contact_distance": CONTACT_DISTANCE + CONTACT_MARGIN,
                             "contact_heading_tolerance": 0.26,
                             "contact_debounce_frames": 3,
+                            # Under KF_LOCALIZATION, emit hardware-like noisy raw
+                            # sensors for pose_kf and stop publishing the fused
+                            # pose/localization (the KF owns them).
+                            "emit_raw_sensors": kf_on,
+                            "publish_fused": not kf_on,
                             **qos_parameters(depth=10, reliability='RELIABLE')
                         }
                     ]
                 )
             ld.add_action(fake_plant)
-        else:
+        elif not kf_on:
             ld.add_action(pose)
 
     ##############################################################################

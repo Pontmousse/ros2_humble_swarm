@@ -7,6 +7,7 @@ from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.time import Time
 from std_srvs.srv import SetBool
 
 # Custom messages
@@ -179,6 +180,16 @@ class GuidanceNode(Node):
         # 0.75 s of it is 0.056 m of drift.
         self.nbh_hold_timeout = 0.75
 
+        # Perception freshness. landmarks carries header.stamp = the time the
+        # detector last produced a frame (frozen on a stalled pipeline, not the
+        # 100 Hz republish time). Past this age the camera is treated as lost:
+        # the flocking term is zeroed and stale local markers are NOT reprojected
+        # by the live pose, mirroring the localization freeze in the spacecraft.
+        self.declare_parameter("landmarks_freshness_timeout", 0.3)  # seconds
+        self.landmarks_freshness_timeout = float(
+            self.get_parameter("landmarks_freshness_timeout").value)
+        self.last_landmarks_time = None
+
         # Subscribers
         self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile_best_effort)
         self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile_best_effort)
@@ -238,6 +249,19 @@ class GuidanceNode(Node):
                                    throttle_duration_sec=5.0)
             self.vel1 = np.array([0, 0])
             return
+
+        # Perception freshness: a stalled detector republishes byte-identical
+        # markers at 100 Hz, so the only tell is the frozen header stamp aging
+        # out. Reproject the stale local markers by the live pose and the ghost
+        # cloud stays rigidly attached to the robot, reading ~0 error forever.
+        # Zero the flocking term and bail BEFORE reprojection -> hold.
+        if self.landmarks_stale(msg.header.stamp):
+            self.get_logger().warn(
+                "Landmark perception stale; zeroing flocking and holding.",
+                throttle_duration_sec=5.0)
+            self.vel1 = np.array([0, 0])
+            return
+        self.last_landmarks_time = self.get_clock().now()
 
         # Check if landmarks exist
         if len(msg.markers) == 0:
@@ -351,6 +375,24 @@ class GuidanceNode(Node):
         age = (self.get_clock().now() - self.last_nbh_time).nanoseconds / 1e9
         return age > self.nbh_hold_timeout
 
+    def landmarks_stale(self, stamp):
+        """True if a landmark detection stamp is older than the freshness
+        timeout (or zero/absent, i.e. no detection yet)."""
+        if stamp.sec == 0 and stamp.nanosec == 0:
+            return True
+        age = (self.get_clock().now() - Time.from_msg(stamp)).nanoseconds / 1e9
+        return age > self.landmarks_freshness_timeout
+
+    def landmarks_expired(self):
+        """Loop-side guard: the topic keeps republishing so landmarks_callback
+        fires, but if the detector node dies the topic stops entirely. Gate the
+        publish loop on arrival time so a dead node still zeroes the flocking
+        term rather than holding the last vel1 forever."""
+        if self.last_landmarks_time is None:
+            return True
+        age = (self.get_clock().now() - self.last_landmarks_time).nanoseconds / 1e9
+        return age > self.landmarks_freshness_timeout
+
     def own_velocity(self):
         """Our map-frame velocity, or None if it is too old to damp with.
 
@@ -401,6 +443,13 @@ class GuidanceNode(Node):
             self.get_logger().warn("Pose not initialized yet, skipping publish.",
                                    throttle_duration_sec=5.0)
             return
+
+        # Loop-side freshness guard: covers the detector node dying outright (no
+        # more messages -> landmarks_callback never fires to zero vel1). Neighbour
+        # avoidance (vel2) is landmark-independent and stays active, so the robot
+        # holds against the flock but still avoids collisions.
+        if self.landmarks_expired():
+            self.vel1 = np.array([0, 0])
 
         # Calculate next waypoint position target
         self.target = self.pose[:2] + self.step * (self.vel1 + self.vel2)

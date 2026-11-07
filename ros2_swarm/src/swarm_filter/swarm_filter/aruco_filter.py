@@ -75,6 +75,10 @@ class ArucoFilterNode(Node):
                     self.pub.publish(self._last_good_out)
                     return
             out = Markers()
+            # Fresh-but-empty: a live detector that saw nothing. Carry its
+            # (current) detection stamp so a downstream freshness guard treats
+            # this as live, not as a frozen pipeline.
+            out.header = msg.header
             out.markers = []
             out.markers_normals = []
             self.pub.publish(out)
@@ -107,6 +111,10 @@ class ArucoFilterNode(Node):
 
         # 3) Build output: shift each raw marker by (filtered_centroid - raw_centroid)
         out = Markers()
+        # Propagate the detector's validity stamp so the filtered output ages
+        # with the source detection. The hold-last bridge re-publishes this
+        # stored (aging) stamp during gaps -> age keeps growing, as intended.
+        out.header = msg.header
         out.markers = []
         out.markers_normals = []
 

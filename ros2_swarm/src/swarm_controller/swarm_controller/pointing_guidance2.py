@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.time import Time
 
 import math, numpy as np
 
@@ -35,6 +36,28 @@ class GuidanceNode(Node):
         self.yaw_damping_gain = self.get_parameter("yaw_damping_gain").value
         self.maximum_torque = self.get_parameter("maximum_torque").value
 
+        # Slew-rate limit on the published torque (Nm/s). The virtual spacecraft
+        # is an undamped double integrator, so the first frame after a multi-
+        # second perception freeze used to deliver an instantaneous bang-bang
+        # kick (full +/-maximum_torque) into whatever yaw rate had coasted up --
+        # successive kicks rang the yaw axis up to ~0.75 rad/s. Ramping the
+        # torque (soft-start) lets the error shrink and damping grow before the
+        # cap is reached. 0.4 Nm/s reaches the 0.2 Nm cap from zero in ~0.5 s.
+        self.declare_parameter("torque_slew_rate", 0.4)       # Nm/s
+        self.torque_slew_rate = float(self.get_parameter("torque_slew_rate").value)
+
+        # Perception freshness. landmarks header.stamp freezes when the detector
+        # stalls (the topic still republishes at 100 Hz). Past this age the
+        # centroid is treated as lost: stop CHASING it (zero the P term), but
+        # keep the -Kd*craft_wz damping term live so a coasting yaw rate still
+        # bleeds off -- craft_wz comes from odom and is always fresh. Zeroing the
+        # whole wrench (as before) removed the only damping and let the undamped
+        # plant coast, which is what rang the yaw axis up.
+        self.declare_parameter("landmarks_freshness_timeout", 0.3)  # seconds
+        self.landmarks_freshness_timeout = float(
+            self.get_parameter("landmarks_freshness_timeout").value)
+        self.last_landmarks_time = None
+
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
         # For QoS
         self.declare_parameter('qos_depth', 10)
@@ -68,6 +91,10 @@ class GuidanceNode(Node):
         self.target_lcd = None                    # direction (deg)
         self.craft_wz = None                      # spacecraft yaw rate (rad/s)
 
+        # Slew limiter state: the last torque actually published and when.
+        self._last_torque = 0.0
+        self._last_pub_time = None
+
         # Subscribers
         self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile)
         self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile)
@@ -95,9 +122,25 @@ class GuidanceNode(Node):
             self.get_logger().warn("Pose not initialized yet.")
             return
 
-        # Check if landmarks exist
+        # Perception freshness: a stalled detector republishes the same markers
+        # at 100 Hz. Recomputing lc/target_lcd from them keeps the centroid
+        # pinned under the live pose and the controller chases a ghost forever.
+        # Bail BEFORE touching lc/target_lcd -> publish_target_orientation then
+        # falls back to damp-only (holds heading, bleeds yaw rate).
+        if self.landmarks_stale(msg.header.stamp):
+            self.get_logger().warn(
+                "Landmark perception stale; holding heading.",
+                throttle_duration_sec=5.0)
+            return
+        self.last_landmarks_time = self.get_clock().now()
+
+        # Fresh frame but no markers: the camera is alive and genuinely sees no
+        # target. Drop the target so the controller does NOT keep chasing the
+        # last centroid with the live (possibly spinning) heading -- a fresh
+        # empty frame re-arming a stale target_lcd was a direct contributor to
+        # the yaw ring-up. target_lcd=None -> damp-only below.
         if len(msg.markers) == 0:
-            # self.get_logger().warn("Received empty landmarks.")
+            self.target_lcd = None
             return
 
         # Extract landmarks
@@ -129,6 +172,47 @@ class GuidanceNode(Node):
 
 
 
+    def landmarks_stale(self, stamp):
+        """True if a landmark stamp is older than the freshness timeout (or
+        zero/absent, i.e. no detection yet)."""
+        if stamp.sec == 0 and stamp.nanosec == 0:
+            return True
+        age = (self.get_clock().now() - Time.from_msg(stamp)).nanoseconds / 1e9
+        return age > self.landmarks_freshness_timeout
+
+    def landmarks_expired(self):
+        """Loop-side guard for the detector node dying (topic stops entirely, so
+        landmarks_callback never fires to stop the chase)."""
+        if self.last_landmarks_time is None:
+            return True
+        age = (self.get_clock().now() - self.last_landmarks_time).nanoseconds / 1e9
+        return age > self.landmarks_freshness_timeout
+
+    def _damping_torque(self):
+        """Damping-only torque: -Kd * craft_wz, clamped. Used whenever there is
+        no valid heading target (perception lost, no markers, or no pose). It
+        holds heading AND actively bleeds any residual/coasting yaw rate, which a
+        hard zero cannot do on the undamped plant. craft_wz is from odom, always
+        fresh, so this is safe to run while perception is stale."""
+        wz = self.craft_wz if self.craft_wz is not None else 0.0
+        return bound(-self.yaw_damping_gain * wz, self.maximum_torque)
+
+    def _slew(self, desired, now):
+        """Rate-limit the published torque toward `desired` (soft-start). dt is
+        clamped so a stalled timer cannot authorise an unbounded step."""
+        if self._last_pub_time is None:
+            self._last_pub_time = now
+            self._last_torque = desired
+            return desired
+        dt = (now - self._last_pub_time).nanoseconds / 1e9
+        self._last_pub_time = now
+        dt = min(max(dt, 0.0), 0.05)
+        max_step = self.torque_slew_rate * dt
+        delta = desired - self._last_torque
+        delta = max(-max_step, min(max_step, delta))
+        self._last_torque = self._last_torque + delta
+        return self._last_torque
+
     def publish_target_orientation(self):
         # Wait for initialization before triggering the controller
         now = self.get_clock().now()
@@ -136,22 +220,27 @@ class GuidanceNode(Node):
         if elapsed <= 2 * self.init_duration:
             return
 
-        if self.target_lcd == None:
-            self.wrench_pub.publish(Wrench())   # idle: zero torque, stays fresh
-            return
-
-        msg = Float64()
-        msg.data = self.target_lcd
-        self.pub.publish(msg)
-
-        # Attitude torque wrench (always-on; zero until landmarks seen above).
-        wmsg = Wrench()
-        if None not in self.pose:
+        # Decide the DESIRED torque, then slew-limit it once at the single publish
+        # point below. Two regimes:
+        #   - valid target (fresh perception, non-empty, pose known) -> full PD
+        #   - otherwise (perception lost/stale, no markers, no pose) -> damp-only
+        # Damp-only is NOT a hard zero: it keeps -Kd*wz alive so a coasting yaw
+        # rate still decays (the fix for the ring-up).
+        if self.landmarks_expired() or self.target_lcd is None or (None in self.pose):
+            desired = self._damping_torque()
+        else:
+            # Active pointing: publish the advisory setpoint and the PD torque.
+            msg = Float64()
+            msg.data = self.target_lcd
+            self.pub.publish(msg)
             err = math.radians(wrap_deg(self.target_lcd - self.pose[2]))
             wz = self.craft_wz if self.craft_wz is not None else 0.0
-            wmsg.torque.z = bound(
+            desired = bound(
                 self.heading_torque_gain * err - self.yaw_damping_gain * wz,
                 self.maximum_torque)
+
+        wmsg = Wrench()
+        wmsg.torque.z = self._slew(desired, now)
         self.wrench_pub.publish(wmsg)
 
 

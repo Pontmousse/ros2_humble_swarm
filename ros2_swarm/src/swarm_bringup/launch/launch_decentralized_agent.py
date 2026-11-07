@@ -13,6 +13,11 @@ from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 
+# KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
+# linear Kalman filters). Same output contract as pose_publisher, so downstream
+# consumers are unchanged. Default off. See pose_kf.py.
+kf_on = os.environ.get("KF_LOCALIZATION", "").lower() in ("1", "true", "yes", "on")
+
 def _split_env(name, cast=str):
     val = os.getenv(name)
     if val is None:
@@ -496,7 +501,44 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(pose)
+        # Kalman-filter localization (KF_LOCALIZATION=1): same output contract
+        # as pose_publisher, fed by Marvelmind + driver odom/imu.
+        pose_kf = Node(
+            package="swarm_filter",
+            executable="pose_kf",
+            name="pose_kf",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                {
+                    "init_period": init_period,
+                    "timer_frequency": 0.05,
+                    "init_orientation": init_orientation,
+                    "global_frame_id": "swarm_map",
+                    "gps_timeout": 0.25,
+                    "odometry_timeout": 0.25,
+                    "gyro_timeout": 0.25,
+                    "gps_position_variance": 0.01,
+                    "command_tau": 0.25,
+                    "q_pos": 1.0e-4,
+                    "q_vel": 0.5,
+                    "q_theta": 1.0e-4,
+                    "q_omega": 0.5,
+                    "r_odom_vel": 0.04,
+                    "r_yaw": 0.01,
+                    "r_gyro": 0.01,
+                    "innovation_gate_chi2": 9.0,
+                    "require_mm_for_init": True,
+                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                }
+            ]
+        )
+
+        if kf_on:
+            ld.add_action(pose_kf)
+        else:
+            ld.add_action(pose)
 
     ##############################################################################
     ##############################################################################
