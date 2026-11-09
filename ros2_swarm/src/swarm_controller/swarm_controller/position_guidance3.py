@@ -31,6 +31,18 @@ class GuidanceNode(Node):
         self.declare_parameter("timer_frequency", 0.01)
         self.timer_frequency = self.get_parameter("timer_frequency").value
 
+        # Shared response-scale knob from the global /** block of
+        # virtual_spacecraft.yaml. The spacecraft node scales this layer's
+        # integrated wrench by this factor, which drops the damping ratio by
+        # sqrt(scale); flk_damping_gain is boosted by 1/sqrt(scale) below to hold
+        # zeta constant across the sweep. 1.0 = no-op.
+        self.declare_parameter("translation_response_scale", 1.0)
+        translation_response_scale = float(
+            self.get_parameter("translation_response_scale").value)
+        if not (math.isfinite(translation_response_scale)
+                and 0.0 < translation_response_scale <= 1.0):
+            raise ValueError("translation_response_scale must be in (0, 1]")
+
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
         # For QoS
         self.declare_parameter('qos_depth', 10)
@@ -103,8 +115,11 @@ class GuidanceNode(Node):
         self.flk_gain = 2.5
         # D term for the flocking spring, sized near critical damping
         # (2*zeta*sqrt(k*m), zeta~0.7, m=5.0) to kill the translation ringing
-        # seen once flk_gain was raised live.
-        self.flk_damping_gain = 15.0
+        # seen once flk_gain was raised live. Divided by sqrt(response scale) so
+        # that when the spacecraft node scales this layer's wrench by lambda
+        # (dropping zeta to sqrt(lambda)*zeta), the boost restores zeta to its
+        # 15.0 baseline. 1.0 scale leaves it at 15.0.
+        self.flk_damping_gain = 15.0 / math.sqrt(translation_response_scale)
         # Publisher-side cap on the flocking wrench. The spacecraft clamps the
         # SUM of all four sources to its maximum_force (1.0 N), so this is not a
         # safety bound -- it is the share of that envelope the flocking layer may

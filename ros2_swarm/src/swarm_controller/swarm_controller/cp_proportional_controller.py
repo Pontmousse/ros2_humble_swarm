@@ -19,6 +19,11 @@ from swarm_interfaces.msg import CoordXY, Markers
 TRACK_MAX_GAP = 1.0
 TRACK_MAX_JUMP = 0.50
 
+# Floor on the bearing-rate differentiation interval, so a tiny dt between two
+# perception frames cannot blow up the computed rate. TRACK_MAX_GAP above doubles
+# as the upper cutoff (stale resume -> treat as fresh, rate 0).
+BEARING_DT_MIN = 0.02
+
 
 class ControllerNode(Node):
     """Same approach/heading law and output architecture as
@@ -97,6 +102,22 @@ class ControllerNode(Node):
         self.declare_parameter("target_velocity_span", 5.25)
         self.declare_parameter("feedforward_gain", 1.0)
 
+        # Derivative (rate) term on the bearing, damping the tangential "sidling"
+        # command so it backs off before the bearing reaches zero (the pure-P
+        # align term saturates the lateral cap at large bearing and overshoots
+        # across center). Default 0.0 => byte-for-byte current behaviour. NOT
+        # coupled to translation_response_scale: that scales the inner velocity
+        # servo (velocity_force_gain), this lives in the outer velocity-command
+        # loop. align_rate_filter_alpha is a single-pole EMA on the rate
+        # (1.0 = passthrough, smaller = heavier smoothing) since differentiating
+        # a ~10 Hz noisy bearing amplifies noise.
+        self.declare_parameter("align_damping_gain", 0.3)
+        self.declare_parameter("align_rate_filter_alpha", 0.5)
+        self.align_damping_gain = float(
+            self.get_parameter("align_damping_gain").value)
+        self.align_rate_filter_alpha = float(
+            self.get_parameter("align_rate_filter_alpha").value)
+
         self.approach_gain = self.get_parameter("approach_gain").value
         self.align_gain = self.get_parameter("align_gain").value
         self.heading_gain = self.get_parameter("heading_gain").value
@@ -106,7 +127,7 @@ class ControllerNode(Node):
 
         # Capture-wrench output stage (see cp_proportional_controller2.py for
         # the full rationale on the velocity-servo design).
-        self.declare_parameter("velocity_force_gain", 3.0)
+        self.declare_parameter("velocity_force_gain", 6.0)
         self.declare_parameter("yaw_rate_torque_gain", 1.0)
         self.declare_parameter("maximum_force", 0.5)
         self.declare_parameter("maximum_torque", 0.2)
@@ -114,6 +135,26 @@ class ControllerNode(Node):
         self.yaw_rate_torque_gain = self.get_parameter("yaw_rate_torque_gain").value
         self.maximum_force = self.get_parameter("maximum_force").value
         self.maximum_torque = self.get_parameter("maximum_torque").value
+
+        # Shared response-scale knobs from the global /** block of
+        # virtual_spacecraft.yaml. The spacecraft node scales this layer's
+        # force/torque by the matching factor, dropping each axis' damping ratio
+        # by sqrt(scale). Capture is a cascaded velocity servo, so velocity_force_gain
+        # is its damping-like gain (translation) and yaw_rate_torque_gain the
+        # rotation one; boosting each by 1/sqrt(scale) restores its baseline zeta
+        # as the craft is slowed. 1.0 = no-op. Output stays clamped by
+        # maximum_force/maximum_torque, so the higher gain only reduces inner-loop
+        # lag, it cannot exceed the envelope.
+        self.declare_parameter("translation_response_scale", 1.0)
+        self.declare_parameter("rotation_response_scale", 1.0)
+        t_scale = float(self.get_parameter("translation_response_scale").value)
+        r_scale = float(self.get_parameter("rotation_response_scale").value)
+        if not (np.isfinite(t_scale) and 0.0 < t_scale <= 1.0):
+            raise ValueError("translation_response_scale must be in (0, 1]")
+        if not (np.isfinite(r_scale) and 0.0 < r_scale <= 1.0):
+            raise ValueError("rotation_response_scale must be in (0, 1]")
+        self.velocity_force_gain = self.velocity_force_gain / np.sqrt(t_scale)
+        self.yaw_rate_torque_gain = self.yaw_rate_torque_gain / np.sqrt(r_scale)
 
         # direct_cmd_vel: this node becomes the SOLE writer of cmd_vel and acts
         # as a mode-selected mux so virtual_spacecraft and direct capture can
@@ -146,6 +187,14 @@ class ControllerNode(Node):
 
         # Map-frame track of the closest target, for the velocity estimate.
         self.target_track = deque()
+
+        # Bearing-rate damping state (see target_callback). Reset to None/0.0 on
+        # any track discontinuity so the next frame never differentiates across a
+        # gap, target switch, or clock anomaly.
+        self._prev_bearing = None
+        self._prev_bearing_time = None
+        self._prev_closest_index = None
+        self._bearing_rate_filt = 0.0
 
         # Diagnostic state for the [dbg] log: last body-frame target (for the
         # per-frame jump metric), the worst jump seen since the last print, and
@@ -215,10 +264,15 @@ class ControllerNode(Node):
         return (cos_t * mx + sin_t * my, -sin_t * mx + cos_t * my)
 
     def track_target(self, target_body):
-        """Record where the closest target is in the MAP frame."""
+        """Record where the closest target is in the MAP frame.
+
+        Returns True whenever the track is cleared (pose unavailable, or a
+        map-frame gap/jump breaking target identity) so the caller can reset the
+        bearing-rate derivative across the same discontinuity.
+        """
         if self.pose_x is None or self.pose_theta is None:
             self.target_track.clear()
-            return
+            return True
 
         th = np.radians(self.pose_theta)
         cos_t, sin_t = np.cos(th), np.sin(th)
@@ -227,6 +281,7 @@ class ControllerNode(Node):
                  self.pose_x + cos_t * target_body[0] - sin_t * target_body[1],
                  self.pose_y + sin_t * target_body[0] + cos_t * target_body[1])
 
+        track_reset = False
         if self.target_track:
             previous = self.target_track[-1]
             gap = point[0] - previous[0]
@@ -234,6 +289,7 @@ class ControllerNode(Node):
                                   point[2] - previous[2]))
             if gap > TRACK_MAX_GAP or jump > TRACK_MAX_JUMP:
                 self.target_track.clear()
+                track_reset = True
 
         self.target_track.append(point)
 
@@ -241,6 +297,8 @@ class ControllerNode(Node):
                and point[0] - self.target_track[1][0]
                >= self.target_velocity_span):
             self.target_track.popleft()
+
+        return track_reset
 
     def target_velocity_map(self):
         """Least-squares target velocity in the map frame, m/s, or None."""
@@ -268,6 +326,9 @@ class ControllerNode(Node):
                 self.frc_cmd = np.array([None, None])
                 self.trq_cmd = None
                 self.target_track.clear()
+                self._prev_bearing = None
+                self._prev_closest_index = None
+                self._bearing_rate_filt = 0.0
             return
         self.last_target_time = now
 
@@ -288,13 +349,17 @@ class ControllerNode(Node):
         ######################################################
         target = msg.markers[self.closest_target_index]
         target = np.array([target.x, target.y]) / 100.0
-        self.track_target(target)
+        track_reset = self.track_target(target)
         distance = float(np.linalg.norm(target))
 
         v_target = None  # set in the else branch; kept defined for the [dbg] log
         if distance < 1e-3:
             self.frc_cmd[0] = 0.0
             self.frc_cmd[1] = 0.0
+            # Target at the sensor origin -> bearing undefined; drop the rate
+            # history so resume doesn't differentiate across the gap.
+            self._prev_bearing = None
+            self._bearing_rate_filt = 0.0
         else:
             bearing = float(np.arctan2(target[1], target[0]))
             u_r = target / distance
@@ -303,7 +368,39 @@ class ControllerNode(Node):
             # Radial: zero at contact_distance, not buffer_radius -- the only
             # change from cp_proportional_controller2.py's approach law.
             vel = self.approach_gain * (distance - self.contact_distance) * u_r
-            vel = vel + self.align_gain * bearing * u_t
+
+            # Bearing-rate damping (D on the pure-P sidling term). Rate comes from
+            # successive perception bearings, so it is routing-independent (wrench
+            # and direct_cmd_vel share this vel). Reset the derivative across any
+            # discontinuity so it never differentiates across a gap.
+            now_s = now.nanoseconds * 1e-9
+            switched = (self._prev_closest_index is not None
+                        and self.closest_target_index != self._prev_closest_index)
+            if self._prev_bearing is None or track_reset or switched:
+                bearing_rate = 0.0
+                self._bearing_rate_filt = 0.0
+            else:
+                dt = now_s - self._prev_bearing_time
+                if dt <= 0.0 or dt > TRACK_MAX_GAP:
+                    bearing_rate = 0.0
+                    self._bearing_rate_filt = 0.0
+                else:
+                    dt = max(dt, BEARING_DT_MIN)
+                    d_bearing = ((bearing - self._prev_bearing + np.pi)
+                                 % (2.0 * np.pi) - np.pi)
+                    raw_rate = d_bearing / dt
+                    self._bearing_rate_filt = (
+                        self.align_rate_filter_alpha * raw_rate
+                        + (1.0 - self.align_rate_filter_alpha)
+                        * self._bearing_rate_filt)
+                    bearing_rate = self._bearing_rate_filt
+
+            self._prev_bearing = bearing
+            self._prev_bearing_time = now_s
+            self._prev_closest_index = self.closest_target_index
+
+            vel = vel + (self.align_gain * bearing
+                         - self.align_damping_gain * bearing_rate) * u_t
 
             v_target = self.target_velocity_map()
             if v_target is not None and self.pose_theta is not None:

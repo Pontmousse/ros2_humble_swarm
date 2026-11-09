@@ -24,6 +24,7 @@ setup(
             "arm_all = swarm_spacecraft.arm_all:main",
             "spacecraft_visualizer = swarm_spacecraft.spacecraft_visualizer:main",
             "fake_plant = swarm_spacecraft.fake_plant:main",
+            "run_config_snapshot = swarm_spacecraft.run_config_snapshot:main",
         ],
     },
 )

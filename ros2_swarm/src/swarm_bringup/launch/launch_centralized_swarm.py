@@ -242,6 +242,65 @@ def rm_preflight(robot_ips, verbose=False):
     cmd += [ip for ip in robot_ips if ip]
     return ExecuteProcess(cmd=cmd, output='screen')
 
+
+def _find_repo_root(start):
+    """Walk up from `start` to the first dir containing .git, else '' ."""
+    path = os.path.abspath(start)
+    while True:
+        if os.path.isdir(os.path.join(path, '.git')):
+            return path
+        parent = os.path.dirname(path)
+        if parent == path:
+            return ''
+        path = parent
+
+
+def run_config_snapshot_node(robot_names, source_launch, namespace=None,
+                             extra_env_vars=()):
+    """Node that latches a JSON snapshot of this run's config files + env vars.
+
+    Lets a bag answer "what was this run configured with?" offline. The config
+    files are resolved the same way the stack itself resolves them (share dirs,
+    SCENE_FILE override), so the snapshot is the bytes that actually served the
+    run. Published latched so a recorder starting later still captures it; the
+    rosbag launch records /run_config (and /<ns>/run_config). See
+    swarm_spacecraft/run_config_snapshot.py.
+    """
+    scene_file = os.getenv('SCENE_FILE') or os.path.join(
+        get_package_share_directory('swarm_target'), 'config', 'default_scene.yaml')
+    config_files = [
+        os.path.join(get_package_share_directory('swarm_bringup'),
+                     'config', 'virtual_spacecraft.yaml'),
+        scene_file,
+        os.path.join(get_package_share_directory('swarm_bringup'),
+                     'config', 'swarm_config.yaml'),
+    ]
+    env_vars = [
+        'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'KF_LOCALIZATION',
+        'TARGET_ESTIMATOR', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX', 'ROBOT_NAME',
+        'BAG_TAG', 'STRICT_CALIBRATION', 'CALIBRATE_CAMERA', 'CONN_TYPE',
+        'CAMERA_SOURCE', 'RM_DIAGNOSTICS',
+    ] + list(extra_env_vars)
+    return Node(
+        package='swarm_spacecraft',
+        executable='run_config_snapshot',
+        name='run_config_snapshot',
+        namespace=namespace,
+        output='screen',
+        emulate_tty=True,
+        parameters=[
+            {
+                'config_files': config_files,
+                'env_vars': env_vars,
+                'topic': 'run_config',
+                'publish_period': 5.0,
+                'repo_path': _find_repo_root(__file__),
+                'source_launch': source_launch,
+                'robot_names': list(robot_names),
+            }
+        ],
+    )
+
 def generate_launch_description():
     init_period = 2.0 # in seconds
     alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
@@ -257,10 +316,25 @@ def generate_launch_description():
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
+    # Shared spacecraft params yaml. The guidance nodes (pointing/motion/capture)
+    # read the global /** translation_response_scale / rotation_response_scale
+    # from here so their 1/sqrt(scale) damping boost stays consistent with the
+    # wrench scaling the virtual_spacecraft node applies. Listed FIRST in each
+    # node's parameters so the inline dict still wins for timer_frequency etc.;
+    # the yaml only contributes the /** scales (it uses /** wildcards, so it
+    # matches the launch-renamed node names in any namespace).
+    spacecraft_params = os.path.join(
+        get_package_share_directory('swarm_bringup'),
+        'config', 'virtual_spacecraft.yaml')
+
     beacon_addresses, robot_names, robot_serial_numbers, robot_ips, init_orientations = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
+
+    # Latched JSON snapshot of this run's config files + env flags, so the bag is
+    # self-describing. Global /run_config (this process owns the real env flags).
+    ld.add_action(run_config_snapshot_node(robot_names, source_launch='centralized'))
 
     # 'off' (default), 'on', or 'verbose'. See rm_preflight.py and
     # robomaster_ros/diagnostics.py.
@@ -898,6 +972,7 @@ def generate_launch_description():
             output="screen",
             emulate_tty=True,
             parameters=[
+                    spacecraft_params,
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,
@@ -919,6 +994,7 @@ def generate_launch_description():
             output="screen",
             emulate_tty=True,
             parameters=[
+                    spacecraft_params,
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,
@@ -943,6 +1019,7 @@ def generate_launch_description():
             output="screen",
             emulate_tty=True,
             parameters=[
+                    spacecraft_params,
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,

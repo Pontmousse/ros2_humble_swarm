@@ -22,6 +22,21 @@
     y_min: -4.0
     y_max: -1.0
 
+    # Single hand on how fast the virtual reference reacts, without changing what
+    # guidance decides. Each scale (0, 1] does two coupled jobs:
+    #   - at the virtual_spacecraft node it multiplies its axis' integrated wrench
+    #     AND cruise cap, so the craft reacts and coasts slower together --
+    #     physically a heavier / higher-inertia craft;
+    #   - at the guidance nodes (flocking/pointing/capture) it boosts that layer's
+    #     damping gain by 1/sqrt(scale), holding the damping ratio constant so the
+    #     slowed craft does not overshoot (uniform wrench scaling by lambda would
+    #     otherwise drop zeta by sqrt(lambda)).
+    # Both jobs MUST read the same value, so the knob lives here in the global /**
+    # block (every node, incl. virtual_spacecraft, sees it; nodes that do not
+    # declare it ignore it). 1.0 = no-op (full-speed, original behavior).
+    translation_response_scale: 0.3
+    rotation_response_scale: 1.0
+
 /**/virtual_spacecraft:
   ros__parameters:
     # Virtual vehicle properties; these need not match the RoboMaster hardware.
@@ -59,6 +74,10 @@
     # force needs the safe-area revalidation on hardware.
     maximum_speed: 0.5
     maximum_yaw_rate: 1.0
+
+    # translation_response_scale / rotation_response_scale are shared knobs read
+    # from the global /** block above (the virtual_spacecraft node and the
+    # guidance nodes must use one source). See that block for the full rationale.
 
     # Planar Clohessy-Wiltshire relative dynamics, added on top of the clamped
     # wrench because orbital mechanics is environment and must not consume

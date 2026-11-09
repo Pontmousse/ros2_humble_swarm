@@ -33,8 +33,22 @@ class GuidanceNode(Node):
         self.declare_parameter("yaw_damping_gain", 0.15)     # Nm/(rad/s), D on craft yaw rate
         self.declare_parameter("maximum_torque", 0.2)        # publisher-side cap
         self.heading_torque_gain = self.get_parameter("heading_torque_gain").value
-        self.yaw_damping_gain = self.get_parameter("yaw_damping_gain").value
         self.maximum_torque = self.get_parameter("maximum_torque").value
+
+        # Shared response-scale knob from the global /** block of
+        # virtual_spacecraft.yaml. The spacecraft node scales this layer's torque
+        # by this factor, which drops the yaw damping ratio by sqrt(scale);
+        # yaw_damping_gain is boosted by 1/sqrt(scale) to hold zeta constant.
+        # No-op at rotation_response_scale 1.0. 1.0 = no change.
+        self.declare_parameter("rotation_response_scale", 1.0)
+        rotation_response_scale = float(
+            self.get_parameter("rotation_response_scale").value)
+        if not (math.isfinite(rotation_response_scale)
+                and 0.0 < rotation_response_scale <= 1.0):
+            raise ValueError("rotation_response_scale must be in (0, 1]")
+        self.yaw_damping_gain = (
+            self.get_parameter("yaw_damping_gain").value
+            / math.sqrt(rotation_response_scale))
 
         # Slew-rate limit on the published torque (Nm/s). The virtual spacecraft
         # is an undamped double integrator, so the first frame after a multi-

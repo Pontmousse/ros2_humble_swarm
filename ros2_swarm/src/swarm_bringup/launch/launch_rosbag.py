@@ -51,10 +51,20 @@ def generate_launch_description():
         # beacon and a beacon the modem never scheduled look identical.
         '/mm_all_pos',
         '/mm_all_imu',
+
+        # Latched JSON snapshot of the configs this run was launched with
+        # (config YAMLs + env flags + git HEAD), so the bag is self-describing.
+        # Published by the centralized swarm launch; the per-robot variant below
+        # covers decentralized runs. See swarm_spacecraft/run_config_snapshot.py.
+        '/run_config',
     ]
 
     for robot_name in robot_names:
         bag_topics.extend([
+            # Per-agent config snapshot for decentralized runs, where each Pi
+            # publishes its own env/config/git under its namespace.
+            f'/{robot_name}/run_config',
+
             f'/{robot_name}/localization/odom',
             f'/{robot_name}/odom',
 

@@ -99,6 +99,11 @@ class VirtualSpacecraftNode(Node):
         # authority the physical robot has to close a tracking error.
         self.declare_parameter("maximum_speed", 0.25)
         self.declare_parameter("maximum_yaw_rate", 0.5)
+        # Slow the virtual reference without changing what guidance decides:
+        # each scale (0, 1] multiplies its axis' integrated wrench *and* cruise
+        # cap, so 1.0 is today's behavior and smaller is a heavier, slower craft.
+        self.declare_parameter("translation_response_scale", 1.0)
+        self.declare_parameter("rotation_response_scale", 1.0)
         self.declare_parameter("odometry_timeout", 0.25)
         self.declare_parameter("wrench_timeout", 0.25)
         self.declare_parameter("maximum_time_step", 0.05)
@@ -119,6 +124,12 @@ class VirtualSpacecraftNode(Node):
         self.maximum_speed = float(self.get_parameter("maximum_speed").value)
         self.maximum_yaw_rate = float(
             self.get_parameter("maximum_yaw_rate").value
+        )
+        self.translation_response_scale = float(
+            self.get_parameter("translation_response_scale").value
+        )
+        self.rotation_response_scale = float(
+            self.get_parameter("rotation_response_scale").value
         )
         self.odometry_timeout = float(
             self.get_parameter("odometry_timeout").value
@@ -141,6 +152,19 @@ class VirtualSpacecraftNode(Node):
             raise ValueError(
                 "physical, rate, timeout, and limit parameters must be positive"
             )
+        response_scales = (
+            self.translation_response_scale,
+            self.rotation_response_scale,
+        )
+        if not all(math.isfinite(s) and 0.0 < s <= 1.0 for s in response_scales):
+            raise ValueError(
+                "translation_response_scale and rotation_response_scale must be "
+                "in (0, 1]; use the arm/reset services to stop the craft"
+            )
+        # Fold the cruise caps down with their axis' scale so limit_planar_velocity
+        # needs no change -- a slower craft also has a lower top speed.
+        self.maximum_speed *= self.translation_response_scale
+        self.maximum_yaw_rate *= self.rotation_response_scale
         self.enable_chw = bool(self.get_parameter("enable_chw").value)
         self.orbit_altitude = float(self.get_parameter("orbit_altitude").value)
         self.gravity = float(self.get_parameter("gravity").value)
@@ -376,6 +400,12 @@ class VirtualSpacecraftNode(Node):
 
         dt = max(0.0, min(dt, self.maximum_time_step))
         force_x, force_y, torque = self.total_wrench(now.nanoseconds)
+        # Scale the actuation wrench before CHW so the environmental field (a
+        # mass-independent acceleration) stays unscaled, and before the
+        # applied_wrench publish so that topic still reports what moved the craft.
+        force_x *= self.translation_response_scale
+        force_y *= self.translation_response_scale
+        torque *= self.rotation_response_scale
         if self.enable_chw:
             # Environmental, so it is added after the actuation clamp.
             chw_x, chw_y = chw_force(self.reference, self.mean_motion, self.mass)
