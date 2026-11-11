@@ -44,7 +44,10 @@ setup(
             'stop_all = swarm_controller.stop_all:main',
             'all_capture = swarm_controller.all_capture:main',
             'mode_supervisor = swarm_controller.mode_supervisor:main',
-            
+
+            'ap_auction = swarm_controller.ap_auction_node:main',
+            'readiness_consensus = swarm_controller.readiness_consensus_node:main',
+
         ],
     },
 )

@@ -38,7 +38,10 @@ except ImportError:
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from rclpy.qos import (
+    DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy,
+)
+from std_msgs.msg import Int32, String
 from visualization_msgs.msg import Marker, MarkerArray
 
 from swarm_interfaces.msg import Markers
@@ -113,6 +116,11 @@ class SpacecraftVisualizerNode(Node):
     RAW_TARGETS_ID = 30
     RAW_TARGET_NORMALS_ID = 31
     RAW_TARGET_CONTOUR_ID = 32
+    # Auction assignment line: physical robot -> its assigned target (per-robot ns).
+    ASSIGN_LINE_ID = 33
+    # Legend swatch/text pairs live in a shared "legend" world ns; ids >=40 so they
+    # never collide with the 0-33 per-robot range or the anchor ids (20-25).
+    LEGEND_BASE_ID = 40
 
     # RGB triples for the perception overlays.
     LANDMARK_COLOR = (0.2, 1.0, 0.3)
@@ -122,6 +130,15 @@ class SpacecraftVisualizerNode(Node):
     # noisy source feeding the estimator.
     RAW_LANDMARK_COLOR = (0.4, 1.0, 0.4)
     RAW_TARGET_COLOR = (1.0, 0.4, 0.4)
+
+    # Mission-mode -> virtual spacecraft RGB; unknown/absent falls back to white.
+    MODE_COLORS = {
+        "search": (0.2, 0.4, 1.0),
+        "encapsulation": (1.0, 0.85, 0.1),
+        "capture": (1.0, 0.55, 0.0),
+        "dock": (0.6, 0.2, 0.8),
+    }
+    DEFAULT_MODE_COLOR = (1.0, 1.0, 1.0)
 
     # Marvelmind anchors (address, x, y) and the arena corner loop, in swarm_map.
     # Hand-transcribed lab layout; see plot_rm2_region.py / virtual_spacecraft.yaml.
@@ -175,6 +192,13 @@ class SpacecraftVisualizerNode(Node):
         # Static lab-frame overlay: X/Y axes + Marvelmind anchors + arena outline.
         self.declare_parameter("show_world_anchors", True)
         self.declare_parameter("world_axis_length", 1.0)
+        # Auction assignment line (physical robot -> assigned target).
+        self.declare_parameter("assignment_timeout", 0.5)
+        # Legend, drawn inside the beacon 13/14/15 triangle (bottom-right).
+        self.declare_parameter("show_legend", True)
+        self.declare_parameter("legend_x", -0.5)
+        self.declare_parameter("legend_y", -1.6)
+        self.declare_parameter("legend_dy", 0.28)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -247,6 +271,13 @@ class SpacecraftVisualizerNode(Node):
         self.world_axis_length = float(
             self.get_parameter("world_axis_length").value
         )
+        self.assignment_timeout = float(
+            self.get_parameter("assignment_timeout").value
+        )
+        self.show_legend = bool(self.get_parameter("show_legend").value)
+        self.legend_x = float(self.get_parameter("legend_x").value)
+        self.legend_y = float(self.get_parameter("legend_y").value)
+        self.legend_dy = float(self.get_parameter("legend_dy").value)
         self.validate_parameters()
 
         self.virtual_odometry = None
@@ -269,8 +300,19 @@ class SpacecraftVisualizerNode(Node):
         self.landmarks_unf_update_time = None
         self.targets_unf_msg = None
         self.targets_unf_update_time = None
+        self.current_mode = None
+        self.assigned_ap_id = -1
+        self.assigned_ap_update_time = None
 
         qos_profile = qos_profile_from_parameters(self)
+        # Latched: catch the last-published mode / assignment even if we subscribe
+        # after the FSM / auction has already settled.
+        latched_qos = QoSProfile(
+            depth=1,
+            reliability=ReliabilityPolicy.RELIABLE,
+            durability=DurabilityPolicy.TRANSIENT_LOCAL,
+            history=HistoryPolicy.KEEP_LAST,
+        )
         # Perception streams are read BEST_EFFORT so the subscription connects to
         # either a RELIABLE writer (aruco_filter) or a BEST_EFFORT one; a
         # RELIABLE reader would silently fail to match a BEST_EFFORT publisher.
@@ -336,6 +378,19 @@ class SpacecraftVisualizerNode(Node):
                 Markers, "targets_unf", self.targets_unf_callback,
                 perception_qos
             )
+        # Mode colour: latched, matches mode_supervisor's current_mode publisher.
+        self.create_subscription(
+            String, "current_mode", self.current_mode_callback, latched_qos
+        )
+        # Auction assignment: RELIABLE/volatile to match ap_auction's assigned_ap.
+        self.create_subscription(
+            Int32, "assigned_ap", self.assigned_ap_callback,
+            QoSProfile(
+                depth=1,
+                reliability=ReliabilityPolicy.RELIABLE,
+                history=HistoryPolicy.KEEP_LAST,
+            ),
+        )
         self.marker_publisher = self.create_publisher(
             MarkerArray, "spacecraft_visualizer/markers", qos_profile
         )
@@ -431,6 +486,15 @@ class SpacecraftVisualizerNode(Node):
         """Store the latest raw (pre-estimator) target observations."""
         self.targets_unf_msg = message
         self.targets_unf_update_time = self.get_clock().now().nanoseconds
+
+    def current_mode_callback(self, message: String) -> None:
+        """Store the mission mode name that tints the virtual spacecraft."""
+        self.current_mode = message.data.strip().lower()
+
+    def assigned_ap_callback(self, message: Int32) -> None:
+        """Store the auction's assigned target id (-1 = unassigned)."""
+        self.assigned_ap_id = int(message.data)
+        self.assigned_ap_update_time = self.get_clock().now().nanoseconds
 
     def orientation_yaw(self, message: Odometry):
         """Extract a global-frame yaw from a comparison odometry source."""
@@ -901,6 +965,96 @@ class SpacecraftVisualizerNode(Node):
                 ))
         return points, normals, contour
 
+    def assigned_target_world(self, px, py, yaw):
+        """Map-frame (x, y) of the auction-assigned target, or None.
+
+        Matches assigned_ap_id against the estimated targets' ids and lifts that
+        marker from body-frame cm with the physical pose (same transform as
+        perception_markers). Returns None when the assignment is unavailable.
+        """
+        message = self.targets_msg
+        if message is None or self.assigned_ap_id < 0:
+            return None
+        ids = list(message.ids)
+        if len(ids) != len(message.markers):
+            return None
+        try:
+            index = ids.index(self.assigned_ap_id)
+        except ValueError:
+            return None
+        body_x = message.markers[index].x / 100.0
+        body_y = message.markers[index].y / 100.0
+        cosine, sine = math.cos(yaw), math.sin(yaw)
+        return (
+            px + cosine * body_x - sine * body_y,
+            py + sine * body_x + cosine * body_y,
+        )
+
+    def assignment_line_marker(self, stamp, px, py, tx, ty) -> Marker:
+        """White dashed LINE_LIST from the physical robot to its assigned target."""
+        line = self.marker(self.ASSIGN_LINE_ID, Marker.LINE_LIST, stamp)
+        line.scale.x = 0.04
+        line.color.r = line.color.g = line.color.b = line.color.a = 1.0
+        dx, dy = tx - px, ty - py
+        total = math.hypot(dx, dy)
+        if total <= 1.0e-6:
+            return line
+        ux, uy = dx / total, dy / total
+        on, off = 0.15, 0.10  # dash on/off lengths (m)
+        cursor = 0.0
+        while cursor < total:
+            start = cursor
+            end = min(cursor + on, total)
+            line.points.append(self.point(px + ux * start, py + uy * start, 0.04))
+            line.points.append(self.point(px + ux * end, py + uy * end, 0.04))
+            cursor += on + off
+        return line
+
+    def build_legend_markers(self, stamp):
+        """Colour/glyph key, drawn inside the beacon 13/14/15 triangle.
+
+        Every robot's visualizer writes the same shared "legend" ns+ids, so the
+        copies coincide exactly (no flicker, self-heals if one node dies).
+        """
+        rows = (
+            ("Search", self.MODE_COLORS["search"]),
+            ("Encapsulation", self.MODE_COLORS["encapsulation"]),
+            ("Capture", self.MODE_COLORS["capture"]),
+            ("Dock", self.MODE_COLORS["dock"]),
+            ("Assigned target line", (1.0, 1.0, 1.0)),
+            ("Target observation", self.RAW_TARGET_COLOR),
+            ("Target estimate", self.TARGET_COLOR),
+            ("Landmark observation", self.RAW_LANDMARK_COLOR),
+            ("Landmark estimate", self.LANDMARK_COLOR),
+            ("Real robot", (0.1, 1.0, 0.9)),
+            ("Beacon", (0.1, 0.8, 1.0)),
+        )
+        markers = []
+        for row, (text, (red, green, blue)) in enumerate(rows):
+            row_y = self.legend_y - row * self.legend_dy
+            swatch = self.world_marker(
+                self.LEGEND_BASE_ID + 2 * row, Marker.CUBE, stamp)
+            swatch.ns = "legend"
+            swatch.scale.x = swatch.scale.y = swatch.scale.z = 0.12
+            swatch.color.r, swatch.color.g, swatch.color.b = red, green, blue
+            swatch.color.a = 1.0
+            swatch.pose.position.x = self.legend_x
+            swatch.pose.position.y = row_y
+            swatch.pose.position.z = 0.06
+            markers.append(swatch)
+
+            label = self.world_marker(
+                self.LEGEND_BASE_ID + 2 * row + 1, Marker.TEXT_VIEW_FACING, stamp)
+            label.ns = "legend"
+            label.text = text
+            label.scale.z = 0.22
+            label.color.r = label.color.g = label.color.b = label.color.a = 1.0
+            label.pose.position.x = self.legend_x + 0.18
+            label.pose.position.y = row_y
+            label.pose.position.z = 0.06
+            markers.append(label)
+        return markers
+
     def delete_marker(self, marker_id: int, stamp) -> Marker:
         """Delete a previously published dynamic marker."""
         marker = self.marker(marker_id, Marker.LINE_STRIP, stamp)
@@ -931,14 +1085,17 @@ class SpacecraftVisualizerNode(Node):
                 )
             )
         else:
+            mode_r, mode_g, mode_b = self.MODE_COLORS.get(
+                self.current_mode, self.DEFAULT_MODE_COLOR
+            )
             markers.append(
                 self.triangle_marker(
                     self.VIRTUAL_ID,
                     self.virtual_odometry,
                     stamp,
-                    1.0,
-                    1.0,
-                    1.0,
+                    mode_r,
+                    mode_g,
+                    mode_b,
                     1.0,
                 )
             )
@@ -1049,6 +1206,23 @@ class SpacecraftVisualizerNode(Node):
         else:
             px = py = yaw = None
 
+        # Auction assignment line: real robot -> its assigned target. Drawn only
+        # while the assignment is fresh, the pose is valid, and the assigned id is
+        # visible in the estimated targets; otherwise the line is removed.
+        assignment_fresh = self.source_is_fresh(
+            now.nanoseconds, self.assigned_ap_update_time, self.assignment_timeout
+        )
+        target_xy = (
+            self.assigned_target_world(px, py, yaw)
+            if physical_pose_valid and assignment_fresh else None
+        )
+        if target_xy is not None:
+            markers.append(
+                self.assignment_line_marker(stamp, px, py, *target_xy)
+            )
+        else:
+            markers.append(self.delete_marker(self.ASSIGN_LINE_ID, stamp))
+
         perception = (
             (
                 self.show_landmarks,
@@ -1140,6 +1314,9 @@ class SpacecraftVisualizerNode(Node):
 
         if self.show_world_anchors:
             markers.extend(self.build_world_markers(stamp))
+
+        if self.show_legend:
+            markers.extend(self.build_legend_markers(stamp))
 
         message = MarkerArray()
         message.markers = markers

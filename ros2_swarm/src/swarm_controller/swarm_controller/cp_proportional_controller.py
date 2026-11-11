@@ -9,6 +9,7 @@ import numpy as np
 from geometry_msgs.msg import Twist, Wrench
 from nav_msgs.msg import Odometry
 from std_srvs.srv import SetBool
+from std_msgs.msg import Int32
 
 # Custom messages for target position
 from swarm_interfaces.msg import StatePos as State
@@ -207,8 +208,17 @@ class ControllerNode(Node):
         self.target_hold_timeout = float(self.get_parameter("target_hold_timeout").value)
         self.last_target_time = None
 
+        # Auction-assigned attachment point. When fresh+visible, the closest-target
+        # pick is restricted to this AP id so the robot docks its OWN point rather
+        # than greedily grabbing the nearest. Stale/absent -> today's behaviour.
+        self.declare_parameter("assignment_timeout", 0.5)
+        self.assignment_timeout = float(self.get_parameter("assignment_timeout").value)
+        self.assigned_ap_id = -1
+        self.assigned_ap_time = None
+
         # Subscribers
         self.create_subscription(Markers, 'targets', self.target_callback, self.qos_profile)
+        self.create_subscription(Int32, 'assigned_ap', self.assigned_ap_callback, self.qos_profile)
         qos_latest = QoSProfile(depth=1,
                                 reliability=ReliabilityPolicy.BEST_EFFORT,
                                 history=HistoryPolicy.KEEP_LAST)
@@ -247,6 +257,10 @@ class ControllerNode(Node):
         self.pose_x = msg.x
         self.pose_y = msg.y
         self.pose_theta = msg.theta
+
+    def assigned_ap_callback(self, msg: Int32):
+        self.assigned_ap_id = int(msg.data)
+        self.assigned_ap_time = self.get_clock().now()
 
     def spacecraft_callback(self, msg: Odometry):
         self.craft_vx = msg.twist.twist.linear.x
@@ -335,14 +349,23 @@ class ControllerNode(Node):
         ######################################################
         # Finding the closest target
         ######################################################
-        target_distances = np.zeros((len(msg.markers),))
-        for i in range(len(msg.markers)):
-            target_distances[i] = np.linalg.norm(
-                np.array([msg.markers[i].x, msg.markers[i].y]) -
-                np.array([self.ref_offset_x, self.ref_offset_y])
-            )
+        # Restrict candidates to the auction-assigned AP when the assignment is
+        # fresh, the id is set, and it is actually visible in this frame;
+        # otherwise fall back to closest over all markers (today's behaviour).
+        idxs = list(range(len(msg.markers)))
+        fresh = (self.assigned_ap_time is not None and
+                 (now - self.assigned_ap_time).nanoseconds * 1e-9 < self.assignment_timeout)
+        if fresh and self.assigned_ap_id >= 0 and len(msg.ids) == len(msg.markers):
+            match = [i for i in idxs if msg.ids[i] == self.assigned_ap_id]
+            if match:
+                idxs = match
 
-        self.closest_target_index = np.argmin(target_distances)
+        target_distances = np.array([
+            np.linalg.norm(np.array([msg.markers[i].x, msg.markers[i].y]) -
+                           np.array([self.ref_offset_x, self.ref_offset_y]))
+            for i in idxs
+        ])
+        self.closest_target_index = idxs[int(np.argmin(target_distances))]
 
         ######################################################
         # Velocity command - drive to contact, not a standoff

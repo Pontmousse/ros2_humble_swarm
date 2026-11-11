@@ -107,7 +107,7 @@ DIRECT_CMD_VEL = os.environ.get("DIRECT_CMD_VEL", "").lower() in ("1", "true", "
 def load_swarm_config():
 
     # Original configuration (order matters!)
-    beacon_addresses = [1, 3, 2, 4, 5, 6]
+    beacon_addresses = [1, 2, 3, 4, 5, 6]
 
     robot_names = ["RM1", "RM2", "RM3", "RM4", "RM5", "RM6"]
 
@@ -151,7 +151,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '1,2'
+    env_idx = '1,2,3'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -1038,6 +1038,36 @@ def generate_launch_description():
         ld.add_action(cp_control)
 
     ##############################################################################
+    ################## - AP auction: distinct attachment points - ################
+    for i in range(N):
+        robot_name = robot_names[i]
+        ld.add_action(Node(
+            package="swarm_controller",
+            executable="ap_auction",
+            name="ap_auction",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                spacecraft_params,
+                {
+                    "robot_id": beacon_addresses[i],
+                    "bid_rate": 5.0,
+                    "approach_distance": 0.8,
+                    "w_proximity": 1.0,
+                    "w_velocity_align": 0.3,
+                    "w_normal_align": 0.3,
+                    "neighbor_bid_timeout": 0.5,
+                    "target_hold_timeout": 0.4,
+                    "lock_hysteresis": 0.1,
+                    "lock_rounds": 3,
+                    "allow_reassignment_on_dropout": True,
+                    **qos_parameters(depth=1, reliability='RELIABLE')
+                }
+            ]
+        ))
+
+    ##############################################################################
     ####### - Mode supervisor: SEARCH -> ENCAPSULATION -> CAPTURE - ##############
     for i in range(N):
         robot_name = robot_names[i]
@@ -1055,9 +1085,12 @@ def generate_launch_description():
                     "lost_timeout": 4.0,
                     "miss_tolerance": 3,
                     "latch_capture": False,
-                    # Manual capture: detection only cycles SEARCH<->ENCAP;
-                    # publish `/mode_cmd` "capture" to trigger all robots at once.
-                    "auto_capture": False,
+                    # Distributed synchronized capture: detection drives SEARCH<->ENCAP
+                    # and stages a stable target, but CAPTURE promotion is held until
+                    # readiness_consensus clears capture_sync, so the whole swarm flips
+                    # together. latch_capture=False keeps per-robot fallback on AP loss.
+                    "auto_capture": True,
+                    "require_capture_sync": True,
                     "initial_mode": "search",
                     "qos_reliability": "BEST_EFFORT",
                 }
@@ -1087,31 +1120,33 @@ def generate_launch_description():
         # ld.add_action(magnet_node)
 
 
-    # ##############################################################################
-    # ##################### - Consensus on capture time - ##########################
-    # for i in range(N):
-    #     robot_name = robot_names[i]
-    #     init_pos = initial_positions[i]
-
-    #     consensus_node = Node(
-    #         package="swarm_magnet",
-    #         executable="linear_consensus_node",
-    #         name="linear_consensus_node",
-    #         namespace=robot_name,
-    #         output="screen",
-    #         emulate_tty=True,
-    #         parameters=[
-    #             {
-    #                 "robot_name": robot_name,
-    #                 "initial_position": init_pos,
-    #                 "timer_frequency": timer_frequency,
-    #                 "consensus_rate": consensus_rate,
-    #                 **qos_parameters(depth=1, reliability='BEST_EFFORT')
-    #             }
-    #         ]
-    #     )
-
-    #     ld.add_action(consensus_node)
+    ##############################################################################
+    ############ - Readiness consensus: synchronized capture trigger - ###########
+    for i in range(N):
+        robot_name = robot_names[i]
+        ld.add_action(Node(
+            package="swarm_controller",
+            executable="readiness_consensus",
+            name="readiness_consensus",
+            namespace=robot_name,
+            output="screen",
+            emulate_tty=True,
+            parameters=[
+                spacecraft_params,
+                {
+                    "robot_id": beacon_addresses[i],
+                    "consensus_rate": 5.0,
+                    "approach_distance": 0.8,
+                    "perception_stale_timeout": 0.5,
+                    "action_lead": 2.0,
+                    "min_lead": 0.5,
+                    "time_tol": 0.05,
+                    "neighbor_timeout": 0.5,
+                    "min_consensus_hold": 0.3,
+                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
+                }
+            ]
+        ))
 
 
     ##############################################################################

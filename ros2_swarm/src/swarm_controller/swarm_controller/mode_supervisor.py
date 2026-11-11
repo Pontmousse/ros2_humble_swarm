@@ -129,6 +129,11 @@ class ModeSupervisor(Node):
         # When False, detection never auto-promotes to CAPTURE; capture is reached
         # only via a mode_cmd override (manual go-signal now, swarm consensus later).
         self.declare_parameter("auto_capture", True)
+        # Gate the auto_capture promotion behind the distributed capture-sync
+        # clearance (readiness_consensus -> capture_sync). False = today's behaviour
+        # (promote as soon as targets are stable). True = hold until the swarm's
+        # synchronized trigger clears the gate, so all robots promote together.
+        self.declare_parameter("require_capture_sync", False)
         # Mode the node assumes it starts in. The launch is expected to bring up
         # search-enabled / capture-disabled, so SEARCH matches reality without
         # the supervisor forcing any service call at startup.
@@ -140,6 +145,7 @@ class ModeSupervisor(Node):
         self.lost_timeout = float(self.get_parameter("lost_timeout").value)
         self.latch_capture = bool(self.get_parameter("latch_capture").value)
         self.auto_capture = bool(self.get_parameter("auto_capture").value)
+        self.require_capture_sync = bool(self.get_parameter("require_capture_sync").value)
         reliability = str(self.get_parameter("qos_reliability").value)
         self.mode = _MODE_ALIASES.get(
             str(self.get_parameter("initial_mode").value).lower()) or Mode.SEARCH
@@ -164,6 +170,10 @@ class ModeSupervisor(Node):
 
         # Manual / consensus override. None -> detection policy is in charge.
         self.mode_override = None
+
+        # Distributed capture-sync clearance (readiness_consensus -> capture_sync).
+        # Only consulted when require_capture_sync is True.
+        self.capture_cleared = False
 
         # Service clients, one SetBool gate per mode. Relative names resolve
         # under the launch namespace into /RMx/<name>.
@@ -203,6 +213,17 @@ class ModeSupervisor(Node):
         self.create_subscription(
             String, "/mode_cmd", self.on_mode_cmd, override_qos)
 
+        # Capture-sync clearance from this robot's readiness_consensus node.
+        # Latched (same QoS as the override) so a late/recovering supervisor
+        # still receives a clearance published before it subscribed.
+        self.create_subscription(
+            Bool, "capture_sync", self.on_capture_sync, override_qos)
+
+        # Current mission mode, latched so a late visualizer still colours the
+        # spacecraft by the active mode.
+        self.mode_pub = self.create_publisher(String, "current_mode", override_qos)
+        self.mode_pub.publish(String(data=self.mode.value))
+
         # Evaluate the policy at 5 Hz. Detection gates are updated in the topic
         # callbacks; this timer only decides + actuates.
         self.create_timer(0.2, self.tick)
@@ -220,6 +241,9 @@ class ModeSupervisor(Node):
 
     def on_contact(self, msg: Bool):
         self.contact = bool(msg.data)
+
+    def on_capture_sync(self, msg: Bool):
+        self.capture_cleared = bool(msg.data)
 
     def on_mode_cmd(self, msg: String):
         key = msg.data.strip().lower()
@@ -259,7 +283,10 @@ class ModeSupervisor(Node):
 
         # A stable target wins -- go straight to CAPTURE from any mode. Disabled
         # by auto_capture=False, which reserves CAPTURE for the mode_cmd override.
-        if self.auto_capture and self.targets.stable:
+        # With require_capture_sync, also hold until the distributed trigger has
+        # cleared the gate, so the whole swarm promotes together.
+        if self.auto_capture and self.targets.stable and \
+                (self.capture_cleared or not self.require_capture_sync):
             return Mode.CAPTURE
 
         if self.mode == Mode.SEARCH:
@@ -302,6 +329,7 @@ class ModeSupervisor(Node):
         self.call(self.mode_clients[old], False)
         self.call(self.mode_clients[new], True)
         self.mode = new
+        self.mode_pub.publish(String(data=self.mode.value))
 
     def call(self, client, state: bool):
         """Fire-and-forget SetBool request; warn if the service is absent."""
