@@ -265,7 +265,11 @@ class ModeSupervisor(Node):
         Replace the body, or drive `mode_override` via `mode_cmd`, to switch to
         manual / consensus triggering without touching anything below.
         """
-        if self.mode_override is not None:
+        # Contact still docks under a CAPTURE override (manual go-signal);
+        # any other override wins outright, including forcing a way out of DOCK.
+        if self.mode_override is not None and not (
+                self.mode_override == Mode.CAPTURE
+                and (self.mode == Mode.DOCK or (self.mode == Mode.CAPTURE and self.contact))):
             return self.mode_override
 
         # DOCK is terminal for now -- checked before everything else so a
@@ -300,7 +304,7 @@ class ModeSupervisor(Node):
                 return Mode.SEARCH
             return Mode.ENCAPSULATION
 
-        # CAPTURE (contact -> DOCK is handled at the top, above the override).
+        # CAPTURE (contact -> DOCK is handled at the top).
         if self.latch_capture:
             return Mode.CAPTURE
         if self.targets.age(now) > self.lost_timeout:
