@@ -65,7 +65,7 @@ def virtual_scene_node(robot_names):
                 "noise_std_cm": 10.5 if estimator_on else 0.0,
                 "normal_noise_std": 0.3 if estimator_on else 0.0,
                 "observation_dropout_prob": 0.5 if estimator_on else 0.0,
-                "obs_update_rate": 1.5,
+                "obs_update_rate": 4.0,
                 "global_frame_id": "swarm_map",
             }
         ]

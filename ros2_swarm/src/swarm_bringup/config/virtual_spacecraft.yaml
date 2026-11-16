@@ -34,57 +34,30 @@
     # Both jobs MUST read the same value, so the knob lives here in the global /**
     # block (every node, incl. virtual_spacecraft, sees it; nodes that do not
     # declare it ignore it). 1.0 = no-op (full-speed, original behavior).
-    translation_response_scale: 0.3
+    translation_response_scale: 1.0
     rotation_response_scale: 1.0
 
 /**/virtual_spacecraft:
   ros__parameters:
-    # Virtual vehicle properties; these need not match the RoboMaster hardware.
+    # Virtual spacecraft properties (independent of RoboMaster hardware)
     mass: 5.0
-    yaw_inertia: 0.25
-    timer_frequency: 0.02  # 50 Hz (was 100 Hz) - dt is measured from the clock, gains unaffected
+    yaw_inertia: 0.05       # kg m², transverse-axis approximation
+    timer_frequency: 0.02  # 50 Hz nominal
 
-    # Bounds on the summed virtual input, applied once to the total so adding a
-    # contributor cannot raise the authority the safe area was sized for.
-    # 1.0 N / 0.2 Nm is the envelope measured in the 2026-09-09 run that tracked
-    # well; doubling it put the coast speed past what the chassis can render.
-    maximum_force: 1.0
-    maximum_torque: 0.2
+    # Fast, responsive laboratory configuration
+    # maximum_force: 1.0      # N
+    # maximum_torque: 0.2     # N m
+    # maximum_speed: 0.5      # m/s
+    # maximum_yaw_rate: 1.0   # rad/s
 
-    # Bounds on the virtual *state*, not the input. maximum_force alone does not
-    # bound velocity: this is an undamped double integrator, so a bounded force
-    # applied long enough reaches any speed. Measured 2026-10-07 on RM2, the
-    # reference was coasting at 0.461 m/s while nav2_pidff.maximum_speed is
-    # 0.5 -- 8% of authority left to close a 1.26 m error, so the error could
-    # not converge.
-    #
-    # Held at half the tracker's limits, leaving 2x the reference speed as
-    # catch-up authority. Raise only together with the nav2_pidff limits, and
-    # never above them.
-    #
-    # 2026-11-02: velocity ladder lifted 2x (0.25->0.5, 0.5->1.0). The chassis
-    # was over-constrained -- RM2 sat near the target with nav2_pidff logging
-    # continuous "Physical velocity command is saturated", i.e. the tracker was
-    # clipping its own corrections. The RoboMaster can render far more than
-    # 0.5 m/s, so the whole speed ladder (this + nav2_pidff + velocity_smoother)
-    # was doubled uniformly to keep the <= invariant and the 2x catch-up ratio.
-    # The FORCE/TORQUE envelope (maximum_force/maximum_torque above) is NOT
-    # touched here: a_max = force/mass is unchanged, so this only lets the
-    # reference coast and the tracker catch faster, not push harder. Raising
-    # force needs the safe-area revalidation on hardware.
-    maximum_speed: 0.5
-    maximum_yaw_rate: 1.0
+    # 3U CubeSat-inspired configuration (5 kg)
+    maximum_force: 0.02      # N, 20 mN propulsion
+    maximum_torque: 0.003    # N m, 3 mN m attitude control
+    maximum_speed: 0.05      # m/s, operational limit
+    maximum_yaw_rate: 0.1    # rad/s, operational limit
 
-    # translation_response_scale / rotation_response_scale are shared knobs read
-    # from the global /** block above (the virtual_spacecraft node and the
-    # guidance nodes must use one source). See that block for the full rationale.
 
-    # Planar Clohessy-Wiltshire relative dynamics, added on top of the clamped
-    # wrench because orbital mechanics is environment and must not consume
-    # control authority. The LVLH origin is swarm_map (0, 0) with x radial and
-    # y along-track, so the state is read as an LVLH offset with no transform.
-    # At 400 km the mean motion is ~1.1e-3 rad/s, so the force is ~1e-5 N at a
-    # 2 m offset: present and correct, but invisible next to maximum_force.
+    # Clohessy-Wiltshire equations for relative motion in orbit.
     enable_chw: true
     orbit_altitude: 400000.0
     gravity: 9.80665
@@ -107,7 +80,7 @@
     # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
     # Add a term by naming it here plus a topic/frame pair; a source that stops
     # publishing simply drops out after wrench_timeout.
-    # Four contributors, one per behaviour layer. All are summed every step and
+    # Contributors, one per behaviour layer. All are summed every step and
     # the SUM is clamped to maximum_force / maximum_torque, so each layer may
     # saturate its own publisher-side cap without the total ever exceeding the
     # validated envelope. The mode_supervisor does not route or mux these: it
@@ -116,14 +89,17 @@
     # the sum (and, after wrench_timeout, drops out entirely if it stops).
     #   bounding_box  SEARCH-phase box-keeping burn      (body, always on)
     #   flocking      ENCAPSULATION landmark APF         (inertial, gated)
+    #   preparation   ENCAPSULATION assigned-AP alignment (body, gated)
     #   capture       CAPTURE approach/align velocity    (body, gated)
     #   avoidance     inter-robot anti-flocking          (inertial, always on)
     #   pointing      heading-hold torque                (inertial, always on)
-    wrench_sources: ["bounding_box", "flocking", "capture", "avoidance", "pointing"]
+    wrench_sources: ["bounding_box", "flocking", "preparation", "capture", "avoidance", "pointing"]
     wrench_sources.bounding_box.topic: "spacecraft_wrench"
     wrench_sources.bounding_box.frame: "body"
     wrench_sources.flocking.topic: "flocking_wrench"
     wrench_sources.flocking.frame: "inertial"
+    wrench_sources.preparation.topic: "preparation_wrench"
+    wrench_sources.preparation.frame: "body"
     wrench_sources.capture.topic: "capture_wrench"
     wrench_sources.capture.frame: "body"
     wrench_sources.avoidance.topic: "avoidance_wrench"

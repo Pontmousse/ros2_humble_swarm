@@ -78,7 +78,8 @@ def generate_launch_description():
         guidance_mode_argument,
         visualization_argument,
     ]
-    for robot_name in robot_names_from_environment():
+    robot_names = robot_names_from_environment()
+    for robot_name in robot_names:
         configured_parameters = ReplaceString(
             source_file=LaunchConfiguration("spacecraft_parameters"),
             replacements={"<robot_namespace>": robot_name},
@@ -111,7 +112,8 @@ def generate_launch_description():
                 name="spacecraft_visualizer",
                 namespace=robot_name,
                 output="screen",
-                parameters=[configured_parameters],
+                parameters=[configured_parameters,
+                            {"show_capture_timing": robot_name == robot_names[0]}],
                 condition=visualization_condition,
             )
         )

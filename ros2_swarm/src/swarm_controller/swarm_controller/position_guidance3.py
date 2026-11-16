@@ -119,7 +119,7 @@ class GuidanceNode(Node):
         # that when the spacecraft node scales this layer's wrench by lambda
         # (dropping zeta to sqrt(lambda)*zeta), the boost restores zeta to its
         # 15.0 baseline. 1.0 scale leaves it at 15.0.
-        self.flk_damping_gain = 15.0 / math.sqrt(translation_response_scale)
+        self.flk_damping_gain = 35.0 / math.sqrt(translation_response_scale)
         # Publisher-side cap on the flocking wrench. The spacecraft clamps the
         # SUM of all four sources to its maximum_force (1.0 N), so this is not a
         # safety bound -- it is the share of that envelope the flocking layer may

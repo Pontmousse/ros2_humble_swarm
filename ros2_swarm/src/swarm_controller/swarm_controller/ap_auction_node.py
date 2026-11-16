@@ -46,6 +46,7 @@ class ApAuctionNode(Node):
         self.declare_parameter("w_proximity", 1.0)
         self.declare_parameter("w_velocity_align", 0.3)
         self.declare_parameter("w_normal_align", 0.3)
+        self.declare_parameter("velocity_min_speed", 0.05)
         self.declare_parameter("approach_distance", 0.8)
         self.declare_parameter("neighbor_bid_timeout", 0.5)
         self.declare_parameter("target_hold_timeout", 0.4)
@@ -57,6 +58,7 @@ class ApAuctionNode(Node):
         self.w_prox = float(self.get_parameter("w_proximity").value)
         self.w_vel = float(self.get_parameter("w_velocity_align").value)
         self.w_norm = float(self.get_parameter("w_normal_align").value)
+        self.vel_min_speed = float(self.get_parameter("velocity_min_speed").value)
         self.approach_distance = float(self.get_parameter("approach_distance").value)
         self.neighbor_bid_timeout = float(self.get_parameter("neighbor_bid_timeout").value)
         self.target_hold_timeout = float(self.get_parameter("target_hold_timeout").value)
@@ -130,12 +132,14 @@ class ApAuctionNode(Node):
                 continue
             bid = self.w_prox / (EPS + dist)
             br = (mx / dist, my / dist)  # bearing unit (body)
-            if speed > EPS:
-                bid += self.w_vel * (self.vx * br[0] + self.vy * br[1]) / speed
-            nx, ny = msg.markers_normals[i].x, msg.markers_normals[i].y
+            # Fades to zero below velocity_min_speed, where heading is just noise.
+            bid += self.w_vel * (self.vx * br[0] + self.vy * br[1]) / max(speed, self.vel_min_speed, EPS)
+            # Published normal is (right, fwd), sign-ambiguous -> body (fwd, left);
+            # |cos| of the incidence angle: 1 head-on, 0 edge-on.
+            nx, ny = msg.markers_normals[i].y, -msg.markers_normals[i].x
             nmag = math.hypot(nx, ny)
             if nmag > EPS:
-                bid += self.w_norm * (br[0] * nx + br[1] * ny) / nmag
+                bid += self.w_norm * abs(br[0] * nx + br[1] * ny) / nmag
             if math.isfinite(bid):
                 out[int(msg.ids[i])] = bid
         return out
@@ -181,7 +185,10 @@ class ApAuctionNode(Node):
         self.miss_rounds = 0
 
         claim = -1
-        for ap_id, mybid in sorted(my_bids.items(), key=lambda kv: kv[1], reverse=True):
+        # A locked claim is only abandoned for an AP that beats it by lock_hysteresis.
+        held = self.my_claim if self.locked else -1
+        for ap_id, mybid in sorted(my_bids.items(), reverse=True,
+                                   key=lambda kv: kv[1] + self.lock_hysteresis * (kv[0] == held)):
             if self.locked and ap_id == self.my_claim:
                 # Hysteresis: hold the lock unless beaten by a clear margin.
                 if not self.outranked(ap_id, mybid, self.lock_hysteresis):

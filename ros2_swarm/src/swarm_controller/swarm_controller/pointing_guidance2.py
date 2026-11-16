@@ -1,6 +1,6 @@
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 from rclpy.time import Time
 
 import math, numpy as np
@@ -8,7 +8,7 @@ import math, numpy as np
 # Custom messages
 from swarm_interfaces.msg import StatePos as State
 from swarm_interfaces.msg import Markers
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, String
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 
@@ -104,6 +104,7 @@ class GuidanceNode(Node):
         self.lc = np.array([None, None])          # landmark centroid
         self.target_lcd = None                    # direction (deg)
         self.craft_wz = None                      # spacecraft yaw rate (rad/s)
+        self.current_mode = ''
 
         # Slew limiter state: the last torque actually published and when.
         self._last_torque = 0.0
@@ -113,6 +114,9 @@ class GuidanceNode(Node):
         self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile)
         self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile)
         self.create_subscription(Odometry, 'localization/odom', self.odom_callback, self.qos_profile)
+        self.create_subscription(String, 'current_mode', self.mode_callback,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
         # Publishers
         self.pub = self.create_publisher(Float64, 'target_orientation', self.qos_profile)
@@ -127,6 +131,9 @@ class GuidanceNode(Node):
     def odom_callback(self, msg: Odometry):
         # Yaw rate is frame-invariant, so the body-frame twist is used as-is.
         self.craft_wz = msg.twist.twist.angular.z
+
+    def mode_callback(self, msg: String):
+        self.current_mode = msg.data.strip().lower()
 
 
 
@@ -230,6 +237,11 @@ class GuidanceNode(Node):
     def publish_target_orientation(self):
         # Wait for initialization before triggering the controller
         now = self.get_clock().now()
+        if self.current_mode in ('capture', 'dock'):
+            # CP owns capture yaw; bypass slew so no old centroid torque lingers.
+            self._last_torque, self._last_pub_time = 0.0, now
+            self.wrench_pub.publish(Wrench())
+            return
         elapsed = (now - self.init_start_time).nanoseconds / 1e9
         if elapsed <= 2 * self.init_duration:
             return

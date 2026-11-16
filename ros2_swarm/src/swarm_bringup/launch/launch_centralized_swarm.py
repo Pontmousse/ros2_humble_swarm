@@ -151,7 +151,7 @@ def load_swarm_config():
     ###############################################################################
     # Set from environment variable (e.g., ROBOT_IDX=1,2 for RM1 and RM2)
     env_idx = os.getenv('ROBOT_IDX')
-    env_idx = '1,2,3'
+    env_idx = '1'
 
     if env_idx is None:
         raise RuntimeError("ROBOT_IDX environment variable must be set.")
@@ -1023,12 +1023,16 @@ def generate_launch_description():
                     {
                         "timer_frequency": timer_frequency,
                         "init_period": init_period,
-                        "approach_gain": 0.9,
-                        "align_gain": 0.05,
+                        "approach_gain": 0.5,
+                        "align_gain": 0.12,
+                        "align_damping_gain": 0.4,
+                        "preparation_max_force": 0.01,
                         "heading_gain": 1.0,
                         "target_velocity_span": 5.25,
                         "feedforward_gain": 0.0,
                         "contact_distance": CONTACT_DISTANCE,
+                        "capture_slow_radius": 0.5,
+                        "capture_min_speed_frac": 0.3,
                         "direct_cmd_vel": DIRECT_CMD_VEL,
                         **qos_parameters(depth=1, reliability='RELIABLE')
                     }
@@ -1054,8 +1058,9 @@ def generate_launch_description():
                     "robot_id": beacon_addresses[i],
                     "bid_rate": 5.0,
                     "approach_distance": 0.8,
-                    "w_proximity": 1.0,
+                    "w_proximity": 0.3,
                     "w_velocity_align": 0.3,
+                    "velocity_min_speed": 0.05,
                     "w_normal_align": 0.3,
                     "neighbor_bid_timeout": 0.5,
                     "target_hold_timeout": 0.4,
@@ -1137,8 +1142,8 @@ def generate_launch_description():
                     "robot_id": beacon_addresses[i],
                     "consensus_rate": 5.0,
                     "approach_distance": 0.8,
-                    "perception_stale_timeout": 0.5,
-                    "action_lead": 2.0,
+                    "perception_stale_timeout": 2.0,
+                    "action_lead": 5.0,
                     "min_lead": 0.5,
                     "time_tol": 0.05,
                     "neighbor_timeout": 0.5,

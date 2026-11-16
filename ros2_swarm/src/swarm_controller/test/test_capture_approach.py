@@ -24,6 +24,7 @@ import types
 
 import numpy as np
 import pytest
+from rclpy.time import Time
 
 from swarm_controller.cp_proportional_controller import (
     TRACK_MAX_GAP,
@@ -83,7 +84,8 @@ BEACON_OUTLIER = 2.1
 
 def stub(approach_gain=APPROACH_GAIN, align_gain=ALIGN_GAIN,
          heading_gain=HEADING_GAIN, span=TRACK_SPAN,
-         feedforward_gain=FEEDFORWARD_GAIN):
+         feedforward_gain=FEEDFORWARD_GAIN,
+         capture_slow_radius=0.0, capture_min_speed_frac=0.3):
     """Enough of ControllerNode for the laws, with a clock the test drives.
 
     The tracking methods are bound onto the namespace rather than reimplemented
@@ -98,9 +100,24 @@ def stub(approach_gain=APPROACH_GAIN, align_gain=ALIGN_GAIN,
         frc_cmd=np.array([None, None]),
         trq_cmd=None,
         buffer_radius=BUFFER_RADIUS,
+        contact_distance=BUFFER_RADIUS,  # Exercise the configured equilibrium at 0.6 m.
+        assigned_ap_time=None,
+        assigned_ap_id=-1,
+        assignment_timeout=0.5,
+        target_hold_timeout=0.4,
+        last_target_time=None,
+        align_damping_gain=0.3,
+        align_rate_filter_alpha=0.5,
+        _prev_bearing=None,
+        _prev_bearing_time=None,
+        _prev_closest_index=None,
+        _prev_target_identity=None,
+        _bearing_rate_filt=0.0,
         approach_gain=approach_gain,
         align_gain=align_gain,
         heading_gain=heading_gain,
+        capture_slow_radius=capture_slow_radius,
+        capture_min_speed_frac=capture_min_speed_frac,
         target_velocity_span=span,
         feedforward_gain=feedforward_gain,
         target_track=collections.deque(),
@@ -110,42 +127,75 @@ def stub(approach_gain=APPROACH_GAIN, align_gain=ALIGN_GAIN,
         seconds=0.0,
     )
     node.get_clock = lambda: types.SimpleNamespace(
-        now=lambda: types.SimpleNamespace(nanoseconds=node.seconds * 1e9))
+        now=lambda: Time(nanoseconds=round(node.seconds * 1e9)))
     for name in ("to_body", "track_target", "target_velocity_map"):
         setattr(node, name,
                 types.MethodType(getattr(ControllerNode, name), node))
     return node
 
 
-def markers(*positions_cm):
-    """Markers message. Positions are body frame, centimetres, as published."""
+def markers(*specs, flip=True):
+    """Markers message. Each spec is (x_cm, y_cm) or (x_cm, y_cm, face).
+
+    Positions are body frame, centimetres, as published. `face` is the body-frame
+    direction (rad, atan2(left, fwd)) of the target's surface normal axis. Omit it
+    to square the face to the line of sight -- the robot sits on the corridor
+    axis, so the corridor (glideslope) bearing is zero. Pass face=None for a
+    degenerate zero-length normal, which exercises the LOS-bearing fallback.
+
+    `flip` reproduces virtual_scene.py's ArUco antipodal flip: the published
+    normal's forward component is forced non-negative, so a normal that truly
+    points back toward the craft comes out pointing forward and is sign-ambiguous.
+    The controller must disambiguate it against the LOS; leaving flip on is what
+    makes the corridor tests exercise that path. Heading tests pass flip=False to
+    pin the torque-law arithmetic on an unambiguous normal.
+    """
     msg = Markers()
-    for x, y in positions_cm:
+    for spec in specs:
+        if len(spec) == 3:
+            x, y, face = spec
+        else:
+            x, y = spec
+            face = math.atan2(y, x) + math.pi  # normal axis along target->robot
         marker = CoordXY()
         marker.x, marker.y = float(x), float(y)
         msg.markers.append(marker)
         normal = CoordXY()
-        bearing = math.atan2(y, x)
-        normal.x, normal.y = -math.sin(bearing), math.cos(bearing)
+        if face is None:
+            normal.x, normal.y = 0.0, 0.0
+        else:
+            normal.x, normal.y = -math.sin(face), math.cos(face)
+            if flip and normal.y < 0.0:  # force forward component >= 0 (nfx)
+                normal.x, normal.y = -normal.x, -normal.y
         msg.markers_normals.append(normal)
     return msg
 
 
-def command(distance_m, bearing_rad=0.0, **gains):
-    """Velocity command for a single target at this range and bearing."""
+def command(distance_m, bearing_rad=0.0, face=None, **gains):
+    """Velocity command for a single target at this range and bearing.
+
+    `face` is the target's outward-normal body angle; left unset the face is
+    squared to the LOS (corridor bearing zero, i.e. pure radial approach).
+    """
     node = stub(**gains)
     x = 100.0 * distance_m * math.cos(bearing_rad)
     y = 100.0 * distance_m * math.sin(bearing_rad)
-    ControllerNode.target_callback(node, markers((x, y)))
+    spec = (x, y) if face is None else (x, y, face)
+    ControllerNode.target_callback(node, markers(spec))
     return np.array([float(node.frc_cmd[0]), float(node.frc_cmd[1])])
 
 
 def heading(bearing_rad, distance_m=BUFFER_RADIUS, **gains):
-    """Yaw rate command, rad/s, for a single target at this bearing."""
+    """Yaw rate command, rad/s, for a single target at this bearing.
+
+    The torque law is unchanged by the corridor work, so the face is set equal to
+    `bearing_rad` to feed it the same normal it saw before -- these tests pin the
+    heading channel in isolation.
+    """
     node = stub(**gains)
     x = 100.0 * distance_m * math.cos(bearing_rad)
     y = 100.0 * distance_m * math.sin(bearing_rad)
-    ControllerNode.target_callback(node, markers((x, y)))
+    ControllerNode.target_callback(node, markers((x, y, bearing_rad), flip=False))
     return float(node.trq_cmd)
 
 
@@ -199,13 +249,75 @@ def test_the_hold_distance_does_not_depend_on_bearing():
         assert radial_component(BUFFER_RADIUS, bearing) == pytest.approx(0.0, abs=1e-12)
 
 
-def test_the_tangential_term_opposes_the_bearing_error():
-    """Orbiting along +u_t changes bearing by -delta/distance, so same sign."""
+def test_the_tangential_term_nulls_the_corridor_angle():
+    """The corridor change: sidling now opposes the glideslope angle -- between
+    the LOS and the target's outward normal -- not the raw body bearing. The
+    target is held dead ahead and the face is rotated so the approach corridor is
+    off by `corridor`; the tangential command is ALIGN_GAIN * corridor.
+    """
+    u_t = np.array([-math.sin(0.0), math.cos(0.0)])  # bearing 0 -> u_t = +y
+    for corridor in (0.3, 1.2, -0.8):
+        face = 0.0 - corridor - math.pi  # bearing - corridor - pi
+        tangential = command(BUFFER_RADIUS, 0.0, face=face) @ u_t
+        assert math.copysign(1.0, tangential) == math.copysign(1.0, corridor)
+        assert tangential == pytest.approx(ALIGN_GAIN * corridor)
+
+
+def test_an_off_axis_face_sidles_even_with_the_target_dead_ahead():
+    """The whole point of the change: a target dead ahead used to command no
+    sidling; a rotated face now does, because the approach corridor is off-axis.
+    """
+    u_t = np.array([0.0, 1.0])  # bearing 0
+    on_corridor = command(BUFFER_RADIUS, 0.0) @ u_t
+    off_axis = command(BUFFER_RADIUS, 0.0, face=-0.6 - math.pi) @ u_t
+    assert on_corridor == pytest.approx(0.0, abs=1e-12)
+    assert abs(off_axis) > 1e-6
+
+
+def test_a_forward_flipped_normal_is_disambiguated_by_the_los():
+    """Regression for the sign bug: the published normal is forced forward by the
+    ArUco flip, so a craft squarely on the corridor sees a normal pointing *along*
+    its LOS. Taking -normal unconditionally read that as ~180 deg off and sidled
+    the wrong way; disambiguating against the LOS must give zero sidling here.
+    """
+    u_t = np.array([0.0, 1.0])  # bearing 0
+    # On corridor, dead ahead: the flip publishes a forward normal (m . LOS > 0).
+    msg = markers((100.0 * BUFFER_RADIUS, 0.0))  # default face -> on corridor, flipped
+    assert msg.markers_normals[0].y > 0.0  # forward component is positive (flipped)
+    node = stub()
+    ControllerNode.target_callback(node, msg)
+    tangential = np.array([float(node.frc_cmd[0]),
+                           float(node.frc_cmd[1])]) @ u_t
+    assert tangential == pytest.approx(0.0, abs=1e-12)
+
+
+def test_a_degenerate_normal_falls_back_to_the_los_bearing():
+    """No usable face normal -> sidling reverts to the old body-bearing law, so
+    behaviour is unchanged wherever perception cannot supply a normal.
+    """
     for bearing in (0.3, 1.2, -0.8):
+        node = stub()
+        x = 100.0 * BUFFER_RADIUS * math.cos(bearing)
+        y = 100.0 * BUFFER_RADIUS * math.sin(bearing)
+        ControllerNode.target_callback(node, markers((x, y, None)))
         u_t = np.array([-math.sin(bearing), math.cos(bearing)])
-        tangential = command(BUFFER_RADIUS, bearing) @ u_t
-        assert math.copysign(1.0, tangential) == math.copysign(1.0, bearing)
+        tangential = np.array([float(node.frc_cmd[0]),
+                               float(node.frc_cmd[1])]) @ u_t
         assert tangential == pytest.approx(ALIGN_GAIN * bearing)
+
+
+def test_the_near_target_envelope_tapers_the_command_inside_the_radius():
+    """Inside capture_slow_radius the summed command scales linearly toward the
+    floor, so the weak thruster can track the final corridor run-in.
+    """
+    r0, frac0 = 1.2, 0.25
+    contact = BUFFER_RADIUS  # the stub's contact_distance
+    far = command(1.0, 0.0, capture_slow_radius=0.0)[0]
+    gated = command(1.0, 0.0, capture_slow_radius=r0,
+                    capture_min_speed_frac=frac0)[0]
+    expect = frac0 + (1.0 - frac0) * (1.0 - contact) / (r0 - contact)
+    assert gated == pytest.approx(far * expect)
+    assert gated < far
 
 
 def test_a_detection_at_the_robot_centre_commands_nothing():

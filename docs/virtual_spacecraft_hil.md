@@ -158,6 +158,66 @@ remains constant, which is the desired free-drift behavior. Stop the tracker or
 the combined launch to stop motion rendering; hardware emergency-stop behavior
 must remain independent of ROS software.
 
+## Capture preparation
+
+During ENCAPSULATION, `cp_controller` publishes `preparation_wrench` for a fresh,
+locked assigned attachment point present in fresh estimated `targets`. It uses
+the same tangential bearing-alignment command and filtered bearing-rate damping
+as capture. Estimated geometry allows this preparation to recover raw visibility.
+
+The body-frame force projects the velocity-servo error onto the AP tangent:
+`F = clamp(Kv * (alignment_speed - dot(craft_velocity, tangent)), ±preparation_max_force) * tangent`.
+It adds no radial attraction, radial braking, target-velocity feedforward, or
+torque. `preparation_max_force` defaults to **0.002 N** (2 mN) in both swarm
+launches; set it to zero to disable the source for comparison. This is a starting
+cap for the current 20 mN total propulsion limit, not a validated tuning result.
+
+Preparation publishes zero in SEARCH, CAPTURE, DOCK, on assignment/lock/target
+loss or timeout, and while either capture or dock service flag is active. Missing
+assigned geometry never falls back to another point for preparation. The existing
+capture source keeps its closest-point fallback, radial approach, feedforward,
+and heading law. The shared alignment term is `K * bearing + D * bearing_rate`:
+decreasing bearing reduces the requested sidling speed. `pointing_guidance2`
+publishes zero torque in CAPTURE and DOCK, leaving capture heading and yaw-rate
+damping to CP; centroid pointing remains active in SEARCH/ENCAPSULATION.
+AP identity changes and long
+gaps reset the shared bearing-rate history. The source is also published in
+`DIRECT_CMD_VEL` mode, where the existing nav passthrough tracks the virtual
+spacecraft before capture; no additional `cmd_vel` writer is introduced.
+
+Readiness now allows **2.0 seconds** since the last live raw observation of the
+assigned AP (`perception_stale_timeout`). The raw-observation gate remains active.
+This is observation freshness, not a sensing period or the synchronization
+tolerance; `action_lead` remains 2 seconds. An observation made at proposal time
+alone will expire around execution time, so subsequent observations are needed.
+
+The bag recorder includes `preparation_wrench`, assigned AP, assignment lock,
+current mode, capture clearance, consensus debug, and global `/readiness` and
+`/ap_bids`, for whichever robots the recorder selects. Select both robots when
+investigating a two-agent run.
+
+## RViz capture timing
+
+With `enable_guidance_visualization:=true`, the first selected robot's visualizer
+adds one shared table to its existing `spacecraft_visualizer/markers` topic. Keep
+that MarkerArray display enabled in RViz. The table appears inside the top of the bounding box
+in `swarm_map`, even before odometry arrives; no extra plugin is needed.
+
+The header shows current **ROS time**, and each row shows a readiness `robot_id`,
+its proposed absolute action time, seconds remaining, and WAIT/READY/ARMED status.
+All times use seconds to three decimal places. A negative countdown means the
+deadline has passed; ARMED does not confirm capture has fired. Missing proposals
+show `--`; rows become STALE after one second without updates. ROS time and the
+countdown pause together when using a paused simulation clock. The visualizer and
+consensus nodes must use the same `use_sim_time` setting.
+
+Position and size can be configured under `/**/spacecraft_visualizer` in
+`virtual_spacecraft.yaml` with `timing_table_x`, `timing_table_y`, and
+`timing_table_text_size`. Defaults are the box's X midpoint, `y_max - 0.15` for the
+table's top edge, and 0.14 m text height. Rows extend downwards from that edge.
+Standalone visualizers default to hiding the table; enable
+`show_capture_timing:=true` on one instance. This is a read-only overlay.
+
 ## Safety and experimental validation
 
 - `localization/odom` is withheld until GPS and RoboMaster attitude initialize

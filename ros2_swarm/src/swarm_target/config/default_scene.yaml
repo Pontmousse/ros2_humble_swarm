@@ -49,11 +49,12 @@ objects:
       - [ 1.00,  0.25]
       - [ 0.00,  0.875]
       - [-0.875, 0.375]
-    com: [-3.0, -2.5]
+    com: [-3.0, -2.6]
     yaw_deg: 0.0
     vel: [0.00, 0.0]
     omega_deg: 0.0
     landmark_points_per_m: 20.0
     captures: auto
-    captures_per_edge: 1
+    captures_per_edge: 2
     corner_margin_m: 0.03
+    capture_min_spacing_m: 0.15

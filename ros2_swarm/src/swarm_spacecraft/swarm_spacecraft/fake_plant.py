@@ -99,7 +99,7 @@ class FakePlant(Node):
         # noise, dropout (hold previous), periodic recal steps and rare glitches.
         self.declare_parameter("mm_update_rate", 6.0)
         self.declare_parameter("mm_republish_rate", 100.0)
-        self.declare_parameter("mm_pos_noise_std", 0.015)
+        self.declare_parameter("mm_pos_noise_std", 0.1)
         self.declare_parameter("mm_dropout_prob", 0.5)
         self.declare_parameter("mm_recal_period", 30.0)
         self.declare_parameter("mm_recal_jump_std", 0.2)

@@ -2,14 +2,14 @@ from collections import deque
 
 import rclpy
 from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import numpy as np
 
 # Built-in messages
 from geometry_msgs.msg import Twist, Wrench
 from nav_msgs.msg import Odometry
 from std_srvs.srv import SetBool
-from std_msgs.msg import Int32
+from std_msgs.msg import Bool, Int32, String
 
 # Custom messages for target position
 from swarm_interfaces.msg import StatePos as State
@@ -25,6 +25,10 @@ TRACK_MAX_JUMP = 0.50
 # as the upper cutoff (stale resume -> treat as fresh, rate 0).
 BEARING_DT_MIN = 0.02
 
+# A published face normal shorter than this is treated as absent, so the sidling
+# law falls back to the raw line-of-sight bearing.
+NORMAL_MIN = 1e-6
+
 
 class ControllerNode(Node):
     """Same approach/heading law and output architecture as
@@ -35,7 +39,8 @@ class ControllerNode(Node):
     cmd_vel output for real-hardware bench testing without the wrench sum.
     Contact itself is NOT detected here -- see fake_plant.py / the future
     hardware end-of-course node, which publish contact_detected independently
-    of this controller.
+    of this controller. During encapsulation, the assigned AP's shared tangential
+    law also supplies a separately capped preparation wrench, without approach or torque.
     """
 
     def __init__(self):
@@ -98,7 +103,7 @@ class ControllerNode(Node):
         # radians against the real noise floor and chassis caps; only the
         # equilibrium point above changes, not the law shape.
         self.declare_parameter("approach_gain", 0.9)
-        self.declare_parameter("align_gain", 0.05)
+        self.declare_parameter("align_gain", 0.2)
         self.declare_parameter("heading_gain", 1.0)
         self.declare_parameter("target_velocity_span", 5.25)
         self.declare_parameter("feedforward_gain", 1.0)
@@ -112,7 +117,19 @@ class ControllerNode(Node):
         # loop. align_rate_filter_alpha is a single-pole EMA on the rate
         # (1.0 = passthrough, smaller = heavier smoothing) since differentiating
         # a ~10 Hz noisy bearing amplifies noise.
-        self.declare_parameter("align_damping_gain", 0.3)
+        # Near-target speed envelope: inside capture_slow_radius the summed
+        # velocity command (radial + sidling) is scaled down linearly to
+        # capture_min_speed_frac at contact, so the weak thruster can actually
+        # track the final corridor run-in instead of commanding a speed it
+        # cannot realise. Outside the radius the law is unchanged.
+        self.declare_parameter("capture_slow_radius", 0.5)
+        self.declare_parameter("capture_min_speed_frac", 0.3)
+        self.capture_slow_radius = float(
+            self.get_parameter("capture_slow_radius").value)
+        self.capture_min_speed_frac = float(
+            self.get_parameter("capture_min_speed_frac").value)
+
+        self.declare_parameter("align_damping_gain", 0.6)
         self.declare_parameter("align_rate_filter_alpha", 0.5)
         self.align_damping_gain = float(
             self.get_parameter("align_damping_gain").value)
@@ -136,6 +153,10 @@ class ControllerNode(Node):
         self.yaw_rate_torque_gain = self.get_parameter("yaw_rate_torque_gain").value
         self.maximum_force = self.get_parameter("maximum_force").value
         self.maximum_torque = self.get_parameter("maximum_torque").value
+        self.declare_parameter("preparation_max_force", 0.002)
+        self.preparation_max_force = float(self.get_parameter("preparation_max_force").value)
+        if not np.isfinite(self.preparation_max_force) or self.preparation_max_force < 0.0:
+            raise ValueError("preparation_max_force must be finite and nonnegative")
 
         # Shared response-scale knobs from the global /** block of
         # virtual_spacecraft.yaml. The spacecraft node scales this layer's
@@ -195,6 +216,7 @@ class ControllerNode(Node):
         self._prev_bearing = None
         self._prev_bearing_time = None
         self._prev_closest_index = None
+        self._prev_target_identity = None
         self._bearing_rate_filt = 0.0
 
         # Diagnostic state for the [dbg] log: last body-frame target (for the
@@ -215,10 +237,22 @@ class ControllerNode(Node):
         self.assignment_timeout = float(self.get_parameter("assignment_timeout").value)
         self.assigned_ap_id = -1
         self.assigned_ap_time = None
+        self.assignment_locked = False
+        self.assignment_locked_time = None
+        self.current_mode = ''
+        self.preparation_tangent = None
+        self.preparation_speed = 0.0
+        self.preparation_target_id = -1
+        self.preparation_target_time = None
 
         # Subscribers
         self.create_subscription(Markers, 'targets', self.target_callback, self.qos_profile)
         self.create_subscription(Int32, 'assigned_ap', self.assigned_ap_callback, self.qos_profile)
+        self.create_subscription(Bool, 'assignment_locked', self.assignment_locked_callback,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
+        self.create_subscription(String, 'current_mode', self.mode_callback,
+                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
         qos_latest = QoSProfile(depth=1,
                                 reliability=ReliabilityPolicy.BEST_EFFORT,
                                 history=HistoryPolicy.KEEP_LAST)
@@ -238,6 +272,7 @@ class ControllerNode(Node):
         else:
             self.wrench_pub = self.create_publisher(Wrench, 'capture_wrench',
                                                     self.qos_profile)
+        self.preparation_pub = self.create_publisher(Wrench, 'preparation_wrench', self.qos_profile)
         self.cmd_pub_timer = self.create_timer(self.timer_frequency, self.publish_cmd)
 
         # Capture mode and dock freeze. DOCK wins over CAPTURE: once docked
@@ -259,8 +294,22 @@ class ControllerNode(Node):
         self.pose_theta = msg.theta
 
     def assigned_ap_callback(self, msg: Int32):
+        if int(msg.data) != self.assigned_ap_id:
+            self.preparation_tangent = None
+            self.assignment_locked = False
+            self.assignment_locked_time = None
+            self._prev_bearing = self._prev_target_identity = None
+            self._bearing_rate_filt = 0.0
+            self.target_track.clear()
         self.assigned_ap_id = int(msg.data)
         self.assigned_ap_time = self.get_clock().now()
+
+    def assignment_locked_callback(self, msg: Bool):
+        self.assignment_locked = bool(msg.data)
+        self.assignment_locked_time = self.get_clock().now()
+
+    def mode_callback(self, msg: String):
+        self.current_mode = msg.data.strip().lower()
 
     def spacecraft_callback(self, msg: Odometry):
         self.craft_vx = msg.twist.twist.linear.x
@@ -333,6 +382,7 @@ class ControllerNode(Node):
 
     def target_callback(self, msg: Markers):
         now = self.get_clock().now()
+        self.preparation_tangent = None
         if len(msg.markers) == 0:
             if (self.last_target_time is None or
                     (now - self.last_target_time).nanoseconds * 1e-9
@@ -342,6 +392,7 @@ class ControllerNode(Node):
                 self.target_track.clear()
                 self._prev_bearing = None
                 self._prev_closest_index = None
+                self._prev_target_identity = None
                 self._bearing_rate_filt = 0.0
             return
         self.last_target_time = now
@@ -366,6 +417,11 @@ class ControllerNode(Node):
             for i in idxs
         ])
         self.closest_target_index = idxs[int(np.argmin(target_distances))]
+        identity = ('id', int(msg.ids[self.closest_target_index])) \
+            if len(msg.ids) == len(msg.markers) else ('index', self.closest_target_index)
+        switched = self._prev_target_identity is not None and identity != self._prev_target_identity
+        if switched:
+            self.target_track.clear()
 
         ######################################################
         # Velocity command - drive to contact, not a standoff
@@ -384,9 +440,29 @@ class ControllerNode(Node):
             self._prev_bearing = None
             self._bearing_rate_filt = 0.0
         else:
-            bearing = float(np.arctan2(target[1], target[0]))
             u_r = target / distance
             u_t = np.array([-u_r[1], u_r[0]])
+
+            # Corridor (glideslope) bearing: the signed angle between the LOS and
+            # the target's face-normal axis, not the raw body-frame LOS. Nulling
+            # it slides the craft onto the normal axis so it docks square to the
+            # face. The published normal is sign-ambiguous -- the ArUco antipodal
+            # flip (virtual_scene.py forces its forward component >= 0), so it may
+            # point toward or away from the craft. Disambiguate by the approach:
+            # the robot sits inside the face's incidence cone, so the corridor
+            # axis is whichever of +/-m aligns with the LOS. Fall back to the raw
+            # LOS bearing when no usable normal is present (old behaviour).
+            los_bearing = float(np.arctan2(target[1], target[0]))
+            n = msg.markers_normals[self.closest_target_index]
+            m = np.array([n.y, -n.x])  # published (right, fwd) -> body (fwd, left)
+            nmag = float(np.linalg.norm(m))
+            if nmag > NORMAL_MIN:
+                d = m if float(m @ u_r) >= 0.0 else -m
+                bearing = float(
+                    (los_bearing - np.arctan2(d[1], d[0])
+                     + np.pi) % (2.0 * np.pi) - np.pi)
+            else:
+                bearing = los_bearing
 
             # Radial: zero at contact_distance, not buffer_radius -- the only
             # change from cp_proportional_controller2.py's approach law.
@@ -397,8 +473,6 @@ class ControllerNode(Node):
             # and direct_cmd_vel share this vel). Reset the derivative across any
             # discontinuity so it never differentiates across a gap.
             now_s = now.nanoseconds * 1e-9
-            switched = (self._prev_closest_index is not None
-                        and self.closest_target_index != self._prev_closest_index)
             if self._prev_bearing is None or track_reset or switched:
                 bearing_rate = 0.0
                 self._bearing_rate_filt = 0.0
@@ -422,16 +496,31 @@ class ControllerNode(Node):
             self._prev_bearing_time = now_s
             self._prev_closest_index = self.closest_target_index
 
-            vel = vel + (self.align_gain * bearing
-                         - self.align_damping_gain * bearing_rate) * u_t
+            # Positive sidling reduces bearing: +D*beta_dot opposes that motion.
+            alignment_speed = self.align_gain * bearing + self.align_damping_gain * bearing_rate
+            vel = vel + alignment_speed * u_t
+            if fresh and identity == ('id', self.assigned_ap_id) and np.isfinite(distance):
+                self.preparation_tangent = u_t
+                self.preparation_speed = alignment_speed
+                self.preparation_target_id = self.assigned_ap_id
+                self.preparation_target_time = now
 
             v_target = self.target_velocity_map()
             if v_target is not None and self.pose_theta is not None:
                 vx, vy = self.to_body(v_target[0], v_target[1])
                 vel = vel + self.feedforward_gain * np.array([vx, vy])
 
+            if distance < self.capture_slow_radius:
+                span = max(self.capture_slow_radius - self.contact_distance, 1e-3)
+                reach = max(distance - self.contact_distance, 0.0) / span
+                frac = (self.capture_min_speed_frac
+                        + (1.0 - self.capture_min_speed_frac) * min(reach, 1.0))
+                vel = vel * frac
+
             self.frc_cmd[0] = float(vel[0])
             self.frc_cmd[1] = float(vel[1])
+
+        self._prev_target_identity = identity
 
         ######################################################
         # Torque command calculation
@@ -453,9 +542,34 @@ class ControllerNode(Node):
         onto cmd_vel in direct mode whenever this node is not capturing."""
         self.cmd_vel_nav = msg
 
+    def preparation_wrench(self, now):
+        msg = Wrench()
+        if (self.current_mode != 'encapsulation' or self.capture_mode or self.dock_mode
+                or not self.assignment_locked or self.assigned_ap_id < 0
+                or self.preparation_target_id != self.assigned_ap_id
+                or self.preparation_tangent is None or self.preparation_max_force == 0.0):
+            return msg
+        for stamp, timeout in ((self.assigned_ap_time, self.assignment_timeout),
+                               (self.assignment_locked_time, self.assignment_timeout),
+                               (self.preparation_target_time, self.target_hold_timeout)):
+            if stamp is None or not 0.0 <= (now - stamp).nanoseconds * 1e-9 < timeout:
+                return msg
+        velocity = np.array([self.craft_vx if self.craft_vx is not None else 0.0,
+                             self.craft_vy if self.craft_vy is not None else 0.0])
+        # Project the servo error too: radial velocity must not produce braking here.
+        force = self.velocity_force_gain * (
+            self.preparation_speed - float(velocity @ self.preparation_tangent))
+        if not np.isfinite(force) or not np.all(np.isfinite(self.preparation_tangent)):
+            return msg
+        fx, fy = bound(force, self.preparation_max_force) * self.preparation_tangent
+        msg.force.x, msg.force.y = float(fx), float(fy)
+        return msg
+
     def publish_cmd(self):
         now = self.get_clock().now()
         elapsed = (now - self.init_start_time).nanoseconds / 1e9
+        self.preparation_pub.publish(self.preparation_wrench(now)
+                                     if elapsed > 2 * self.init_duration else Wrench())
         if elapsed <= 2 * self.init_duration:
             return
 

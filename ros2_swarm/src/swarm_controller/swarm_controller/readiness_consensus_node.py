@@ -4,20 +4,21 @@
 Once this agent has LOCKED an attachment point (from the auction), has that AP in
 range (estimated `targets`), and is ACTUALLY seeing it right now (raw `targets_unf`
 liveness, not estimator memory), it proposes an absolute capture timestamp
-`now + action_lead` and runs a Metropolis-Hastings average over all ready in-range
-neighbours on the flat `/readiness` topic. The update is snapshot-then-update, so
-it is callback-order independent; convergence is measured from DISAGREEMENT
-(max-min action_time < time_tol), not step size. When the swarm agrees (held for
-`min_consensus_hold`) it latches the agreed time, and each agent fires its own
-`capture_sync` gate when wall-clock reaches that time -> true simultaneity under
-latency (chrony-synced clocks assumed).
+`now + action_lead` and propagates the minimum proposal over `/readiness`.
+Agreement must hold for `min_consensus_hold`, with at least `min_lead` remaining,
+before the deadline is frozen. At that deadline each agent fires `capture_sync`
+only if all its live neighbours have committed to the same round and agree within
+`time_tol`. ROS clocks must be synchronized; timer scheduling limits simultaneity.
 
-Guards: requires >=1 live neighbour to fire (a comms-isolated agent holds, never
-self-fires); withdraws its proposal and un-arms if it loses readiness before firing
-(so the trigger never fires on remembered-but-unseen APs).
+Readiness loss, membership changes, and missed deadlines cancel the round. Round
+numbers propagate by maximum, preventing old proposals from entering a restarted
+negotiation. This is neighbour-local coordination, not a global membership or
+atomic-commit protocol under network partitions.
 
 Pure coordination layer: identical under VIRTUAL_PLANT and real hardware.
 """
+import math
+
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
@@ -27,13 +28,14 @@ from swarm_interfaces.msg import Markers, NeighbourStates, Readiness
 
 
 class PeerReady:
-    __slots__ = ("stamp", "action_time", "degree", "ready")
+    __slots__ = ("stamp", "action_time", "ready", "round_id", "armed")
 
-    def __init__(self, stamp, action_time, degree, ready):
+    def __init__(self, stamp, action_time, ready, round_id, armed):
         self.stamp = stamp
         self.action_time = action_time
-        self.degree = degree
         self.ready = ready
+        self.round_id = round_id
+        self.armed = armed
 
 
 class ReadinessConsensusNode(Node):
@@ -43,7 +45,7 @@ class ReadinessConsensusNode(Node):
         self.declare_parameter("robot_id", 1)
         self.declare_parameter("consensus_rate", 5.0)
         self.declare_parameter("approach_distance", 0.8)
-        self.declare_parameter("perception_stale_timeout", 0.5)
+        self.declare_parameter("perception_stale_timeout", 2.0)
         self.declare_parameter("action_lead", 2.0)
         self.declare_parameter("min_lead", 0.5)
         self.declare_parameter("time_tol", 0.05)
@@ -73,6 +75,10 @@ class ReadinessConsensusNode(Node):
         self.live_ids = set()
         self.peers = {}
         # Consensus state
+        self.round_id = 0
+        self.participants = frozenset()
+        self.proposal_ap = -1
+        self.armed_time = 0.0
         self.my_t = 0.0
         self.armed = False
         self.fired = False
@@ -124,9 +130,15 @@ class ReadinessConsensusNode(Node):
     def on_peer(self, msg: Readiness):
         if msg.robot_id == self.robot_id:
             return
+        action_time = float(msg.action_time)
+        if not math.isfinite(action_time) or action_time < 0.0:
+            return
+        stamp = self.stamp_sec(msg.header)
+        previous = self.peers.get(msg.robot_id)
+        if previous is not None and stamp <= previous.stamp:
+            return
         self.peers[msg.robot_id] = PeerReady(
-            self.stamp_sec(msg.header), float(msg.action_time),
-            int(msg.degree), bool(msg.ready))
+            stamp, action_time, bool(msg.ready), int(msg.round_id), bool(msg.armed))
 
     def _track(self, which, msg: Markers):
         """Record per-id last-advance wall time on an advancing header stamp.
@@ -166,47 +178,62 @@ class ReadinessConsensusNode(Node):
                 and self.ap_in_range() and self.perception_live(now))
 
     # ------------------------------ consensus ------------------------------
+    def reset_round(self, round_id):
+        self.round_id = round_id
+        self.my_t = self.armed_time = self.hold = 0.0
+        self.armed = False
+
     def round(self):
         now = self.now()
         self.peers = {rid: pr for rid, pr in self.peers.items()
                       if now - pr.stamp < self.neighbor_timeout}
-        my_degree = len(self.live_ids)
         live = {rid: pr for rid, pr in self.peers.items() if rid in self.live_ids}
-
+        participants = frozenset(self.live_ids)
         ready = self.local_ready(now)
-        if ready and (self.my_t == 0.0 or self.my_t < now + self.min_lead):
-            self.my_t = now + self.action_lead
-        if not ready:
-            self.my_t = 0.0
-            if not self.fired:
-                self.armed = False
-                self.hold = 0.0
 
-        t_old = self.my_t  # snapshot -> order-independent MH update
-        if ready and t_old > 0.0:
-            for pr in live.values():
-                if pr.ready and pr.action_time > 0.0:
-                    w = 1.0 / (1.0 + max(my_degree, pr.degree))
-                    self.my_t += w * (pr.action_time - t_old)
-            self.my_t = max(self.my_t, now + self.min_lead)
+        if not self.fired:
+            peer_round = max([self.round_id] + [pr.round_id for pr in live.values()])
+            if peer_round > self.round_id:
+                self.reset_round(peer_round)
+            if self.my_t and (not ready or participants != self.participants
+                              or self.assigned_ap != self.proposal_ap):
+                self.reset_round(self.round_id + 1)
+            self.participants = participants
+            self.proposal_ap = self.assigned_ap
 
-        self.publish_readiness(now, ready, my_degree)
+            peers = [pr for pr in live.values() if pr.round_id == self.round_id]
+            all_ready = (ready and bool(participants) and len(peers) == len(participants)
+                         and all(pr.ready and pr.action_time > 0.0 for pr in peers))
+            if ready and self.my_t == 0.0:
+                self.my_t = now + self.action_lead
 
-        ready_peers = [pr.action_time for pr in live.values()
-                       if pr.ready and pr.action_time > 0.0]
-        all_ready = ready and len(ready_peers) == len(live) and len(live) >= 1
-        if all_ready:
-            times = [self.my_t] + ready_peers
-            converged = (max(times) - min(times)) < self.time_tol
-        else:
-            converged = False
-        self.hold = self.hold + self.dt if converged else 0.0
-        if self.hold >= self.min_consensus_hold:
-            self.armed = True
-        if self.armed and not self.fired and now >= self.my_t:
-            self.sync_pub.publish(Bool(data=True))
-            self.fired = True
-            self.get_logger().info(f"capture_sync FIRED at t={self.my_t:.3f}")
+            if self.armed:
+                agreed = all_ready and all(
+                    abs(pr.action_time - self.armed_time) < self.time_tol for pr in peers)
+                if not agreed:
+                    self.reset_round(self.round_id + 1)
+                elif now >= self.armed_time:
+                    if all(pr.armed for pr in peers):
+                        self.sync_pub.publish(Bool(data=True))
+                        self.fired = True
+                        self.get_logger().info(f"capture_sync FIRED at t={self.armed_time:.3f}")
+                    else:
+                        self.reset_round(self.round_id + 1)
+            elif ready:
+                times = [self.my_t] + [pr.action_time for pr in peers
+                                       if pr.ready and pr.action_time > 0.0]
+                self.my_t = min(times)
+                if self.my_t < now + self.min_lead:
+                    # Withdraw for this tick; peers adopt the new round before retrying.
+                    self.reset_round(self.round_id + 1)
+                else:
+                    converged = all_ready and max(times) - min(times) < self.time_tol
+                    self.hold = self.hold + self.dt if converged else 0.0
+                    if self.hold >= self.min_consensus_hold:
+                        self.armed = True
+                        self.armed_time = self.my_t
+
+        self.publish_readiness(now, ready, len(participants))
 
     def publish_readiness(self, now, ready, degree):
         msg = Readiness()
@@ -216,6 +243,8 @@ class ReadinessConsensusNode(Node):
         msg.ready = ready
         msg.degree = min(degree, 255)
         msg.action_time = self.my_t
+        msg.round_id = self.round_id
+        msg.armed = self.armed
         self.ready_pub.publish(msg)
         self.debug_pub.publish(Float64(data=self.my_t))
 

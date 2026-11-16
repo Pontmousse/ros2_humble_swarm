@@ -57,6 +57,8 @@ def generate_launch_description():
         # Published by the centralized swarm launch; the per-robot variant below
         # covers decentralized runs. See swarm_spacecraft/run_config_snapshot.py.
         '/run_config',
+        '/readiness',
+        '/ap_bids',
     ]
 
     for robot_name in robot_names:
@@ -80,6 +82,12 @@ def generate_launch_description():
             f'/{robot_name}/avoidance_wrench',
             f'/{robot_name}/flocking_wrench',
             f'/{robot_name}/capture_wrench',
+            f'/{robot_name}/preparation_wrench',
+            f'/{robot_name}/assigned_ap',
+            f'/{robot_name}/assignment_locked',
+            f'/{robot_name}/current_mode',
+            f'/{robot_name}/capture_sync',
+            f'/{robot_name}/consensus_debug',
             f'/{robot_name}/pointing_wrench',
 
             # ArUco perception

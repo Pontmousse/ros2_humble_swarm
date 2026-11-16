@@ -973,10 +973,12 @@ def generate_launch_description():
                         # (< 3.3), the body-x cap over the 52 mm noise floor
                         # (< 0.96, else noise alone saturates the command),
                         # and tracking lag v_target / gain (> 0.58).
-                        "approach_gain": 0.9,
+                        "approach_gain": 0.5,
                         # Tangential alignment, (m/s)/rad. 0.0 steers by
                         # rotation alone.
-                        "align_gain": 0.05,
+                        "align_gain": 0.12,
+                        "align_damping_gain": 0.4,
+                        "preparation_max_force": 0.01,
                         # Heading gain, s^-1. Capped at 2.3 by the rotation
                         # cap over the bearing noise -- 52 mm of position
                         # noise subtends 0.087 rad at buffer_radius = 0.60 --
@@ -999,6 +1001,12 @@ def generate_launch_description():
                         # contact_distance used by fake_plant.py's geometric
                         # gate on the centralized/virtual side.
                         "contact_distance": 0.20,
+                        # Near-target speed envelope: inside capture_slow_radius
+                        # the summed approach command tapers to
+                        # capture_min_speed_frac at contact so the weak thruster
+                        # can track the final corridor run-in.
+                        "capture_slow_radius": 0.5,
+                        "capture_min_speed_frac": 0.3,
                         # True bypasses virtual_spacecraft/nav2_pidff and
                         # publishes straight to cmd_vel for real-hardware
                         # bench testing; do not also run velocity_smoother on
@@ -1028,8 +1036,9 @@ def generate_launch_description():
                     "robot_id": beacon_addresses[i],
                     "bid_rate": 5.0,
                     "approach_distance": 0.8,
-                    "w_proximity": 1.0,
+                    "w_proximity": 0.3,
                     "w_velocity_align": 0.3,
+                    "velocity_min_speed": 0.05,
                     "w_normal_align": 0.3,
                     "neighbor_bid_timeout": 0.5,
                     "target_hold_timeout": 0.4,
@@ -1127,8 +1136,8 @@ def generate_launch_description():
                     "robot_id": beacon_addresses[i],
                     "consensus_rate": 5.0,
                     "approach_distance": 0.8,
-                    "perception_stale_timeout": 0.5,
-                    "action_lead": 2.0,
+                    "perception_stale_timeout": 2.0,
+                    "action_lead": 5.0,
                     "min_lead": 0.5,
                     "time_tol": 0.05,
                     "neighbor_timeout": 0.5,

@@ -44,7 +44,7 @@ from rclpy.qos import (
 from std_msgs.msg import Int32, String
 from visualization_msgs.msg import Marker, MarkerArray
 
-from swarm_interfaces.msg import Markers
+from swarm_interfaces.msg import Markers, Readiness
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -118,8 +118,9 @@ class SpacecraftVisualizerNode(Node):
     RAW_TARGET_CONTOUR_ID = 32
     # Auction assignment line: physical robot -> its assigned target (per-robot ns).
     ASSIGN_LINE_ID = 33
+    CAPTURE_TIMING_ID = 34
     # Legend swatch/text pairs live in a shared "legend" world ns; ids >=40 so they
-    # never collide with the 0-33 per-robot range or the anchor ids (20-25).
+    # never collide with the 0-34 per-robot range or the anchor ids (20-25).
     LEGEND_BASE_ID = 40
 
     # RGB triples for the perception overlays.
@@ -195,10 +196,16 @@ class SpacecraftVisualizerNode(Node):
         # Auction assignment line (physical robot -> assigned target).
         self.declare_parameter("assignment_timeout", 0.5)
         # Legend, drawn inside the beacon 13/14/15 triangle (bottom-right).
-        self.declare_parameter("show_legend", True)
-        self.declare_parameter("legend_x", -0.5)
-        self.declare_parameter("legend_y", -1.6)
-        self.declare_parameter("legend_dy", 0.28)
+        # Off by default; enable per-launch when a key is wanted.
+        self.declare_parameter("show_legend", False)
+        self.declare_parameter("legend_x", -0.85)
+        self.declare_parameter("legend_y", -1.3)
+        self.declare_parameter("legend_dy", 0.22)
+        self.declare_parameter("show_capture_timing", False)
+        self.declare_parameter("timing_table_x", (
+            self.get_parameter("x_min").value + self.get_parameter("x_max").value) / 2.0)
+        self.declare_parameter("timing_table_y", self.get_parameter("y_max").value - 0.15)
+        self.declare_parameter("timing_table_text_size", 0.14)
         self.declare_parameter("qos_depth", 10)
         self.declare_parameter("qos_reliability", "RELIABLE")
         self.declare_parameter("qos_history", "KEEP_LAST")
@@ -278,6 +285,10 @@ class SpacecraftVisualizerNode(Node):
         self.legend_x = float(self.get_parameter("legend_x").value)
         self.legend_y = float(self.get_parameter("legend_y").value)
         self.legend_dy = float(self.get_parameter("legend_dy").value)
+        self.show_capture_timing = bool(self.get_parameter("show_capture_timing").value)
+        self.timing_table_x = float(self.get_parameter("timing_table_x").value)
+        self.timing_table_y = float(self.get_parameter("timing_table_y").value)
+        self.timing_table_text_size = float(self.get_parameter("timing_table_text_size").value)
         self.validate_parameters()
 
         self.virtual_odometry = None
@@ -303,6 +314,7 @@ class SpacecraftVisualizerNode(Node):
         self.current_mode = None
         self.assigned_ap_id = -1
         self.assigned_ap_update_time = None
+        self.capture_readiness = {}
 
         qos_profile = qos_profile_from_parameters(self)
         # Latched: catch the last-published mode / assignment even if we subscribe
@@ -321,6 +333,9 @@ class SpacecraftVisualizerNode(Node):
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
         )
+        if self.show_capture_timing:
+            self.create_subscription(Readiness, "/readiness", self.readiness_callback,
+                                     QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT))
         self.create_subscription(
             Odometry,
             "virtual_spacecraft/odom",
@@ -422,6 +437,9 @@ class SpacecraftVisualizerNode(Node):
             self.world_axis_length,
             self.robot_length,
             self.robot_width,
+            self.timing_table_x,
+            self.timing_table_y,
+            self.timing_table_text_size,
         )
         if not all(math.isfinite(value) for value in values):
             raise ValueError("Visualizer parameters must be finite")
@@ -446,6 +464,7 @@ class SpacecraftVisualizerNode(Node):
             self.world_axis_length,
             self.robot_length,
             self.robot_width,
+            self.timing_table_text_size,
         )
         if not all(value > 0.0 for value in positive):
             raise ValueError("Visualizer timing, sizes, and limits must be positive")
@@ -495,6 +514,10 @@ class SpacecraftVisualizerNode(Node):
         """Store the auction's assigned target id (-1 = unassigned)."""
         self.assigned_ap_id = int(message.data)
         self.assigned_ap_update_time = self.get_clock().now().nanoseconds
+
+    def readiness_callback(self, message: Readiness) -> None:
+        self.capture_readiness[int(message.robot_id)] = (
+            message, self.get_clock().now().nanoseconds)
 
     def orientation_yaw(self, message: Odometry):
         """Extract a global-frame yaw from a comparison odometry source."""
@@ -1010,6 +1033,32 @@ class SpacecraftVisualizerNode(Node):
             cursor += on + off
         return line
 
+    def capture_timing_marker(self, now):
+        marker = self.marker(self.CAPTURE_TIMING_ID, Marker.TEXT_VIEW_FACING, now.to_msg())
+        marker.pose.position.x = self.timing_table_x
+        marker.pose.position.z = 0.15
+        marker.scale.z = self.timing_table_text_size
+        marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0
+        marker.lifetime.sec = 1
+        now_sec = now.nanoseconds * 1e-9
+        rows = [f"ROS now: {now_sec:.3f}s"]
+        if not self.capture_readiness:
+            rows.append("Waiting for readiness")
+        for rid, (message, received) in sorted(self.capture_readiness.items()):
+            age = now.nanoseconds - received
+            state = "ARMED" if message.armed else "READY" if message.ready else "WAIT"
+            action = left = "--"
+            if not 0 <= age < 1_000_000_000:
+                state = "STALE"
+            elif math.isfinite(message.action_time) and message.action_time > 0.0:
+                action = f"{message.action_time:.3f}"
+                left = f"{message.action_time - now_sec:+.3f}s"
+            rows.append(f"ID{rid}: action={action} left={left} {state}")
+        # RViz centres multiline text; keep its top inside the box as rows grow.
+        marker.pose.position.y = self.timing_table_y - len(rows) * marker.scale.z / 2.0
+        marker.text = "\n".join(rows)
+        return marker
+
     def build_legend_markers(self, stamp):
         """Colour/glyph key, drawn inside the beacon 13/14/15 triangle.
 
@@ -1021,21 +1070,26 @@ class SpacecraftVisualizerNode(Node):
             ("Encapsulation", self.MODE_COLORS["encapsulation"]),
             ("Capture", self.MODE_COLORS["capture"]),
             ("Dock", self.MODE_COLORS["dock"]),
-            ("Assigned target line", (1.0, 1.0, 1.0)),
-            ("Target observation", self.RAW_TARGET_COLOR),
-            ("Target estimate", self.TARGET_COLOR),
-            ("Landmark observation", self.RAW_LANDMARK_COLOR),
-            ("Landmark estimate", self.LANDMARK_COLOR),
+            ("Assigned line", (1.0, 1.0, 1.0)),
+            ("Target obs.", self.RAW_TARGET_COLOR),
+            ("Target est.", self.TARGET_COLOR),
+            ("Landmark obs.", self.RAW_LANDMARK_COLOR),
+            ("Landmark est.", self.LANDMARK_COLOR),
             ("Real robot", (0.1, 1.0, 0.9)),
             ("Beacon", (0.1, 0.8, 1.0)),
         )
+        swatch_size = 0.09
+        text_scale = 0.13
+        # TEXT_VIEW_FACING is centre-anchored, so the label column must sit far
+        # enough right of the swatch that even the widest label clears it.
+        text_offset = 0.6
         markers = []
         for row, (text, (red, green, blue)) in enumerate(rows):
             row_y = self.legend_y - row * self.legend_dy
             swatch = self.world_marker(
                 self.LEGEND_BASE_ID + 2 * row, Marker.CUBE, stamp)
             swatch.ns = "legend"
-            swatch.scale.x = swatch.scale.y = swatch.scale.z = 0.12
+            swatch.scale.x = swatch.scale.y = swatch.scale.z = swatch_size
             swatch.color.r, swatch.color.g, swatch.color.b = red, green, blue
             swatch.color.a = 1.0
             swatch.pose.position.x = self.legend_x
@@ -1047,9 +1101,9 @@ class SpacecraftVisualizerNode(Node):
                 self.LEGEND_BASE_ID + 2 * row + 1, Marker.TEXT_VIEW_FACING, stamp)
             label.ns = "legend"
             label.text = text
-            label.scale.z = 0.22
+            label.scale.z = text_scale
             label.color.r = label.color.g = label.color.b = label.color.a = 1.0
-            label.pose.position.x = self.legend_x + 0.18
+            label.pose.position.x = self.legend_x + text_offset
             label.pose.position.y = row_y
             label.pose.position.z = 0.06
             markers.append(label)
@@ -1317,6 +1371,9 @@ class SpacecraftVisualizerNode(Node):
 
         if self.show_legend:
             markers.extend(self.build_legend_markers(stamp))
+
+        if self.show_capture_timing:
+            markers.append(self.capture_timing_marker(now))
 
         message = MarkerArray()
         message.markers = markers

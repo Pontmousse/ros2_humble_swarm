@@ -70,6 +70,18 @@ def _centroid(outline):
     return cx, cy
 
 
+def _dedup(points, normals, min_spacing):
+    """Greedily drop capture points within min_spacing of an already-kept one."""
+    if min_spacing <= 0.0:
+        return points, normals
+    kept_p, kept_n = [], []
+    for p, nrm in zip(points, normals):
+        if all(math.hypot(p[0] - q[0], p[1] - q[1]) >= min_spacing for q in kept_p):
+            kept_p.append(p)
+            kept_n.append(nrm)
+    return kept_p, kept_n
+
+
 def _outward_normal(p0, p1, cx, cy):
     """Unit normal of edge p0->p1, flipped to point away from the centroid."""
     ex, ey = p1[0] - p0[0], p1[1] - p0[1]
@@ -159,12 +171,16 @@ class Object:
         if mode == "none":
             return [], []
         cx, cy = _centroid(outline)
+        margin = float(spec.get("corner_margin_m", 0.03))
         count = spec.get("capture_count")
         if count is not None:
-            return Object._captures_by_arclength(outline, int(count), cx, cy)
-        per_edge = int(spec.get("captures_per_edge", 1))
-        margin = float(spec.get("corner_margin_m", 0.03))
-        return Object._captures_per_edge(outline, per_edge, margin, cx, cy)
+            pts, nrm = Object._captures_by_arclength(outline, int(count), cx, cy)
+        else:
+            per_edge = int(spec.get("captures_per_edge", 1))
+            pts, nrm = Object._captures_per_edge(outline, per_edge, margin, cx, cy)
+        # Drop near-duplicates (e.g. adjacent edges crowding a shared vertex).
+        min_spacing = float(spec.get("capture_min_spacing_m", 2.0 * margin))
+        return _dedup(pts, nrm, min_spacing)
 
     @staticmethod
     def _captures_per_edge(outline, per_edge, margin, cx, cy):
@@ -178,8 +194,9 @@ class Object:
                 continue  # edge too short to host a capture clear of corners
             ex, ey = p1[0] - p0[0], p1[1] - p0[1]
             for k in range(per_edge):
-                frac = 0.5 if per_edge == 1 else k / (per_edge - 1)
-                t = (margin + usable * frac) / length
+                # Interior half-steps (1/4, 3/4 for per_edge=2): symmetric and
+                # never on a corner, unlike an endpoint-inclusive linspace.
+                t = (margin + usable * (k + 0.5) / per_edge) / length
                 points.append((p0[0] + t * ex, p0[1] + t * ey))
                 normals.append((nx, ny))
         return points, normals
