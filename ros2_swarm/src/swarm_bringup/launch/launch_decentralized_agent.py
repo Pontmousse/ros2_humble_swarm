@@ -14,6 +14,10 @@ from launch.substitutions import LaunchConfiguration
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 # BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
 contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(",") if x.strip()]
+# Camera backend: csi (default) / usb -> ext_camera; robomaster -> the driver's
+# own camera (h264 ON_DEMAND, decoded once by video_processor), as centralized does.
+camera_source = os.getenv("CAMERA_SOURCE", "csi").lower()
+rm_camera = camera_source == "robomaster"
 
 # KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
 # linear Kalman filters). Same output contract as pose_publisher, so downstream
@@ -340,7 +344,8 @@ def generate_launch_description():
                 # 4 s deadline, lifecycle manager cleans it up, cmd_vel stops.
                 # Observed 2026-10-09: both robots stopped mid-run.
                 #
-                # To restore, uncomment the three below and drop this arg.
+                # To restore, set CAMERA_SOURCE=robomaster (wires the streams
+                # below and drops ext_camera).
                 # Note the raw/h264 asymmetry is deliberate: the SDK software
                 # decoder is the only path yielding a usable image_color here,
                 # because the Pi hardware VPU cannot decode the RoboMaster
@@ -348,7 +353,9 @@ def generate_launch_description():
                 # ON emits SPS/PPS and the first IDR at driver boot, so a
                 # decoder joining later never gets a parameter set and every
                 # packet fails avcodec_send_packet forever.
-                'camera': 'false',
+                'camera': 'true' if rm_camera else 'false',
+                # ffmpeg set explicitly: unset, it defaults ON (see above).
+                **({'video_h264': '2', 'video_raw': '-1', 'video_ffmpeg': '-1'} if rm_camera else {}),
                 # 'video_raw': '-1',
                 # 'video_h264': '2',
                 # 'video_rate': '6.0',
@@ -652,7 +659,7 @@ def generate_launch_description():
                     # Capture backend. Defaults to the Pi Camera Module 3 (csi);
                     # export CAMERA_SOURCE=usb to use the See3CAM instead. Normal
                     # runs leave it unset and get csi.
-                    "source": os.getenv("CAMERA_SOURCE", "csi"),
+                    "source": camera_source,
                     "device": os.getenv("USB_CAM_DEVICE", "/dev/video0"),
                     # See3CAM_CU30. 640x480 is its lowest mode -- it has no
                     # 640x360, which is what the stored calibration assumes.
@@ -676,14 +683,22 @@ def generate_launch_description():
         # and delivered 3-5 fps of frequently-corrupt frames over the double-hop
         # WiFi. Measured on the Pi 4 with robot2 running, the usb path gives 23.8
         # fps end to end at 35% of the 4-core machine with a 100% detection rate.
-        # The backend (csi default, usb override) is chosen by CAMERA_SOURCE.
-        ld.add_action(ext_camera)
+        # The backend (csi default, usb override) is chosen by CAMERA_SOURCE;
+        # CAMERA_SOURCE=robomaster uses the driver camera instead, so no ext_camera.
+        if not rm_camera:
+            ld.add_action(ext_camera)
 
     ##############################################################################
     ##############################################################################
     for i in range(N):
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
+
+        # One H.264 decode per robot, republished as mono8 camera/image_color
+        # (same contract as ext_camera) so both detectors share it.
+        h264_decoder = Node(package="swarm_aruco", executable="video_processor_h264",
+                            name="video_processor", namespace=robot_name, output="screen",
+                            emulate_tty=True, parameters=[{"publish_max_hz": 15.0}])
 
         landmarks = Node(
         package="swarm_aruco",
@@ -704,12 +719,15 @@ def generate_launch_description():
                     "aruco_scale": (1.0, 1.0),
                     "calibrate_camera": 0,
                     "detect_max_hz": 15.0,  # see target_detector note
+                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
         )
 
         ld.add_action(landmarks)
+        if rm_camera:
+            ld.add_action(h264_decoder)
 
 
     ##############################################################################
@@ -775,6 +793,7 @@ def generate_launch_description():
                     # conversion/detection frees ~a core. publish_markers keeps
                     # republishing the last markers, so downstream rate is kept.
                     "detect_max_hz": 15.0,
+                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]

@@ -1,65 +1,65 @@
-import rclpy
-from rclpy.node import Node
+"""Decode the RoboMaster H.264 stream once and republish mono8 on `camera/image_color`.
+
+Same output contract as ext_camera, so both aruco detectors (use_h264: False)
+share one decode instead of each running their own.
+"""
+import time
 
 import av
-import cv2
-import numpy as np
+import rclpy
+from cv_bridge import CvBridge
+from rclpy.node import Node
+from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
+from robomaster_msgs.msg import H264Packet
+from sensor_msgs.msg import Image
 
-from std_msgs.msg import Header
-from robomaster_msgs.msg import H264Packet  # Replace with your actual package name
 
 class H264VideoProcessor(Node):
-    def __init__(self, display=False):
+    def __init__(self):
         super().__init__('video_processor')
-
-        self.display = display
+        # Every packet is decoded (H.264 frames reference each other); only the
+        # gray conversion + publish is capped. 0 disables the cap.
+        self.declare_parameter('publish_max_hz', 15.0)
+        hz = float(self.get_parameter('publish_max_hz').value)
+        self.min_interval = 1.0 / hz if hz > 0 else 0.0
+        self.last_publish = 0.0
         self.decoder = av.codec.CodecContext.create('h264', 'r')
-
-        self.subscription = self.create_subscription(
-            H264Packet,
-            'camera/image_h264', 
-            self.h264_callback,
-            10
-        )
-
-        self.get_logger().warn('H264 video processor initialized. Display: {}'.format(self.display))
+        self.bridge = CvBridge()
+        self.pub = self.create_publisher(Image, 'camera/image_color', QoSProfile(
+            depth=1, reliability=ReliabilityPolicy.BEST_EFFORT, history=HistoryPolicy.KEEP_LAST))
+        self.create_subscription(H264Packet, 'camera/image_h264', self.h264_callback, 10)
+        self.get_logger().info(f'H264 decoder up, publishing mono8 at <= {hz} Hz')
 
     def h264_callback(self, msg):
         try:
-            # msg.data arrives as array.array('B'); parse() expects bytes.
-            packets = self.decoder.parse(bytes(msg.data))
-            for packet in packets:
+            for packet in self.decoder.parse(bytes(msg.data)):  # data is array.array('B')
                 try:
                     frames = self.decoder.decode(packet)
-                except av.error.InvalidDataError as decode_err:
-                    self.get_logger().warn(f"Invalid data during decode: {decode_err}")
+                except av.error.InvalidDataError as e:
+                    self.get_logger().warn(f'Invalid data during decode: {e}', throttle_duration_sec=5.0)
                     continue
                 for frame in frames:
-                    img = frame.to_ndarray(format='bgr24')
-                    
-                    # save in main ROS2 workspace directory
-                    cv2.imwrite('h264_test_frame.jpg', img)
-
-                    # Optional: Show it (if GUI is working)
-                    if self.display:
-                        cv2.imshow("H264 Image Stream", img)
-                        cv2.waitKey(1)
-
-                    if cv2.waitKey(1) & 0xFF == ord('q'):
-                        rclpy.shutdown()
-
-                    self.get_logger().info(f"I am here and the image shape is: {img.shape}") # Debug
+                    t = time.monotonic()
+                    if t - self.last_publish < self.min_interval:
+                        continue
+                    self.last_publish = t
+                    out = self.bridge.cv2_to_imgmsg(frame.to_ndarray(format='gray'), encoding='mono8')
+                    out.header = msg.header
+                    self.pub.publish(out)
         except av.FFmpegError as e:
-            self.get_logger().warn(f"H264 decode error: {e}")
-        except Exception as e:
-            self.get_logger().warn(f"Unexpected error in h264 callback: {e}")
+            self.get_logger().warn(f'H264 decode error: {e}', throttle_duration_sec=5.0)
+
 
 def main(args=None):
     rclpy.init(args=args)
-    node = H264VideoProcessor(display=False) # Set to True if you want to enable display, but might not work
-    rclpy.spin(node)
+    node = H264VideoProcessor()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
     node.destroy_node()
-    rclpy.shutdown()
+    rclpy.try_shutdown()
+
 
 if __name__ == '__main__':
     main()

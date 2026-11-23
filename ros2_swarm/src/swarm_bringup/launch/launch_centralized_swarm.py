@@ -410,7 +410,7 @@ def generate_launch_description():
 
             # Camera wiring, set explicitly instead of inheriting driver defaults.
             #  VIRTUAL_TARGET=1 -> unload the module (no camera, saves bandwidth);
-            #  real run (=0)    -> h264 ON_DEMAND decoded client-side by the detectors,
+            #  real run (=0)    -> h264 ON_DEMAND decoded once per robot by video_processor,
             #                      raw + ffmpeg streams killed as unused footguns.
             if virtual_target_on:
                 camera_args = {'camera': 'false', 'vision_targets': '[]'}
@@ -726,6 +726,12 @@ def generate_launch_description():
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
+        # One H.264 decode per robot, republished as mono8 camera/image_color
+        # (same contract as ext_camera) so both detectors share it.
+        h264_decoder = Node(package="swarm_aruco", executable="video_processor_h264",
+                            name="video_processor", namespace=robot_name, output="screen",
+                            emulate_tty=True, parameters=[{"publish_max_hz": 15.0}])
+
         landmarks = Node(
         package="swarm_aruco",
         executable="aruco_detector",
@@ -745,13 +751,14 @@ def generate_launch_description():
                     "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": calibrate_camera,
                     "strict_calibration": strict_calibration,
-                    "use_h264": True,  # decode the driver's h264 stream client-side
+                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
         )
 
         ld.add_action(landmarks)
+        ld.add_action(h264_decoder)
     
     ##############################################################################
     ##############################################################################
@@ -815,7 +822,7 @@ def generate_launch_description():
                     "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": 0,
                     "strict_calibration": strict_calibration,
-                    "use_h264": True,  # decode the driver's h264 stream client-side
+                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }
             ]
