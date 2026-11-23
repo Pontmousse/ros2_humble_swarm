@@ -21,7 +21,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 
 # Main 40-pin header controller: Pi 5 (RP1), Pi 4 (BCM2711), older Pis. The BCM
-# GPIO number is the line offset on each, so GPIO17 is offset 17 everywhere.
+# GPIO number is the line offset on each, so GPIO5 is offset 5 everywhere.
 # Matched by label because chip numbering differs across boards and kernels.
 HEADER_CHIP_LABELS = ('pinctrl-rp1', 'pinctrl-bcm2711', 'pinctrl-bcm2835')
 
@@ -40,7 +40,7 @@ def find_header_chip():
 class ContactSwitchNode(Node):
     def __init__(self):
         super().__init__('contact_switch')
-        self.declare_parameter('gpio_lines', [17])
+        self.declare_parameter('gpio_lines', [5])
         self.declare_parameter('gpio_chip', 'auto')
         self.declare_parameter('rate_hz', 50.0)
         self.declare_parameter('debounce_samples', 3)

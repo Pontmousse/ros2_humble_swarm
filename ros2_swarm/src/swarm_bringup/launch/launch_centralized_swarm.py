@@ -1102,6 +1102,8 @@ def generate_launch_description():
                     "require_capture_sync": True,
                     "initial_mode": "search",
                     "qos_reliability": "BEST_EFFORT",
+                    # Cut the wheel motors on DOCK; off under VIRTUAL_PLANT (no driver).
+                    "disengage_wheels_on_dock": not virtual_plant_on,
                 }
             ],
         )

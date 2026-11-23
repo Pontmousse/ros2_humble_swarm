@@ -1095,6 +1095,8 @@ def generate_launch_description():
                     "initial_mode": "search",
                     # Match the BEST_EFFORT publisher on the detection topics.
                     "qos_reliability": "BEST_EFFORT",
+                    # Cut the wheel motors on DOCK (real hardware; no VIRTUAL_PLANT here).
+                    "disengage_wheels_on_dock": True,
                 }
             ],
         )

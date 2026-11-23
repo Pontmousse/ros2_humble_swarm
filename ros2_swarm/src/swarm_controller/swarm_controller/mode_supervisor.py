@@ -43,6 +43,8 @@ True. That topic is a PLANT-layer signal -- published by fake_plant.py under
 VIRTUAL_PLANT, or by a future physical end-of-course-sensor node on real
 hardware -- so this supervisor and cp_controller never need to know which one
 is active. DOCK is terminal for now: only a mode_cmd override leaves it.
+With disengage_wheels_on_dock (real hardware), entering DOCK also calls the
+driver's `engage_wheels` false, and leaving it calls it true.
 """
 
 from enum import Enum
@@ -139,6 +141,11 @@ class ModeSupervisor(Node):
         # the supervisor forcing any service call at startup.
         self.declare_parameter("initial_mode", "search")
         self.declare_parameter("qos_reliability", "BEST_EFFORT")
+        # Real hardware only: cut the RoboMaster wheel motors (engage_wheels
+        # false) on entering DOCK, re-engage on leaving it. Off in sim, where no
+        # driver serves engage_wheels.
+        self.declare_parameter("disengage_wheels_on_dock", False)
+        self.disengage_on_dock = bool(self.get_parameter("disengage_wheels_on_dock").value)
 
         detect_frames = int(self.get_parameter("detect_frames").value)
         miss_tolerance = int(self.get_parameter("miss_tolerance").value)
@@ -185,6 +192,7 @@ class ModeSupervisor(Node):
         self.encap_client = self.create_client(SetBool, "encapsulation/enable")
         self.capture_client = self.create_client(SetBool, "toggle_controller")
         self.dock_client = self.create_client(SetBool, "toggle_dock")
+        self.engage_client = self.create_client(SetBool, "engage_wheels")
         # One client per mode, keyed so apply_mode is a two-line toggle.
         self.mode_clients = {
             Mode.SEARCH: self.search_client,
@@ -330,6 +338,9 @@ class ModeSupervisor(Node):
         """
         old = self.mode
         self.get_logger().info(f"MODE {old.value} -> {new.value}")
+        # Wheels first: stopping the chassis on DOCK is the most urgent call.
+        if self.disengage_on_dock and Mode.DOCK in (old, new):
+            self.call(self.engage_client, new != Mode.DOCK)
         self.call(self.mode_clients[old], False)
         self.call(self.mode_clients[new], True)
         self.mode = new

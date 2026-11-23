@@ -37,6 +37,7 @@
       - docker.io
       - python3-pip
       - python3-rpi.gpio
+      - gpiod
       - git
       - libopus-dev
     state: present
