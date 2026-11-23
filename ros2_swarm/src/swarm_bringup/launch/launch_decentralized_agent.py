@@ -13,7 +13,7 @@ from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 # BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
-contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "29").split(",") if x.strip()]
+contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(",") if x.strip()]
 
 # KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
 # linear Kalman filters). Same output contract as pose_publisher, so downstream

@@ -5,7 +5,7 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.11
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
 
   - name: RM2
     beacon: 2
@@ -13,7 +13,7 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.152
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
 
   - name: RM3
     beacon: 3
@@ -21,7 +21,7 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.3
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
 
   - name: RM4
     beacon: 4
@@ -29,7 +29,7 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.154
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
 
   - name: RM5
     beacon: 5
@@ -37,7 +37,7 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.155
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
 
   - name: RM6
     beacon: 6
@@ -45,4 +45,4 @@ robots:
     init_orientation: 0.0
     # ip: 192.168.50.156
     # marvelmind_port: /dev/ttyACM0
-    # contact_gpio: "29"   # limit-switch BCM GPIO line(s), comma-separated
+    # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated

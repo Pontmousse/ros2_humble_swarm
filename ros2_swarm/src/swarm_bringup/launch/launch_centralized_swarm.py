@@ -14,7 +14,7 @@ from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 # BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
-contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "29").split(",") if x.strip()]
+contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(",") if x.strip()]
 
 # STRICT_CALIBRATION=0 downgrades the aruco intrinsics sanity check from a hard
 # failure to a warning, so the swarm can be brought up on a known-bad

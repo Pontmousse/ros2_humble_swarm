@@ -36,7 +36,7 @@ Build native on PI (Much faster - 100s of times)
 # 1. SSH in PI
 ssh -i ~/.ssh/ansible robomaster6@192.168.50.106
 
-# 2. Compare first
+# 2. Compare first (from dev machine)
 rsync -avnc --delete --itemize-changes \
   -e "ssh -i ~/.ssh/ansible" \
   --exclude='.git/' \
