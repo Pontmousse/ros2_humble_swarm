@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.3.0"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.5.0"
 swarm_image_repo: "elghaliasri/ros2-humble-swarm"
 
 # Container names used by older revisions of this playbook. Removed on deploy so
@@ -14,6 +14,9 @@ virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bring
 
 camera_source: "usb"
 usb_cam_device: "/dev/video1"
+
+# COM -> GND, NO -> GPIO; per-robot override: contact_gpio in swarm_config.yaml. GND => PIN 30 | GPIO 5 => PIN 29
+contact_gpio: "29"
 
 ros_domain_id: "0"
 rmw_implementation: "rmw_fastrtps_cpp"

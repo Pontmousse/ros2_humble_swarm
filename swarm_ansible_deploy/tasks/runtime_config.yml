@@ -17,6 +17,7 @@
       INITIAL_ORIENT:     "{{ robot_cfg.init_orientation | string }}"
       ROBOT_IP:           "{{ robot_cfg.ip | default('') }}"
       MARVELMIND_PORT:    "{{ robot_cfg.marvelmind_port | default('/dev/ttyACM0') }}"
+      CONTACT_GPIO:       "{{ robot_cfg.contact_gpio | default(contact_gpio) | string }}"
       ROS_DOMAIN_ID:      "{{ ros_domain_id }}"
       RMW_IMPLEMENTATION: "{{ rmw_implementation }}"
       ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"

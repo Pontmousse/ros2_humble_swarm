@@ -54,12 +54,12 @@ rsync -avz --delete -e "ssh -i ~/.ssh/ansible" \
   /home/elghali/projects/ros2_humble_swarm/ \
   robomaster6@192.168.50.106:~/ros2_humble_swarm/
 
-# 2. SSH in and build/push v9.3.1
+# 2. SSH in and build/push new version
 ssh -i ~/.ssh/ansible robomaster6@192.168.50.106
 cd ~/ros2_humble_swarm
 sudo docker login
 sudo docker buildx build \
   -f swarm_docker_img/Dockerfile.tar.arm64 \
-  -t elghaliasri/ros2-humble-swarm:robot-arm64-v9.4.0 \
+  -t elghaliasri/ros2-humble-swarm:robot-arm64-v9.5.0 \
   --load .
-sudo docker push elghaliasri/ros2-humble-swarm:robot-arm64-v9.4.0
+sudo docker push elghaliasri/ros2-humble-swarm:robot-arm64-v9.5.0

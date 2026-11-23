@@ -12,6 +12,8 @@ import os
 from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
+# BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
+contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "29").split(",") if x.strip()]
 
 # KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
 # linear Kalman filters). Same output contract as pose_publisher, so downstream
@@ -182,12 +184,14 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
         scene_file,
         os.path.join(get_package_share_directory('swarm_bringup'),
                      'config', 'swarm_config.yaml'),
-    ]
+    ] + [  # launch files carry the inline node params (auction, consensus, capture, avoidance)
+        os.path.join(get_package_share_directory('swarm_bringup'), 'launch', f)
+        for f in (os.path.basename(__file__), 'launch_virtual_spacecraft.py', 'launch_virtual_target.py')]
     env_vars = [
         'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'KF_LOCALIZATION',
         'TARGET_ESTIMATOR', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX', 'ROBOT_NAME',
         'BAG_TAG', 'STRICT_CALIBRATION', 'CALIBRATE_CAMERA', 'CONN_TYPE',
-        'CAMERA_SOURCE', 'RM_DIAGNOSTICS',
+        'CAMERA_SOURCE', 'RM_DIAGNOSTICS', 'CONTACT_GPIO',
     ] + list(extra_env_vars)
     return Node(
         package='swarm_spacecraft',
@@ -1116,6 +1120,22 @@ def generate_launch_description():
         )
 
         # ld.add_action(magnet_node)
+
+
+    ##############################################################################
+    ###################### - Contact limit switch node - #########################
+    # Publishes contact_detected from the GPIO limit switches (pressed = LOW,
+    # internal pull-up). No VIRTUAL_PLANT here, so always on (see centralized).
+    for i in range(N):
+        ld.add_action(Node(
+            package="swarm_magnet",
+            executable="contact_switch_node",
+            name="contact_switch",
+            namespace=robot_names[i],
+            output="screen",
+            emulate_tty=True,
+            parameters=[{"gpio_lines": contact_gpio_lines}],
+        ))
 
 
 

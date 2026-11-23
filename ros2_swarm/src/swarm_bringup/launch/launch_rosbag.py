@@ -59,6 +59,9 @@ def generate_launch_description():
         '/run_config',
         '/readiness',
         '/ap_bids',
+        # Operator overrides (N=1 capture is manual) and the SIL scene truth.
+        '/mode_cmd',
+        '/virtual_scene/markers',
     ]
 
     for robot_name in robot_names:
@@ -86,6 +89,9 @@ def generate_launch_description():
             f'/{robot_name}/assigned_ap',
             f'/{robot_name}/assignment_locked',
             f'/{robot_name}/current_mode',
+            f'/{robot_name}/mode_cmd',
+            f'/{robot_name}/contact_detected',
+            f'/{robot_name}/ground_truth/pose',  # SIL only (fake_plant)
             f'/{robot_name}/capture_sync',
             f'/{robot_name}/consensus_debug',
             f'/{robot_name}/pointing_wrench',

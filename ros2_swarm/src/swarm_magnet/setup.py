@@ -20,7 +20,8 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            "gpio_control_node = swarm_magnet.gpio_control_node:main"
+            "gpio_control_node = swarm_magnet.gpio_control_node:main",
+            "contact_switch_node = swarm_magnet.contact_switch_node:main",
         ],
     },
 )
