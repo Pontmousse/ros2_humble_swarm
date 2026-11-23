@@ -144,7 +144,7 @@ def generate_launch_description():
         ])
 
     # ~/rosbags/swarm_20260909_185500/
-    bag_root = os.path.expanduser('~/rosbags')
+    bag_root = os.path.expanduser(os.getenv('BAG_DIR', '~/rosbags'))  # e.g. BAG_DIR=~/rosbags/sil_batch
     os.makedirs(bag_root, exist_ok=True)
 
     # The experiment tag used to be hardcoded to "boundingbox", so every bag

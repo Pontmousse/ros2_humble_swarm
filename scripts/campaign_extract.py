@@ -134,7 +134,8 @@ def config(rcs, warn):
 
 def extract(bag):
     warn, S = [], load(bag)
-    t0 = min(rows[0][0] for rows in S.values())
+    if not any(S.values()): raise SystemExit(f"{bag}: empty bag (recorder never discovered the topics)")
+    t0 =min(rows[0][0] for rows in S.values())
     rel = lambda t: None if t is None else round(t - t0, 3)
     rcs = [json.loads(rows[0][1].data) for k, rows in sorted(S.items()) if k.endswith("run_config")]
     if not rcs: raise SystemExit(f"{bag}: no run_config, cannot classify the run")
@@ -341,7 +342,8 @@ def extract(bag):
               jitter={r: float(np.median(v) - np.percentile(v, 1)) for r, v in lag.items()},
               gaps={r: int((np.diff(R[r]["kf"][:, 1]) > P["odometry_timeout"]).sum()) for r in robots},
               tf_rate=len(S.get("/tf", [])) / max(te - ts, 1e-9))
-    qc["verdict"] = "DEGRADED" if max(qc["jitter"].values()) > 0.05 or sum(qc["gaps"].values()) else "OK"
+    # SIL host starvation shows as /tf collapse (>=100 Hz/robot healthy, <=12 starved) before jitter rises
+    qc["verdict"] = "DEGRADED" if max(qc["jitter"].values()) > 0.05 or sum(qc["gaps"].values()) or (sil and qc["tf_rate"] / N < 50) else "OK"
 
     meta = dict(bag=Path(bag).name, mode="SIL" if sil else "HIL", N=N, robots=robots, config_id=cid, commit=rc.get("git", {}).get("commit", "")[:7],
                 dirty=rc.get("git", {}).get("dirty"), source_launch=rc.get("source_launch"), trigger=trigger, params_source=psrc,

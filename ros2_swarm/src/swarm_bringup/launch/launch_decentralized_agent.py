@@ -195,7 +195,7 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
         'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'KF_LOCALIZATION',
         'TARGET_ESTIMATOR', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX', 'ROBOT_NAME',
         'BAG_TAG', 'STRICT_CALIBRATION', 'CALIBRATE_CAMERA', 'CONN_TYPE',
-        'CAMERA_SOURCE', 'RM_DIAGNOSTICS', 'CONTACT_GPIO',
+        'CAMERA_SOURCE', 'RM_DIAGNOSTICS', 'CONTACT_GPIO', 'SWARM_BROADCAST_ADDR', 'SWARM_COMMS_PORT', 'GUIDANCE_VIZ',
     ] + list(extra_env_vars)
     return Node(
         package='swarm_spacecraft',
@@ -517,6 +517,7 @@ def generate_launch_description():
     # the route table can pick usb0, where only the RoboMaster body listens.
     comms_broadcast_address = os.getenv("SWARM_BROADCAST_ADDR", "192.168.50.255")
     comms_bind_device = os.getenv("SWARM_BROADCAST_IFACE", "")
+    comms_port = int(os.getenv("SWARM_COMMS_PORT", "9870"))  # SIL batch uses its own port so lab robots stay unheard
 
     for i in range(N):
         robot_name = robot_names[i]
@@ -535,6 +536,7 @@ def generate_launch_description():
                         "robot_id": beacon_addresses[i],
                         "broadcast_address": comms_broadcast_address,
                         "bind_device": comms_bind_device,
+                        "port": comms_port,
                         "broadcast_rate": 10.0,
                         "receive_rate": 50.0,
                         "stale_timeout": 0.5,
@@ -1207,7 +1209,7 @@ def generate_launch_description():
                     "launch_virtual_spacecraft.py"
                 )
             ),
-        launch_arguments={"enable_guidance_visualization": "true"}.items(),
+        launch_arguments={"enable_guidance_visualization": os.getenv("GUIDANCE_VIZ", "true")}.items(),  # GUIDANCE_VIZ=false: headless batch
         )
 
         ld.add_action(virtual_spacecraft_launch)
