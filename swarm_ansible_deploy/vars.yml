@@ -1,4 +1,4 @@
-swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.5.0"
+swarm_image: "elghaliasri/ros2-humble-swarm:robot-arm64-v9.5.2"
 swarm_image_repo: "elghaliasri/ros2-humble-swarm"
 
 # Container names used by older revisions of this playbook. Removed on deploy so
@@ -12,7 +12,7 @@ container_config_dir: /ros2_ws/src/swarm_bringup/config
 swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
 
-camera_source: "robomaster"
+camera_source: "usb"
 usb_cam_device: "/dev/video1"
 
 # COM -> GND, NO -> GPIO; per-robot override: contact_gpio in swarm_config.yaml. GND => PIN 30 | GPIO 5 => PIN 29
@@ -27,6 +27,7 @@ direct_cmd_vel: "false"
 
 kf_localization: "true"
 target_estimator: "true"
+guidance_viz: "false"   # no RViz markers on the Pi; run launch_dev_viz.py on the dev PC
 
 
 conn_type: "rndis"

@@ -23,6 +23,12 @@ class H264VideoProcessor(Node):
         hz = float(self.get_parameter('publish_max_hz').value)
         self.min_interval = 1.0 / hz if hz > 0 else 0.0
         self.last_publish = 0.0
+        # Low-rate copy of the decoded frame on camera/image_snapshot for the rosbag
+        # (a lone H.264 packet is undecodable without its keyframe). 0 disables.
+        self.declare_parameter('snapshot_period', 10.0)
+        self.snapshot_period = float(self.get_parameter('snapshot_period').value)
+        self.last_snapshot = 0.0
+        self.snap_pub = self.create_publisher(Image, 'camera/image_snapshot', 1)
         self.decoder = av.codec.CodecContext.create('h264', 'r')
         self.bridge = CvBridge()
         self.pub = self.create_publisher(Image, 'camera/image_color', QoSProfile(
@@ -46,6 +52,9 @@ class H264VideoProcessor(Node):
                     out = self.bridge.cv2_to_imgmsg(frame.to_ndarray(format='gray'), encoding='mono8')
                     out.header = msg.header
                     self.pub.publish(out)
+                    if self.snapshot_period > 0.0 and t - self.last_snapshot >= self.snapshot_period:
+                        self.last_snapshot = t
+                        self.snap_pub.publish(out)
         except av.FFmpegError as e:
             self.get_logger().warn(f'H264 decode error: {e}', throttle_duration_sec=5.0)
 

@@ -101,6 +101,9 @@ def generate_launch_description():
             f'/{robot_name}/landmarks',
             f'/{robot_name}/targets_unf',
             f'/{robot_name}/targets',
+            # Camera frame every ~10 s (ext_camera / video_processor snapshot_period),
+            # so "was the camera seeing anything?" is answerable from the bag.
+            f'/{robot_name}/camera/image_snapshot',
 
             # Landmark/target estimator: map-frame memory clouds (not
             # reconstructable offline without the estimator's internal state; the

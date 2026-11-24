@@ -31,6 +31,8 @@ kf_on = os.environ.get("KF_LOCALIZATION", "").lower() in ("1", "true", "yes", "o
 # perception-starvation yaw limit cycle). Same landmarks/targets output contract
 # and QoS as aruco_filter, so controllers are untouched. Default off.
 estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
+# GUIDANCE_VIZ=false (Pi, headless batch): no RViz markers; the dev PC draws them (launch_dev_viz.py).
+guidance_viz = os.environ.get("GUIDANCE_VIZ", "true").lower() in ("1", "true", "yes", "on")
 
 def _split_env(name, cast=str):
     val = os.getenv(name)
@@ -870,6 +872,7 @@ def generate_launch_description():
                         "output_fov_gate": False,
                         "camera_yaw_offset_deg": 0.0,
                         "global_frame_id": "swarm_map",
+                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
                     }
                 ]
             )
@@ -899,6 +902,7 @@ def generate_launch_description():
                         "output_fov_gate": False,
                         "camera_yaw_offset_deg": 0.0,
                         "global_frame_id": "swarm_map",
+                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
                     }
                 ]
             )

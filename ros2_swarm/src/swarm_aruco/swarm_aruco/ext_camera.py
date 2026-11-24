@@ -63,6 +63,9 @@ class ExtCamera(Node):
         self.declare_parameter("frame_id", "camera_link")
         self.declare_parameter("qos_depth", 1)
         self.declare_parameter("qos_reliability", "BEST_EFFORT")
+        # Low-rate copy of the frame on camera/image_snapshot for the rosbag
+        # (full stream is too heavy to record). 0 disables.
+        self.declare_parameter("snapshot_period", 10.0)
 
         self.source = str(self.get_parameter("source").value).lower()
         self.device = str(self.get_parameter("device").value)
@@ -90,6 +93,9 @@ class ExtCamera(Node):
 
         self.bridge = CvBridge()
         self.pub = self.create_publisher(Image, "camera/image_color", qos)
+        self.snapshot_period = float(self.get_parameter("snapshot_period").value)
+        self.last_snapshot = 0.0
+        self.snap_pub = self.create_publisher(Image, "camera/image_snapshot", 1)
 
         # Backend handles. Only one is ever opened.
         self.cap = None     # cv2.VideoCapture (usb)
@@ -262,6 +268,10 @@ class ExtCamera(Node):
         msg.header.stamp = now.to_msg()
         msg.header.frame_id = self.frame_id
         self.pub.publish(msg)
+        t = now.nanoseconds * 1e-9
+        if self.snapshot_period > 0.0 and t - self.last_snapshot >= self.snapshot_period:
+            self.last_snapshot = t
+            self.snap_pub.publish(msg)
 
     def destroy_node(self):
         if self.cap is not None:

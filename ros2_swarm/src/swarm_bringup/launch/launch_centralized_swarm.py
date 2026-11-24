@@ -61,6 +61,8 @@ if virtual_target_on:
 # virtual_scene into raw-observation mode (noisy/dropped/starved *_unf streams
 # with ground-truth IDs) so the estimator is tested before hardware.
 estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
+# GUIDANCE_VIZ=false (Pi, headless batch): no RViz markers; the dev PC draws them (launch_dev_viz.py).
+guidance_viz = os.environ.get("GUIDANCE_VIZ", "true").lower() in ("1", "true", "yes", "on")
 if estimator_on:
     print("TARGET_ESTIMATOR=1 -- landmark_estimator replaces aruco_filter.")
 
@@ -896,6 +898,7 @@ def generate_launch_description():
                         "output_fov_gate": False,
                         "camera_yaw_offset_deg": 0.0,
                         "global_frame_id": "swarm_map",
+                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
                     }
                 ]
             )
@@ -925,6 +928,7 @@ def generate_launch_description():
                         "output_fov_gate": False,
                         "camera_yaw_offset_deg": 0.0,
                         "global_frame_id": "swarm_map",
+                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
                     }
                 ]
             )
