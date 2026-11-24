@@ -33,7 +33,7 @@ class ArucoMarker():
     # of image width/height.
     PRINCIPAL_POINT_TOLERANCE = 0.15
 
-    def __init__(self, sn, aruco_type="DICT_5X5_100", aruco_marker_side_length = 2.5, scale = (1.5, 0.80)):
+    def __init__(self, sn, aruco_type="DICT_5X5_100", aruco_marker_side_length = 2.5, scale = (1.5, 0.80), max_range = 0.0):
         '''
             2.5 cm - > DICT_5X5_100  - >  scale = (1.5, 0.80)
             4.3 cm - > DICT_6X6_250  - >  scale = (1.0, 1.0)
@@ -88,6 +88,7 @@ class ArucoMarker():
         self.ids = None   # ArUco IDs parallel to tvecs/rvecs (identity for data association)
         self.scalex = scale[0]
         self.scaley = scale[1]
+        self.max_range = max_range  # drop poses beyond this (marker-side units, cm; 0 = off)
 
         self.CameraMatrix = []
         self.DistortionMatrix = []
@@ -473,6 +474,11 @@ class ArucoMarker():
                 self.rvecs[i,1] = rvec[0][1]
                 self.rvecs[i,2] = rvec[0][2]
                 # print(f"Marker {ids[i]}: Position = ({self.tvecs[i][0]:.2f}, {self.tvecs[i][1]:.2f}, {self.tvecs[i][2]:.2f}) meters")
+
+            r = np.hypot(self.tvecs[:, 0], self.tvecs[:, 1])
+            keep = np.isfinite(r) & ((r <= self.max_range) if self.max_range > 0 else True)
+            self.tvecs, self.rvecs, self.ids = self.tvecs[keep], self.rvecs[keep], self.ids[keep]
+            self.marker_num = len(self.ids)
         else:
             self.tvecs = np.zeros([0,2])
             self.rvecs = np.zeros([0,3])

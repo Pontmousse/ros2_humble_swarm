@@ -35,6 +35,10 @@ class ArucoDetectorNode(Node):
         self.aruco_size = self.get_parameter("aruco_size").value
         self.serial_number = self.get_parameter("serial_number").value
         self.aruco_scale = self.get_parameter("aruco_scale").value
+        # Reject detections beyond this range (m, 0 = off): solvePnP occasionally
+        # returns km-scale poses that permanently poison landmark_estimator's mean.
+        self.declare_parameter("max_range", 0.0)
+        self.max_range = float(self.get_parameter("max_range").value)
 
         # # # # # # # # # # # # # # # # # # # # # # # # # # # 
         # For QoS
@@ -91,7 +95,8 @@ class ArucoDetectorNode(Node):
         self.aruco = ArucoMarker(sn = self.serial_number,
                                  aruco_type = self.aruco_type,
                                  aruco_marker_side_length = self.aruco_size,
-                                 scale = self.aruco_scale)
+                                 scale = self.aruco_scale,
+                                 max_range = self.max_range * 100.0)  # m -> cm
 
         # For the calibration process
         self.declare_parameter("calibrate_camera", 0)

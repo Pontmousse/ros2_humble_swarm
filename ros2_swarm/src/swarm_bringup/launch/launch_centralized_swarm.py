@@ -137,7 +137,7 @@ def load_swarm_config():
 
     # initial angles for orientation propagation. should be in degree,
     # although it will be converted to radians
-    init_orientations = [180.0, 180.0, 0.0, 0.0, 0.0, 0.0]
+    init_orientations = [180.0, 180.0, 0.0, 0.0, 0.0, 180.0]
 
 
 
@@ -749,6 +749,7 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_4X4_100",
                     "aruco_size": 3.56,
+                    "max_range": 2.5,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
                     "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": calibrate_camera,
                     "strict_calibration": strict_calibration,
@@ -816,6 +817,7 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_50",
                     "aruco_size": 5.76,
+                    "max_range": 4.0,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
                     # Deliberately NOT wired to CALIBRATE_CAMERA: this node
                     # shares the camera and the photo output folder with
                     # landmark_detector, and two capturers overwrite each

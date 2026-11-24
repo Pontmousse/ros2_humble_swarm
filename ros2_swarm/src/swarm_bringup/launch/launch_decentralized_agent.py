@@ -718,6 +718,7 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_4X4_100",
                     "aruco_size": 3.56,
+                    "max_range": 2.5,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
                     "aruco_scale": (1.0, 1.0),
                     "calibrate_camera": 0,
                     "detect_max_hz": 15.0,  # see target_detector note
@@ -788,6 +789,7 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_50",
                     "aruco_size": 5.76,
+                    "max_range": 4.0,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
                     "aruco_scale": (1.15, 0.8),
                     "calibrate_camera": 0,
                     # Cap ArUco detection at 5 Hz. solvePnP-per-frame was the #1
