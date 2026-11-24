@@ -12,7 +12,7 @@ container_config_dir: /ros2_ws/src/swarm_bringup/config
 swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
 
-camera_source: "usb"
+camera_source: "robomaster"
 usb_cam_device: "/dev/video1"
 
 # COM -> GND, NO -> GPIO; per-robot override: contact_gpio in swarm_config.yaml. GND => PIN 30 | GPIO 5 => PIN 29

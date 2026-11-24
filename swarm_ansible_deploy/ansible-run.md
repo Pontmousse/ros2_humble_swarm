@@ -131,6 +131,22 @@ ansible-playbook -i inventory.ini deploy.yml --tags prune
 
 
 ############################################################
+# 12) STOP / START / RESTART THE SWARM CONTAINER
+############################################################
+
+ansible-playbook -i inventory.ini container_ctl.yml -K -e cmd=stop
+ansible-playbook -i inventory.ini container_ctl.yml -K -e cmd=start
+ansible-playbook -i inventory.ini container_ctl.yml -K -e cmd=restart
+# Acts on every uncommented robot in inventory.ini; add --limit robot6 for one
+# cmd defaults to restart
+
+# Quick: reuses the existing container and the config already on the Pi.
+# After editing swarm_config.yaml / vars.yml use deploy-config.yml instead.
+# A stopped container comes back on Pi reboot (restart_policy: always)
+
+
+
+############################################################
 # THAT’S IT.
 # These are the only commands you need for:
 # - SSH setup

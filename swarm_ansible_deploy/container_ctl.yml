@@ -1,0 +1,22 @@
+---
+# Stop / start / restart the existing swarm container as-is (no config copy, no
+# recreate). Usage: -e cmd=stop|start|restart (default restart).
+# Use deploy-config.yml after editing swarm_config.yaml / vars.yml.
+- name: Control RoboMaster Swarm Node
+  hosts: robots
+  become: yes
+  gather_facts: false
+  strategy: free
+  vars:
+    cmd: restart
+
+  tasks:
+    - ansible.builtin.assert:
+        that: cmd in ['stop', 'start', 'restart']
+        fail_msg: "cmd must be stop, start or restart (got '{{ cmd }}')"
+
+    - name: "{{ cmd | capitalize }} swarm container"
+      community.docker.docker_container:
+        name: "{{ inventory_hostname }}"
+        state: "{{ 'stopped' if cmd == 'stop' else 'started' }}"
+        restart: "{{ cmd == 'restart' }}"

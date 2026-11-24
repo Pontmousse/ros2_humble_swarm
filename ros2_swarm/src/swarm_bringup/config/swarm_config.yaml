@@ -42,7 +42,7 @@ robots:
   - name: RM6
     beacon: 6
     serial: 159CKC50070EVP
-    init_orientation: 0.0
+    init_orientation: 180.0
     # ip: 192.168.50.156
     # marvelmind_port: /dev/ttyACM0
     # contact_gpio: "5"   # limit-switch BCM GPIO line(s), comma-separated
