@@ -3,6 +3,7 @@ from launch.actions import ExecuteProcess, TimerAction
 from datetime import datetime
 
 import os
+import tempfile
 
 # All robots are visible to the central station over DDS (same domain,
 # stable LAN), so one recorder here captures every namespaced topic
@@ -158,6 +159,21 @@ def generate_launch_description():
     bag_name = datetime.now().strftime(f'swarm_{tag}_{N}{"agent" if N == 1 else "agents"}_%Y%m%d_%H%M%S')
     bag_path = os.path.join(bag_root, bag_name)
 
+    # Subscribe BEST_EFFORT to the high-rate streams: rosbag2 otherwise matches the
+    # Pis' RELIABLE publishers, and every lost WiFi packet becomes a retransmit on a
+    # starved Pi (RM6 localization fell 9 -> 1.2 Hz once recording started). Latched,
+    # event and snapshot topics stay reliable (a ~300 KB image never survives lossy
+    # best-effort). Losing a stream sample costs a bag gap, never the robot. BAG_RELIABLE=1 opts out.
+    keep_reliable = ('/tf_static', '/run_config', '/capture_sync', '/camera/image_snapshot', '/readiness',
+                     '/ap_bids', '/mode_cmd', '/current_mode', '/assigned_ap', '/assignment_locked')
+    qos_args = []
+    if os.getenv('BAG_RELIABLE', '').lower() not in ('1', 'true', 'yes', 'on'):
+        qos_file = os.path.join(tempfile.gettempdir(), f'{bag_name}_qos.yaml')
+        with open(qos_file, 'w') as fh:
+            fh.writelines(f'{t}:\n  history: keep_last\n  depth: 100\n  reliability: best_effort\n'
+                          for t in bag_topics if not t.endswith(keep_reliable))
+        qos_args = ['--qos-profile-overrides-path', qos_file]
+
     bag_record = ExecuteProcess(
         cmd=[
             'ros2',
@@ -165,6 +181,7 @@ def generate_launch_description():
             'record',
             '-s', 'sqlite3',
             '-o', bag_path,
+            *qos_args,
             *bag_topics,
         ],
         output='screen',

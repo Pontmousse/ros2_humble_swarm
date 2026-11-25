@@ -26,6 +26,9 @@
       KF_LOCALIZATION:    "{{ kf_localization }}"
       TARGET_ESTIMATOR:   "{{ target_estimator }}"
       GUIDANCE_VIZ:       "{{ guidance_viz }}"
+      OMP_NUM_THREADS:        "{{ lib_threads }}"
+      OPENBLAS_NUM_THREADS:   "{{ lib_threads }}"
+      OPENCV_FOR_THREADS_NUM: "{{ lib_threads }}"
       # Set explicitly, never left to an implicit default. The launch file's
       # fallback changed between image versions -- v9.1.5 passed no conn_type
       # to s1.launch at all, so the driver's own "sta" default won, while HEAD

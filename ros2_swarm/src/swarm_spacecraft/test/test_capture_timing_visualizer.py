@@ -68,7 +68,7 @@ def test_overlay_is_optional_and_publishes_without_odometry():
     assert table.type == Marker.TEXT_VIEW_FACING
     assert table.header.frame_id == 'swarm_map'
     assert (table.pose.position.x, table.pose.position.y) == (-4.0, 1.71)
-    assert 'ROS now: 100.400s\nWaiting for readiness' == table.text
+    assert 'ROS_now=100.400s\nWaiting_for_readiness' == table.text
     assert len({(m.ns, m.id) for m in markers}) == len(markers)
 
 
@@ -79,15 +79,15 @@ def test_sorted_ids_deadlines_and_countdowns_use_the_same_clock():
     proposal(node, 2, 102.0, ready=True, armed=True)
     proposal(node, 4, 102.0, ready=True)
     rows = text(node).splitlines()
-    assert rows[0] == 'ROS now: 100.400s'
-    assert rows[1] == 'ID2: action=102.000 left=+1.600s ARMED'
-    assert rows[2] == 'ID4: action=102.000 left=+1.600s READY'
-    assert rows[3] == 'ID7: action=103.000 left=+2.600s READY'
-    assert rows[4] == 'ID13: action=-- left=-- WAIT'
+    assert rows[0] == 'ROS_now=100.400s'
+    assert rows[1] == 'ID2:action=102.000,left=+1.600s,ARMED'
+    assert rows[2] == 'ID4:action=102.000,left=+1.600s,READY'
+    assert rows[3] == 'ID7:action=103.000,left=+2.600s,READY'
+    assert rows[4] == 'ID13:action=--,left=--,WAIT'
     # A continuing readiness stream can advertise a deadline already in the past.
     node.now_ns = 102_100_000_000
     proposal(node, 2, 102.0, ready=True, armed=True)
-    assert 'left=-0.100s ARMED' in text(node)
+    assert 'left=-0.100s,ARMED' in text(node)
     assert 'FIRED' not in text(node)
 
 
@@ -99,9 +99,9 @@ def test_staleness_and_paused_ros_time():
     node.now_ns += 999_999_999
     assert 'STALE' not in text(node)
     node.now_ns += 1
-    assert text(node).splitlines()[1] == 'ID2: action=-- left=-- STALE'
+    assert text(node).splitlines()[1] == 'ID2:action=--,left=--,STALE'
     proposal(node, 2)
-    assert text(node).splitlines()[1] == 'ID2: action=-- left=-- WAIT'
+    assert text(node).splitlines()[1] == 'ID2:action=--,left=--,WAIT'
 
 
 def test_launch_enables_only_the_first_selected_visualizer(tmp_path):

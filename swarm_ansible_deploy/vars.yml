@@ -11,8 +11,12 @@ container_config_dir: /ros2_ws/src/swarm_bringup/config
 
 swarm_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/swarm_config.yaml"
 virtual_spacecraft_config_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/config/virtual_spacecraft.yaml"
+# Bind-mounted over the image's copy so launch-param changes deploy with
+# deploy-config.yml, no image rebuild. Must stay compatible with the image's nodes.
+launch_file_src: "{{ playbook_dir }}/../ros2_swarm/src/swarm_bringup/launch/launch_decentralized_agent.py"
+container_launch_dir: /ros2_ws/src/swarm_bringup/launch
 
-camera_source: "usb"
+camera_source: "robomaster"
 usb_cam_device: "/dev/video1"
 
 # COM -> GND, NO -> GPIO; per-robot override: contact_gpio in swarm_config.yaml. GND => PIN 30 | GPIO 5 => PIN 29
@@ -28,6 +32,9 @@ direct_cmd_vel: "false"
 kf_localization: "true"
 target_estimator: "true"
 guidance_viz: "false"   # no RViz markers on the Pi; run launch_dev_viz.py on the dev PC
+# Per-process thread pools (OpenBLAS/OpenMP/OpenCV). ~25 processes on 4 cores; the
+# math is 2x2..4x4 matrices and one 640x480 detectMarkers, so 1 thread each.
+lib_threads: "1"
 
 
 conn_type: "rndis"

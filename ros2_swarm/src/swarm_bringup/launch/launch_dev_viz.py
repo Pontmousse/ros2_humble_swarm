@@ -5,7 +5,7 @@ spacecraft_visualizer and landmark_estimator's memory markers there. This launch
 rebuilds both on the dev PC from the topics the Pis already publish:
   * spacecraft_visualizer per robot (pure subscriber, same params as on the Pi).
   * landmark/target memory: a viz-only copy of landmark_estimator fed the same
-    *_unf + pose streams, so it draws the same spheres/normals/"id (n=count)"
+    *_unf + pose streams, so it draws the same spheres/normals/"id(n=count)"
     labels on the same topics. n counts the frames that reached the PC.
 
 Robots: ROBOT_NAME / ROBOT_IDX (comma list), else every robot in swarm_config.yaml.

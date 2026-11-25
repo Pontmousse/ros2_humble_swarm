@@ -316,7 +316,8 @@ class LandmarkEstimator(Node):
             label.pose.orientation.w = 1.0
             label.scale.z = 0.06
             label.color = ColorRGBA(r=1.0, g=1.0, b=1.0, a=0.9)
-            label.text = f"{est.id} (n={est.count})"
+            # No spaces: RViz2 Humble draws a space ~0.6 m wide regardless of scale.z.
+            label.text = f"{est.id}(n={est.count})"
             arr.markers.append(label)
 
         return arr

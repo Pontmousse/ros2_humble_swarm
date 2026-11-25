@@ -142,7 +142,7 @@ def qos_parameters(depth=5, reliability='BEST_EFFORT', history='KEEP_LAST'):
     # }
 
     qos_params = {
-        'qos_depth': 10,
+        'qos_depth': depth,  # honoured (was forced to 10): latest-only stops a starved node chewing a stale backlog
         'qos_reliability': 'RELIABLE',
         'qos_history': 'KEEP_LAST'
     }
@@ -476,7 +476,7 @@ def generate_launch_description():
                 "robot_names": robot_names,
                 "beacon_addresses": beacon_addresses,
                 "port_address": marvelmind_port,
-                **qos_parameters(depth=1, reliability='BEST_EFFORT')
+                **qos_parameters(depth=10, reliability='BEST_EFFORT')  # /mm_all_* interleaves beacons; depth 1 drops fixes
             }
         ]
     )
@@ -506,7 +506,7 @@ def generate_launch_description():
                     "beacon_address": beacon_address,
                     "timer_frequency": timer_frequency,
                     "init_period": init_period,
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
+                    **qos_parameters(depth=10, reliability='BEST_EFFORT')  # /mm_all_* interleaves beacons; depth 1 drops fixes
                 }
             ]
         )
@@ -540,7 +540,7 @@ def generate_launch_description():
                         "bind_device": comms_bind_device,
                         "port": comms_port,
                         "broadcast_rate": 10.0,
-                        "receive_rate": 50.0,
+                        "receive_rate": 20.0,  # = avoidance rate; drains all queued packets per tick
                         "stale_timeout": 0.5,
                         "drop_timeout": 5.0,
                     }
@@ -549,27 +549,8 @@ def generate_launch_description():
 
         ld.add_action(comms)
 
-    ##############################################################################
-    ##############################################################################
-    for i in range(N):
-        robot_name = robot_names[i]
-
-        mm_filtered = Node(
-        package="swarm_filter",
-        executable="mm_filtered",
-        name="mm_filtered",
-        namespace=robot_name,
-        output="screen",
-        emulate_tty=True,
-        parameters=[
-                {
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "alpha": alpha,  # Filter coefficient
-                }
-            ]
-        )
-
-        ld.add_action(mm_filtered)
+    # mm_filtered (mm_pos_unf -> mm_pos) removed: only the legacy kalman_filter /
+    # pose_publisher read mm_pos, and pose_kf/pose_publisher use mm_pos_unf.
 
     ##############################################################################
     ##############################################################################
@@ -716,7 +697,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
                 {
-                    "timer_frequency": 0.05,
+                    "timer_frequency": 0.1,  # republish at camera rate; consumers dedupe by stamp
                     "serial_number": serial_number,
                     "aruco_type": "DICT_4X4_100",
                     "aruco_size": 3.56,
@@ -787,7 +768,7 @@ def generate_launch_description():
         emulate_tty=True,
         parameters=[
                 {
-                    "timer_frequency": 0.05,
+                    "timer_frequency": 0.1,  # republish at camera rate; consumers dedupe by stamp
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_50",
                     "aruco_size": 5.76,
@@ -798,7 +779,7 @@ def generate_launch_description():
                     # CPU consumer (~116%) on the Pi; dropping frames before
                     # conversion/detection frees ~a core. publish_markers keeps
                     # republishing the last markers, so downstream rate is kept.
-                    "detect_max_hz": 15.0,
+                    "detect_max_hz": 5.0,
                     "use_h264": False,  # read camera/image_color from video_processor / ext_camera
                     **qos_parameters(depth=1, reliability='BEST_EFFORT')
                 }

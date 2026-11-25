@@ -20,3 +20,8 @@
         name: "{{ inventory_hostname }}"
         state: "{{ 'stopped' if cmd == 'stop' else 'started' }}"
         restart: "{{ cmd == 'restart' }}"
+
+
+# command to stop: ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/container_ctl.yml -e cmd=stop
+# command to start: ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/container_ctl.yml -e cmd=start
+# command to restart: ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/container_ctl.yml -e cmd=restart

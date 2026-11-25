@@ -1041,9 +1041,10 @@ class SpacecraftVisualizerNode(Node):
         marker.color.r = marker.color.g = marker.color.b = marker.color.a = 1.0
         marker.lifetime.sec = 1
         now_sec = now.nanoseconds * 1e-9
-        rows = [f"ROS now: {now_sec:.3f}s"]
+        # No spaces: RViz2 Humble draws a space ~0.6 m wide regardless of scale.z.
+        rows = [f"ROS_now={now_sec:.3f}s"]
         if not self.capture_readiness:
-            rows.append("Waiting for readiness")
+            rows.append("Waiting_for_readiness")
         for rid, (message, received) in sorted(self.capture_readiness.items()):
             age = now.nanoseconds - received
             state = "ARMED" if message.armed else "READY" if message.ready else "WAIT"
@@ -1053,7 +1054,7 @@ class SpacecraftVisualizerNode(Node):
             elif math.isfinite(message.action_time) and message.action_time > 0.0:
                 action = f"{message.action_time:.3f}"
                 left = f"{message.action_time - now_sec:+.3f}s"
-            rows.append(f"ID{rid}: action={action} left={left} {state}")
+            rows.append(f"ID{rid}:action={action},left={left},{state}")
         # RViz centres multiline text; keep its top inside the box as rows grow.
         marker.pose.position.y = self.timing_table_y - len(rows) * marker.scale.z / 2.0
         marker.text = "\n".join(rows)
@@ -1070,12 +1071,13 @@ class SpacecraftVisualizerNode(Node):
             ("Encapsulation", self.MODE_COLORS["encapsulation"]),
             ("Capture", self.MODE_COLORS["capture"]),
             ("Dock", self.MODE_COLORS["dock"]),
-            ("Assigned line", (1.0, 1.0, 1.0)),
-            ("Target obs.", self.RAW_TARGET_COLOR),
-            ("Target est.", self.TARGET_COLOR),
-            ("Landmark obs.", self.RAW_LANDMARK_COLOR),
-            ("Landmark est.", self.LANDMARK_COLOR),
-            ("Real robot", (0.1, 1.0, 0.9)),
+            # Hyphens, not spaces (see capture_timing_marker).
+            ("Assigned-line", (1.0, 1.0, 1.0)),
+            ("Target-obs.", self.RAW_TARGET_COLOR),
+            ("Target-est.", self.TARGET_COLOR),
+            ("Landmark-obs.", self.RAW_LANDMARK_COLOR),
+            ("Landmark-est.", self.LANDMARK_COLOR),
+            ("Real-robot", (0.1, 1.0, 0.9)),
             ("Beacon", (0.1, 0.8, 1.0)),
         )
         swatch_size = 0.09
