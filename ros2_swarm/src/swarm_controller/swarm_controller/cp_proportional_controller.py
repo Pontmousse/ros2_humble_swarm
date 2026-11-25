@@ -37,8 +37,8 @@ class ControllerNode(Node):
     radial equilibrium sits at contact_distance from the target instead of
     buffer_radius. Adds a DOCK freeze (toggle_dock) and an optional direct
     cmd_vel output for real-hardware bench testing without the wrench sum.
-    Contact itself is NOT detected here -- see fake_plant.py / the future
-    hardware end-of-course node, which publish contact_detected independently
+    Contact itself is NOT detected here -- see geometric_contact.py / the
+    hardware contact_switch_node, which publish contact_detected independently
     of this controller. During encapsulation, the assigned AP's shared tangential
     law also supplies a separately capped preparation wrench, without approach or torque.
     """

@@ -12,6 +12,7 @@
   ansible.builtin.set_fact:
     swarm_env:
       ROBOT_NAME:         "{{ robot_cfg.name }}"
+      LAUNCH_FILE:        "{{ launch_file }}"
       BEACON_ADDR:        "{{ robot_cfg.beacon | string }}"
       ROBOT_SERIAL:       "{{ robot_cfg.serial }}"
       INITIAL_ORIENT:     "{{ robot_cfg.init_orientation | string }}"

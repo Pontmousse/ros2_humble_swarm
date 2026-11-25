@@ -13,8 +13,6 @@ from launch.substitutions import LaunchConfiguration
 
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
-# BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
-contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(",") if x.strip()]
 
 # STRICT_CALIBRATION=0 downgrades the aruco intrinsics sanity check from a hard
 # failure to a warning, so the swarm can be brought up on a known-bad
@@ -94,7 +92,7 @@ if kf_on:
              else " (fed by Marvelmind + driver odom/imu)."))
 
 # Single source of truth for the CAPTURE approach-law equilibrium --
-# see cp_proportional_controller.py / fake_plant.py docstrings.
+# see cp_proportional_controller.py / geometric_contact.py docstrings.
 CONTACT_DISTANCE = 0.20
 # The approach law parks the robot exactly at CONTACT_DISTANCE, so the contact
 # gate must sit slightly beyond it or a settled robot reads a hair outside and
@@ -683,9 +681,6 @@ def generate_launch_description():
                             "max_yaw_accel": 50.0,
                             "max_speed": 50.0,
                             "max_yaw_rate": 50.0,
-                            "contact_distance": CONTACT_DISTANCE + CONTACT_MARGIN,
-                            "contact_heading_tolerance": 0.26,
-                            "contact_debounce_frames": 3,
                             # Under KF_LOCALIZATION, emit hardware-like noisy raw
                             # sensors for pose_kf and stop publishing the fused
                             # pose/localization (the KF owns them).
@@ -1126,19 +1121,26 @@ def generate_launch_description():
 
 
     ##############################################################################
-    ###################### - Contact limit switch node - #########################
-    # Publishes contact_detected from the GPIO limit switches (pressed = LOW,
-    # internal pull-up). Skipped under VIRTUAL_PLANT, where fake_plant owns it.
-    for i in range(N):
-        if not virtual_plant_on:
+    ######################## - Contact detection nodes - #########################
+    # The limit switch needs Pi GPIO: run launch_contact_switch.py on the Pi.
+    # A virtual target can't press the lever, so contact is geometric here;
+    # mode_supervisor ORs both sources, so they can run together.
+    if virtual_target_on or virtual_plant_on:
+        for i in range(N):
             ld.add_action(Node(
-                package="swarm_magnet",
-                executable="contact_switch_node",
-                name="contact_switch",
+                package="swarm_spacecraft",
+                executable="geometric_contact",
+                name="geometric_contact",
                 namespace=robot_names[i],
                 output="screen",
                 emulate_tty=True,
-                parameters=[{"gpio_lines": contact_gpio_lines}],
+                parameters=[{
+                    "contact_distance": CONTACT_DISTANCE + CONTACT_MARGIN,
+                    "contact_heading_tolerance": 0.26,
+                    "contact_debounce_frames": 3,
+                    "timer_frequency": 0.02,
+                    **qos_parameters(depth=10, reliability='RELIABLE')
+                }],
             ))
 
 

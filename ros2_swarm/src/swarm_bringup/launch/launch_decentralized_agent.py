@@ -1010,7 +1010,7 @@ def generate_launch_description():
                         "feedforward_gain": 1.0,
                         # Contact equilibrium, metres from the robot centre --
                         # half the 0.40 m RoboMaster length, matching the
-                        # contact_distance used by fake_plant.py's geometric
+                        # contact_distance used by geometric_contact.py's
                         # gate on the centralized/virtual side.
                         "contact_distance": 0.20,
                         # Near-target speed envelope: inside capture_slow_radius

@@ -39,10 +39,11 @@ avoidance never depends on which mode is active. Calls are fire-and-forget and
 only warn if a server is briefly absent at startup.
 
 DOCK is entered from CAPTURE once `contact_detected` (std_msgs/Bool) goes
-True. That topic is a PLANT-layer signal -- published by fake_plant.py under
-VIRTUAL_PLANT, or by a future physical end-of-course-sensor node on real
-hardware -- so this supervisor and cp_controller never need to know which one
-is active. DOCK is terminal for now: only a mode_cmd override leaves it.
+True. Several sources may publish it at once -- geometric_contact.py (virtual
+target or plant) and the Pi's contact_switch_node (real lever) -- so contact is
+an OR latch: any True received in CAPTURE latches it, a False never clears it,
+and every mode change resets it. DOCK is terminal for now: only a mode_cmd
+override leaves it.
 With disengage_wheels_on_dock (real hardware), entering DOCK also calls the
 driver's `engage_wheels` false, and leaving it calls it true.
 """
@@ -169,10 +170,8 @@ class ModeSupervisor(Node):
         self.landmarks = DetectionGate(detect_frames, miss_tolerance)
         self.targets = DetectionGate(detect_frames, miss_tolerance)
 
-        # Plant-layer contact signal (see module docstring). Plain bool, not
-        # a DetectionGate -- the debouncing already happens at the source
-        # (fake_plant.py / the future hardware node), and DOCK's own
-        # stickiness in decide() is what makes the transition terminal.
+        # Contact OR latch (see module docstring). Debouncing happens at each
+        # source; set only by a True in CAPTURE, cleared on every mode change.
         self.contact = False
 
         # Manual / consensus override. None -> detection policy is in charge.
@@ -248,7 +247,8 @@ class ModeSupervisor(Node):
         self.targets.update(len(msg.markers) > 0, self.get_clock().now())
 
     def on_contact(self, msg: Bool):
-        self.contact = bool(msg.data)
+        if msg.data and self.mode == Mode.CAPTURE:
+            self.contact = True
 
     def on_capture_sync(self, msg: Bool):
         self.capture_cleared = bool(msg.data)
@@ -344,6 +344,7 @@ class ModeSupervisor(Node):
         self.call(self.mode_clients[old], False)
         self.call(self.mode_clients[new], True)
         self.mode = new
+        self.contact = False
         self.mode_pub.publish(String(data=self.mode.value))
 
     def call(self, client, state: bool):

@@ -2,8 +2,8 @@
 """
 Publish `contact_detected` (std_msgs/Bool) from physical limit switches.
 
-Hardware twin of fake_plant's geometric contact check: same topic, same type,
-so mode_supervisor's CAPTURE -> DOCK transition needs no change.
+Hardware twin of geometric_contact.py: same topic, same type; mode_supervisor
+ORs the two, so both may run at once.
 
 Wiring per switch (e.g. V-153-1C25 SPDT): COM -> GND, NO -> GPIO, NC open.
 The internal pull-up holds the line HIGH when released; pressing shorts it to

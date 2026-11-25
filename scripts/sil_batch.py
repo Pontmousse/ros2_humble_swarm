@@ -21,7 +21,7 @@ ABORTED_<bag> so neither the resume count nor campaign_extract.py picks it up; a
   source /opt/ros/humble/setup.bash && source ros2_marvelmind/install/setup.bash && source ros2_swarm/install/setup.bash
   python3 scripts/sil_batch.py --n 1 2 3 --reps 30 --extract
 """
-import argparse, json, os, signal, socket, subprocess, sys, time
+import argparse, faulthandler, json, os, signal, socket, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 
@@ -31,6 +31,7 @@ ap.add_argument("--reps", type=int, default=30)
 ap.add_argument("--timeout", type=float, default=180.0, help="s from launch until all robots docked")
 ap.add_argument("--settle", type=float, default=10.0, help="s kept recording after the last dock")
 ap.add_argument("--arm-delay", type=float, default=8.0, help="s after launch before arming (retried until localization is fresh)")
+ap.add_argument("--arm-timeout", type=float, default=90.0, help="s after --arm-delay before a never-armed run is aborted (N>=5 startup takes ~30 s)")
 ap.add_argument("--trigger-hold", type=float, default=2.0, help="N=1: s of continuous ready before capture")
 ap.add_argument("--tag", default="test_campaign_SIL")
 ap.add_argument("--bag-dir", default="~/rosbags/sil_batch", help="bags + logs/ (BAG_DIR for launch_rosbag.py)")
@@ -52,6 +53,8 @@ ROOT = Path(a.bag_dir).expanduser()
 LOGS = ROOT / "logs"; LOGS.mkdir(parents=True, exist_ok=True)
 REPO = Path(__file__).resolve().parent.parent
 LATCHED = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+ARM = {}  # robot -> arm client, shared by all runs
+faulthandler.register(signal.SIGUSR1, all_threads=True)  # kill -USR1 <pid> dumps the stacks of a hung runner
 bag_glob = lambda n: f"swarm_{a.tag}_{n}{'agent' if n == 1 else 'agents'}_*"
 done = lambda n: len(list(ROOT.glob(bag_glob(n))))
 
@@ -95,7 +98,8 @@ def run(node, n, rep):
     subs.append(node.create_subscription(Readiness, "/readiness", lambda m: m.robot_id == 1 and ready_since.__setitem__(
         0, (ready_since[0] or time.time()) if m.ready else None), qos_profile_sensor_data))
     pub = node.create_publisher(String, "/mode_cmd", LATCHED) if n == 1 else None
-    arm = {r: node.create_client(Trigger, f"/{r}/virtual_spacecraft/arm") for r in names}
+    # Created once and reused: destroying a client with a request still pending hung rcl (N=6, 11-25).
+    arm = {r: ARM.setdefault(r, node.create_client(Trigger, f"/{r}/virtual_spacecraft/arm")) for r in names}
     futs, armed, t_arm = {}, set(), None
     pop = lambda f: subprocess.Popen(["ros2", "launch", "swarm_bringup", f], env=env, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
     t0, t_all, trig, outcome = time.time(), None, None, None
@@ -106,20 +110,20 @@ def run(node, n, rep):
             for r, cli in arm.items():  # call each robot's arm, retry about 1 s later until it accepts
                 if r in armed or now - t0 < a.arm_delay: continue
                 if r in futs and futs[r].done(): armed.update([r] if futs.pop(r).result().success else [])
+                elif r in futs and now - cli.last > 3.0: futs.pop(r)  # reply lost under load ("failed to send response"); arm is idempotent
                 elif r not in futs and cli.service_is_ready() and now - getattr(cli, "last", 0) > 1.0: cli.last = now; futs[r] = cli.call_async(Trigger.Request())
             if t_arm is None and len(armed) == n: t_arm = now - t0
             if pub and trig is None and ready_since[0] and now - ready_since[0] >= a.trigger_hold:
                 pub.publish(String(data="capture")); trig = now - t0
             if t_all is None and all(mode.get(r) == "dock" for r in names): t_all = now
             if t_all and now - t_all >= a.settle: outcome = "docked"
-            elif t_arm is None and now - t0 > a.arm_delay + 30: outcome = "arm_failed"  # stack never came up: not a mission result
+            elif t_arm is None and now - t0 > a.arm_delay + a.arm_timeout: outcome = "arm_failed"  # stack never came up: not a mission result
             elif now - t0 > a.timeout: outcome = "timeout"
             elif swarm.poll() is not None or rec.poll() is not None: outcome = "crash"
     except KeyboardInterrupt: outcome = "interrupted"
     finally:
         clean = all(stop(p) for p in (rec, swarm) if p)  # recorder first: the bag ends on the docked phase
         for s in subs: node.destroy_subscription(s)
-        for c in arm.values(): node.destroy_client(c)
         if pub: node.destroy_publisher(pub)  # a latched capture must not leak into the next run
         log.close()
     bag = next(iter(sorted(set(ROOT.iterdir()) - before - {LOGS})), None)
