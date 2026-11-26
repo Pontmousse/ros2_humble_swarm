@@ -79,6 +79,16 @@ if virtual_plant_on:
         print("WARNING: VIRTUAL_PLANT without VIRTUAL_SPACECRAFT -- nothing will "
               "produce cmd_vel, so the plant will sit still; set VIRTUAL_SPACECRAFT=1.")
 
+# DRIVER_STACK=v2: chassis, Marvelmind and USB camera+ArUco run in the separate drivers container
+# (swarm_rover_v2 image). This stack then drops its own drivers and adds gnss_bridge + aruco_bridge.
+# Hardware path only: VIRTUAL_PLANT keeps fake_plant. Mirrors launch_decentralized_agent.py.
+v2_drivers = os.getenv("DRIVER_STACK", "robomaster").lower() == "v2" and not virtual_plant_on
+if v2_drivers:
+    print("DRIVER_STACK=v2 -- robomaster/marvelmind/camera drivers replaced by the drivers container + bridges.")
+# ArUco output scale / max range (m) per marker set, shared by the detectors and aruco_bridge.
+LANDMARK_SCALE, LANDMARK_RANGE = (1.15, 0.8), 2.5
+TARGET_SCALE, TARGET_RANGE = (1.15, 0.8), 4.0
+
 # KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
 # linear Kalman filters: heading [theta, omega] + planar [x, y, vx, vy]). It
 # runs in place of pose_publisher on hardware, and -- under VIRTUAL_PLANT -- is
@@ -400,7 +410,7 @@ def generate_launch_description():
         # server); fake_plant replaces the robot further down. The robomaster_ros
         # package is only present on the robots, so its share lookup must stay
         # inside this guard or the dev-machine fake run can't even load the file.
-        if not virtual_plant_on:
+        if not virtual_plant_on and not v2_drivers:
             path = os.path.join(
                 get_package_share_directory('robomaster_ros'),
                 'launch',
@@ -500,7 +510,7 @@ def generate_launch_description():
               "bury the photo countdown).")
     elif virtual_plant_on:
         print("VIRTUAL_PLANT=1 -- skipping marvelmind_obs (fake_plant provides pose).")
-    else:
+    elif not v2_drivers:
         ld.add_action(mm)
 
     ##############################################################################
@@ -530,7 +540,7 @@ def generate_launch_description():
         # hedgehog_obs only consumes marvelmind_obs output, which is not
         # running during calibration. Silent either way; skipped for tidiness.
         # Also skipped under VIRTUAL_PLANT (no beacon, fake_plant provides pose).
-        if calibrate_camera != 1 and not virtual_plant_on:
+        if calibrate_camera != 1 and not virtual_plant_on and not v2_drivers:
             ld.add_action(hedge)
 
     ##############################################################################
@@ -725,8 +735,8 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_4X4_100",
                     "aruco_size": 3.56,
-                    "max_range": 2.5,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
-                    "aruco_scale": (1.15, 0.8),
+                    "max_range": LANDMARK_RANGE,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
+                    "aruco_scale": LANDMARK_SCALE,
                     "calibrate_camera": calibrate_camera,
                     "strict_calibration": strict_calibration,
                     "use_h264": False,  # read camera/image_color from video_processor / ext_camera
@@ -735,8 +745,9 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(landmarks)
-        ld.add_action(h264_decoder)
+        if not v2_drivers:
+            ld.add_action(landmarks)
+            ld.add_action(h264_decoder)
     
     ##############################################################################
     ##############################################################################
@@ -793,12 +804,12 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_50",
                     "aruco_size": 5.76,
-                    "max_range": 4.0,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
+                    "max_range": TARGET_RANGE,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
                     # Deliberately NOT wired to CALIBRATE_CAMERA: this node
                     # shares the camera and the photo output folder with
                     # landmark_detector, and two capturers overwrite each
                     # other's photos.
-                    "aruco_scale": (1.15, 0.8),
+                    "aruco_scale": TARGET_SCALE,
                     "calibrate_camera": 0,
                     "strict_calibration": strict_calibration,
                     "detect_max_hz": 5.0,  # same as launch_decentralized_agent.py target_detector
@@ -808,7 +819,22 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(targets)
+        if not v2_drivers:
+            ld.add_action(targets)
+
+    ##############################################################################
+    ##################### - DRIVER_STACK=v2 bridges - ############################
+    # The drivers container publishes gnss/position and aruco/{landmarks,markers};
+    # these republish them in our mm_pos_unf / landmarks_unf / targets_unf contracts.
+    for i in range(N if v2_drivers else 0):
+        ld.add_action(Node(package="swarm_marvelmind", executable="gnss_bridge", name="gnss_bridge",
+                           namespace=robot_names[i], output="screen", emulate_tty=True,
+                           parameters=[{"beacon": beacon_addresses[i]}]))
+        if i < n_cam:
+            ld.add_action(Node(package="swarm_aruco", executable="aruco_bridge", name="aruco_bridge",
+                               namespace=robot_names[i], output="screen", emulate_tty=True,
+                               parameters=[{"landmark_scale": list(LANDMARK_SCALE), "landmark_max_range": LANDMARK_RANGE,
+                                            "target_scale": list(TARGET_SCALE), "target_max_range": TARGET_RANGE}]))
 
     ##############################################################################
     ##############################################################################

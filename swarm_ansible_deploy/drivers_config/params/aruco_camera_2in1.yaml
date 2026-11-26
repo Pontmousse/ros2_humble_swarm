@@ -1,0 +1,22 @@
+# Override of the drivers image config/params/aruco_camera_2in1.yaml (app-4be73e1-drivers), bind-mounted over it.
+# Ours: targets are DICT_5X5_50, and max_rate caps detection near our old detectors (consumers saw ~10-15 Hz).
+# swarm_aruco/aruco_camera_2in1_node: USB camera + ArUco in one process (replaces camera + aruco; never run both).
+# robot.launch.py also sets frame_id (RM3/camera_optical) and calibration_file
+# (config/calibration/<serial>/<serial>_usb_cam_cal_*.yaml, one file per resolution) from the robot entry.
+/**:
+  ros__parameters:
+    device: "/dev/v4l/by-id/*-video-index0"  # path or glob (first match), or a video file to replay
+    width: 640
+    height: 480          # uses the calibration for this resolution (same aspect ratio: scaled, with a warning)
+    fps: 30.0
+    retry_period: 2.0    # s between reconnect attempts when the camera is missing
+    calibration_check_period: 3.0  # s between checks for a new/changed calibration file (auto-reload)
+    dictionary: DICT_5X5_50              # targets -> aruco/markers; "" = off
+    marker_length: 0.0576                # printed marker side length (black square), m
+    landmark_dictionary: DICT_4X4_100    # landmarks -> aruco/landmarks; "" = off (no detector, no CPU, no topic)
+    landmark_marker_length: 0.0356       # m
+    thresh_win: [7, 7, 10]               # adaptive threshold window min, max, step (px); OpenCV default [3, 23, 10] = 3 passes,
+                                         # [7, 7, 10] = 1 pass: ~2.4x faster per dictionary (check range in dim light)
+    cv_threads: 1                # OpenCV threads
+    max_rate: 15.0               # max detections per second, 0 = every frame; skipped frames are only grabbed, not decoded
+    publish_debug_image: false   # draws markers + axes on aruco/debug_image (costs CPU)

@@ -7,6 +7,8 @@
   become: yes
   gather_facts: false
   strategy: free
+  vars_files:
+    - vars.yml
   vars:
     cmd: restart
 
@@ -15,11 +17,15 @@
         that: cmd in ['stop', 'start', 'restart']
         fail_msg: "cmd must be stop, start or restart (got '{{ cmd }}')"
 
-    - name: "{{ cmd | capitalize }} swarm container"
+    # driver_stack=v2 also controls "<host>-drivers": stopped after ours, started before it.
+    - name: "{{ cmd | capitalize }} containers"
       community.docker.docker_container:
-        name: "{{ inventory_hostname }}"
+        name: "{{ item }}"
         state: "{{ 'stopped' if cmd == 'stop' else 'started' }}"
         restart: "{{ cmd == 'restart' }}"
+      loop: "{{ names if cmd == 'stop' else names | reverse | list }}"
+      vars:
+        names: "{{ [inventory_hostname] + ([inventory_hostname ~ '-drivers'] if driver_stack == 'v2' else []) }}"
 
 
 # command to stop: ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/container_ctl.yml -e cmd=stop

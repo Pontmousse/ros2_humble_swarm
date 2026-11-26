@@ -20,6 +20,10 @@
         name: "{{ swarm_image }}"
         source: pull
 
+    # Before our container: its image prune would delete a pulled but not yet used drivers image.
+    - name: Deploy or remove drivers container
+      ansible.builtin.include_tasks: tasks/drivers_container.yml
+
     - name: Deploy container
       ansible.builtin.include_tasks: tasks/container.yml
 

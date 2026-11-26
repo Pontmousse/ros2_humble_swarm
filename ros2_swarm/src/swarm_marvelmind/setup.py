@@ -24,7 +24,8 @@ setup(
     entry_points={
         'console_scripts': [
             'marvelmind_obs = swarm_marvelmind.marvelmind_obs:main',
-            'hedgehog_obs= swarm_marvelmind.hedgehog_obs:main'
+            'hedgehog_obs= swarm_marvelmind.hedgehog_obs:main',
+            'gnss_bridge = swarm_marvelmind.gnss_bridge:main',
         ],
     },
 )

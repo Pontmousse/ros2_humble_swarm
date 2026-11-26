@@ -9,6 +9,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
@@ -25,7 +26,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/ApBids.msg"
   "msg/Readiness.msg"
   "msg/TargetEstimate.msg"
-  DEPENDENCIES sensor_msgs std_msgs
+  # Copied byte-identical from the driver stack (jasonli03/swarm_rover_v2); DDS matches them by name+layout
+  "msg/ArucoMarker.msg"
+  "msg/ArucoMarkerArray.msg"
+  DEPENDENCIES geometry_msgs sensor_msgs std_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)

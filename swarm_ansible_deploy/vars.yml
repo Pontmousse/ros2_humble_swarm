@@ -41,3 +41,15 @@ lib_threads: "1"
 
 
 conn_type: "rndis"
+
+# Driver stack. robomaster = our own drivers inside the swarm container (robomaster_ros,
+# Marvelmind, camera + aruco_detector). v2 = the swarm_rover_v2 drivers image runs as a second
+# container "<host>-drivers" (chassis, GNSS, USB camera + ArUco); our launch drops its drivers and
+# adds gnss_bridge + aruco_bridge. Per-robot: set driver_stack=v2 on the host line in inventory.ini.
+driver_stack: "robomaster"
+# Pinned tag (public on Docker Hub); the git history of this line is the driver version history.
+drivers_image: "hostage03/robomaster_swarm_v2:app-4be73e1-drivers"
+drivers_nodes: "chassis,gnss,aruco_camera_2in1,health"   # robot.launch.py keys; no spacecraft (ours runs control)
+drivers_config_src: "{{ playbook_dir }}/drivers_config"
+remote_drivers_config_dir: /opt/robomaster/drivers_config
+drivers_container_config_dir: /root/ws/config

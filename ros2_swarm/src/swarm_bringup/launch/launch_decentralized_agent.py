@@ -18,6 +18,12 @@ contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(
 # own camera (h264 ON_DEMAND, decoded once by video_processor), as centralized does.
 camera_source = os.getenv("CAMERA_SOURCE", "csi").lower()
 rm_camera = camera_source == "robomaster"
+# DRIVER_STACK=v2: chassis, Marvelmind and USB camera+ArUco run in the separate drivers container
+# (swarm_rover_v2 image). This stack then drops its own drivers and adds gnss_bridge + aruco_bridge.
+v2_drivers = os.getenv("DRIVER_STACK", "robomaster").lower() == "v2"
+# ArUco output scale / max range (m) per marker set, shared by the detectors and aruco_bridge.
+LANDMARK_SCALE, LANDMARK_RANGE = (1.0, 1.0), 2.5
+TARGET_SCALE, TARGET_RANGE = (1.15, 0.8), 4.0
 
 # KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
 # linear Kalman filters). Same output contract as pose_publisher, so downstream
@@ -292,7 +298,7 @@ def generate_launch_description():
 
     
 
-    for i in range(N):
+    for i in range(0 if v2_drivers else N):  # v2: the drivers container owns the robot link
         robot_name = robot_names[i]
         serial_number = robot_serial_numbers[i]
 
@@ -481,11 +487,11 @@ def generate_launch_description():
         ]
     )
 
-    ld.add_action(mm)
+    if not v2_drivers: ld.add_action(mm)
 
     ##############################################################################
     ##############################################################################
-    for i in range(N):
+    for i in range(0 if v2_drivers else N):  # v2: gnss_bridge publishes mm_pos_unf instead
         robot_name = robot_names[i]
         beacon_address = beacon_addresses[i]
 
@@ -670,7 +676,7 @@ def generate_launch_description():
         # fps end to end at 35% of the 4-core machine with a 100% detection rate.
         # The backend (csi default, usb override) is chosen by CAMERA_SOURCE;
         # CAMERA_SOURCE=robomaster uses the driver camera instead, so no ext_camera.
-        if not rm_camera:
+        if not rm_camera and not v2_drivers:
             ld.add_action(ext_camera)
 
     ##############################################################################
@@ -701,8 +707,8 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_4X4_100",
                     "aruco_size": 3.56,
-                    "max_range": 2.5,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
-                    "aruco_scale": (1.0, 1.0),
+                    "max_range": LANDMARK_RANGE,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
+                    "aruco_scale": LANDMARK_SCALE,
                     "calibrate_camera": 0,
                     "detect_max_hz": 15.0,  # see target_detector note
                     "use_h264": False,  # read camera/image_color from video_processor / ext_camera
@@ -711,9 +717,10 @@ def generate_launch_description():
             ]
         )
 
-        ld.add_action(landmarks)
-        if rm_camera:
-            ld.add_action(h264_decoder)
+        if not v2_drivers:
+            ld.add_action(landmarks)
+            if rm_camera:
+                ld.add_action(h264_decoder)
 
 
     ##############################################################################
@@ -772,8 +779,8 @@ def generate_launch_description():
                     "serial_number": serial_number,
                     "aruco_type": "DICT_5X5_50",
                     "aruco_size": 5.76,
-                    "max_range": 4.0,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
-                    "aruco_scale": (1.15, 0.8),
+                    "max_range": TARGET_RANGE,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
+                    "aruco_scale": TARGET_SCALE,
                     "calibrate_camera": 0,
                     # Cap ArUco detection at 5 Hz. solvePnP-per-frame was the #1
                     # CPU consumer (~116%) on the Pi; dropping frames before
@@ -787,7 +794,21 @@ def generate_launch_description():
         )
 
 
-        ld.add_action(targets)
+        if not v2_drivers:
+            ld.add_action(targets)
+
+    ##############################################################################
+    ##################### - DRIVER_STACK=v2 bridges - ############################
+    # The drivers container publishes gnss/position and aruco/{landmarks,markers};
+    # these republish them in our mm_pos_unf / landmarks_unf / targets_unf contracts.
+    for i in range(N if v2_drivers else 0):
+        ld.add_action(Node(package="swarm_marvelmind", executable="gnss_bridge", name="gnss_bridge",
+                           namespace=robot_names[i], output="screen", emulate_tty=True,
+                           parameters=[{"beacon": beacon_addresses[i]}]))
+        ld.add_action(Node(package="swarm_aruco", executable="aruco_bridge", name="aruco_bridge",
+                           namespace=robot_names[i], output="screen", emulate_tty=True,
+                           parameters=[{"landmark_scale": list(LANDMARK_SCALE), "landmark_max_range": LANDMARK_RANGE,
+                                        "target_scale": list(TARGET_SCALE), "target_max_range": TARGET_RANGE}]))
 
     ##############################################################################
     ##############################################################################

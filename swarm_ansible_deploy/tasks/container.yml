@@ -29,6 +29,9 @@
     restart_policy: always
     privileged: yes
     network_mode: host
+    # Shared /dev/shm with the drivers container: Fast DDS sees both on one host and
+    # uses shared memory, which silently carries no data across separate IPC namespaces.
+    ipc_mode: host
 
     devices:
       - /dev/gpiomem

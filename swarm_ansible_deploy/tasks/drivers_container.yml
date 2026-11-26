@@ -1,0 +1,69 @@
+# driver_stack=v2: run the swarm_rover_v2 drivers image as "<host>-drivers" next to our container,
+# with our config overlay (drivers_config/) bind-mounted over the image's config. Otherwise remove it.
+- name: Remove drivers container (driver_stack != v2)
+  community.docker.docker_container:
+    name: "{{ inventory_hostname }}-drivers"
+    state: absent
+    force_kill: true
+  when: driver_stack != 'v2'
+
+- when: driver_stack == 'v2'
+  block:
+    - name: Create drivers config directories
+      ansible.builtin.file:
+        path: "{{ remote_drivers_config_dir }}/{{ item }}"
+        state: directory
+        mode: "0755"
+      loop: [params, "calibration/{{ robot_cfg.serial }}"]
+
+    - name: Render drivers swarm_config.yaml from ours
+      ansible.builtin.template:
+        src: "{{ drivers_config_src }}/swarm_config.yaml.j2"
+        dest: "{{ remote_drivers_config_dir }}/swarm_config.yaml"
+        mode: "0644"
+
+    - name: Deploy drivers params overrides
+      ansible.builtin.copy:
+        src: "{{ drivers_config_src }}/params/"
+        dest: "{{ remote_drivers_config_dir }}/params/"
+        mode: "0644"
+
+    # Seed only: a calibration made on the Pi (nodes:=calibrate) is never overwritten.
+    - name: Seed camera calibration
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "{{ remote_drivers_config_dir }}/calibration/{{ robot_cfg.serial }}/"
+        mode: "0644"
+        force: false
+      loop: "{{ lookup('fileglob', drivers_config_src ~ '/calibration/' ~ robot_cfg.serial ~ '/*', wantlist=True) }}"
+
+    - name: Pull drivers image
+      community.docker.docker_image:
+        name: "{{ drivers_image }}"
+        source: pull
+
+    - name: Create/recreate drivers container
+      community.docker.docker_container:
+        name: "{{ inventory_hostname }}-drivers"
+        image: "{{ drivers_image }}"
+        state: started
+        recreate: true
+        restart_policy: always
+        stop_timeout: 30   # SIGINT (image STOPSIGNAL): chassis stops the wheels and closes the SDK link
+        privileged: yes
+        network_mode: host
+        ipc_mode: host
+        volumes:
+          - /dev:/dev
+          - /etc/localtime:/etc/localtime:ro
+          - "{{ remote_drivers_config_dir }}/swarm_config.yaml:{{ drivers_container_config_dir }}/swarm_config.yaml:ro"
+          - "{{ remote_drivers_config_dir }}/params/aruco_camera_2in1.yaml:{{ drivers_container_config_dir }}/params/aruco_camera_2in1.yaml:ro"
+          - "{{ remote_drivers_config_dir }}/calibration/{{ robot_cfg.serial }}:{{ drivers_container_config_dir }}/calibration/{{ robot_cfg.serial }}"
+        env:
+          ROBOT_NAME: "{{ robot_cfg.name }}"
+          SWARM_NODES: "{{ drivers_nodes }}"
+          ROS_DOMAIN_ID: "{{ ros_domain_id }}"
+          RMW_IMPLEMENTATION: "{{ rmw_implementation }}"
+          ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"
+          OMP_NUM_THREADS: "{{ lib_threads }}"
+          OPENBLAS_NUM_THREADS: "{{ lib_threads }}"
