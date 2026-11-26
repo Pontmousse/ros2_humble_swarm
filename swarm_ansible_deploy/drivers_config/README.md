@@ -13,3 +13,31 @@ bind-mounts them over the image's `/root/ws/config/...`:
 Calibration files are only seeded when missing on the Pi, so a calibration made there (his `calibrate`
 node, `nodes:=calibrate`) is never overwritten. Copy it back here and commit it to keep it.
 When upgrading the image, diff `params/aruco_camera_2in1.yaml` against the new image's copy.
+Interface contract: `docs/contracts/driver-contract-v100.md`.
+
+## Deploy a robot on v2 (example: RM3, `robot3`, 192.168.50.103)
+
+1. **Dev PC:** `git switch split-containers` (rsync copies whatever is checked out).
+2. **Build our image on the Pi** (`swarm_docker_img/docker-run.txt`, "Build native on PI"): rsync to
+   `robomaster3@192.168.50.103`, then on the Pi:
+   ```bash
+   cd ~/ros2_humble_swarm && sudo docker login
+   sudo docker buildx build -f swarm_docker_img/Dockerfile.tar.arm64 -t elghaliasri/ros2-humble-swarm:robot-arm64-v9.6.0-split --load .
+   sudo docker push elghaliasri/ros2-humble-swarm:robot-arm64-v9.6.0-split
+   ```
+3. **Dev PC:** set `swarm_image` to that tag in `vars.yml`, add `driver_stack=v2` to the robot's line
+   in `inventory.ini`, commit with `./push-split.sh "..."`.
+4. **Robot:** USB camera plugged, `vcgencmd get_throttled` = `0x0`, `usb0` link provisioned
+   (`usb_link.yml`), calibration in `calibration/<serial>/`.
+5. **Deploy** (pulls both images; drivers container `robot3-drivers` starts before ours):
+   ```bash
+   ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/deploy.yml -l robot3
+   ```
+   Config/launch-only changes later: `deploy-config.yml`, no rebuild.
+6. **Check on the Pi:** `docker ps` shows `robot3` and `robot3-drivers`; `docker logs -f robot3-drivers`
+   shows chassis connected, GNSS fix, calibration loaded; inside ours
+   (`docker exec -it robot3 bash -c "source /ros2_ws/install/setup.bash && ros2 topic hz /RM3/odom"`):
+   `/RM3/odom` ~50 Hz, `/RM3/mm_pos_unf` ~6 Hz, `/RM3/landmarks_unf` <= 15 Hz. Then `ros2 daemon stop`.
+
+**Rollback:** remove `driver_stack=v2` from the inventory line and run `deploy-config.yml`; the
+drivers container is removed and ours runs its own drivers again (same image).
