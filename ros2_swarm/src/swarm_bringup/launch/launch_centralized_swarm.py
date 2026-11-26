@@ -306,7 +306,7 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
                 'config_files': config_files,
                 'env_vars': env_vars,
                 'topic': 'run_config',
-                'publish_period': 5.0,
+                'publish_period': 0.0,  # publish once: latched (TRANSIENT_LOCAL), ~100 KB
                 'repo_path': _find_repo_root(__file__),
                 'source_launch': source_launch,
                 'robot_names': list(robot_names),
@@ -569,7 +569,7 @@ def generate_launch_description():
                         "bind_device": comms_bind_device,
                         "port": comms_port,
                         "broadcast_rate": 10.0,
-                        "receive_rate": 20.0,  # = avoidance rate; drains all queued packets per tick
+                        "receive_rate": 10.0,  # = broadcast_rate = avoidance rate; drains all queued packets per tick
                         "stale_timeout": 0.5,
                         "drop_timeout": 5.0,
                     }
@@ -641,9 +641,7 @@ def generate_launch_description():
                     "timer_frequency": timer_frequency,
                     "init_orientation": heading_deg if virtual_plant_on else init_orientation,
                     "global_frame_id": "swarm_map",
-                    "gps_timeout": 0.25,
-                    "odometry_timeout": 0.25,
-                    "gyro_timeout": 0.25,
+                    "odometry_timeout": 1.0,  # wheel odom silent this long = dead driver: output withheld
                     "gps_position_variance": 0.01,
                     "command_tau": 0.25,
                     "q_pos": 1.0e-4,
@@ -1106,7 +1104,7 @@ def generate_launch_description():
             parameters=[
                 {
                     "detect_frames": 3,
-                    "lost_timeout": 4.0,
+                    "lost_timeout": 4.0,  # inert while both estimators keep memory (forget_timeout 0): landmarks/targets never go empty
                     "miss_tolerance": 3,
                     "latch_capture": False,
                     # Distributed synchronized capture: detection drives SEARCH<->ENCAP

@@ -8,10 +8,11 @@ import math, numpy as np
 # Custom messages
 from swarm_interfaces.msg import StatePos as State
 from swarm_interfaces.msg import Markers, TargetEstimate
-from std_msgs.msg import Float64, String
+from std_msgs.msg import String
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
 from .position_guidance3 import nearest_k
+from .zero_gate import ZeroGatedPublisher
 
 class GuidanceNode(Node):
     def __init__(self):
@@ -135,8 +136,7 @@ class GuidanceNode(Node):
             self.create_timer(1.0 / float(self.get_parameter("share_rate").value), self.publish_estimate)
 
         # Publishers
-        self.pub = self.create_publisher(Float64, 'target_orientation', self.qos_profile)
-        self.wrench_pub = self.create_publisher(Wrench, 'pointing_wrench', self.qos_profile)
+        self.wrench_pub = ZeroGatedPublisher(self.create_publisher(Wrench, 'pointing_wrench', self.qos_profile))  # zero in CAPTURE/DOCK: sent once
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_orientation)
  
 
@@ -273,10 +273,7 @@ class GuidanceNode(Node):
         if target is None:
             desired = self._damping_torque()
         else:
-            # Active pointing: publish the advisory setpoint and the PD torque.
-            msg = Float64()
-            msg.data = target
-            self.pub.publish(msg)
+            # Active pointing: PD torque toward the target heading.
             err = math.radians(wrap_deg(target - self.pose[2]))
             wz = self.craft_wz if self.craft_wz is not None else 0.0
             desired = bound(

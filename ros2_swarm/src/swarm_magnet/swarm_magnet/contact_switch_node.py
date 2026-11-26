@@ -42,7 +42,7 @@ class ContactSwitchNode(Node):
         super().__init__('contact_switch')
         self.declare_parameter('gpio_lines', [5])
         self.declare_parameter('gpio_chip', 'auto')
-        self.declare_parameter('rate_hz', 50.0)
+        self.declare_parameter('rate_hz', 20.0)  # level stream (the DOCK latch needs True while in CAPTURE); 3-sample debounce = 150 ms
         self.declare_parameter('debounce_samples', 3)
         self.lines = [int(x) for x in self.get_parameter('gpio_lines').value]
         chip = str(self.get_parameter('gpio_chip').value)

@@ -14,6 +14,7 @@ from std_msgs.msg import Bool, Int32, String
 # Custom messages for target position
 from swarm_interfaces.msg import StatePos as State
 from swarm_interfaces.msg import CoordXY, Markers
+from .zero_gate import ZeroGatedPublisher
 
 # Outlier guards on the target track. Not tuning knobs: the gap is longer than
 # the 0.61 s frozen-fix period seen on RM6, so only a real dropout trips it.
@@ -270,9 +271,9 @@ class ControllerNode(Node):
             self.create_subscription(Twist, 'cmd_vel_nav',
                                      self.cmd_vel_nav_callback, self.qos_profile)
         else:
-            self.wrench_pub = self.create_publisher(Wrench, 'capture_wrench',
-                                                    self.qos_profile)
-        self.preparation_pub = self.create_publisher(Wrench, 'preparation_wrench', self.qos_profile)
+            self.wrench_pub = ZeroGatedPublisher(self.create_publisher(Wrench, 'capture_wrench', self.qos_profile))
+        # Both wrenches are zero outside their mode: one zero on the falling edge, then silence (zero_gate.py).
+        self.preparation_pub = ZeroGatedPublisher(self.create_publisher(Wrench, 'preparation_wrench', self.qos_profile))
         self.cmd_pub_timer = self.create_timer(self.timer_frequency, self.publish_cmd)
 
         # Capture mode and dock freeze. DOCK wins over CAPTURE: once docked
@@ -576,7 +577,10 @@ class ControllerNode(Node):
         wrench_msg = Wrench()
         twist_msg = Twist()
 
-        active = (not self.dock_mode and self.capture_mode and self.trq_cmd is not None
+        # A command older than target_hold_timeout expires (targets stopped arriving altogether).
+        fresh = (self.last_target_time is not None
+                 and (now - self.last_target_time).nanoseconds * 1e-9 <= self.target_hold_timeout)
+        active = (fresh and not self.dock_mode and self.capture_mode and self.trq_cmd is not None
                   and None not in self.frc_cmd)
         if active:
             vx_des = bound(self.frc_cmd[0], self.max_translational_speed[0])

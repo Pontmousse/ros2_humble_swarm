@@ -23,6 +23,7 @@ class Agent:
     on_peer = ReadinessConsensusNode.on_peer
     publish_readiness = ReadinessConsensusNode.publish_readiness
     stamp_sec = ReadinessConsensusNode.stamp_sec
+    schedule_fire = ReadinessConsensusNode.schedule_fire
 
     def __init__(self, robot_id=1, neighbours=(2,)):
         self.robot_id = robot_id
@@ -38,6 +39,16 @@ class Agent:
         self.action_lead, self.min_lead, self.time_tol = 2.0, 0.5, 0.05
         self.neighbor_timeout, self.min_consensus_hold, self.dt = 0.5, 0.3, 0.2
         self.ready_pub, self.sync_pub, self.debug_pub = Publisher(), Publisher(), Publisher()
+        self.fire_timer, self.timers = None, []
+
+    def create_timer(self, period, callback):
+        timer = SimpleNamespace(period=period, callback=callback, cancelled=False)
+        timer.cancel = lambda: setattr(timer, 'cancelled', True)
+        self.timers.append(timer)
+        return timer
+
+    def destroy_timer(self, timer):
+        timer.cancel()
 
     def now(self):
         return self.time
@@ -174,3 +185,28 @@ def test_delayed_multi_robot_negotiation_restarts_then_captures(topology):
     assert all(len(agent.sync_pub.messages) == 1 for agent in agents)
     assert len({agent.armed_time for agent in agents}) == 1
     assert all(agent.round_id > 0 for agent in agents)
+
+
+def test_one_shot_fires_at_the_armed_time_not_the_next_tick():
+    agent = Agent()
+    for _ in range(3):  # deadline 101.9 falls between two 5 Hz ticks
+        peer(agent, 101.9, armed=True); agent.round(); agent.time += 0.2
+    agent.time -= 0.2
+    assert agent.armed and agent.armed_time == 101.9
+    timer = agent.timers[-1]
+    assert timer.period == pytest.approx(101.9 - agent.time + 1e-3)
+    agent.time = 101.901
+    peer(agent, 101.9, armed=True)
+    timer.callback()
+    assert timer.cancelled and agent.fired and len(agent.sync_pub.messages) == 1
+    agent.time = 102.0
+    agent.round()
+    assert len(agent.sync_pub.messages) == 1
+
+
+def test_round_reset_cancels_the_pending_one_shot():
+    agent = Agent()
+    arm(agent)
+    peer(agent, 104.0, round_id=3)
+    agent.round()
+    assert agent.timers[-1].cancelled and not agent.armed

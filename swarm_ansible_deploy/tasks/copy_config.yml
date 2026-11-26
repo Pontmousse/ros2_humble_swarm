@@ -21,3 +21,9 @@
     src: "{{ launch_file_src }}"
     dest: "{{ remote_config_dir }}/launch_decentralized_agent.py"
     mode: "0644"
+
+- name: Deploy virtual spacecraft launch file (included by the decentralized launch)
+  ansible.builtin.copy:
+    src: "{{ virtual_spacecraft_launch_src }}"
+    dest: "{{ remote_config_dir }}/launch_virtual_spacecraft.py"
+    mode: "0644"

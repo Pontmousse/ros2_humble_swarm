@@ -35,8 +35,9 @@ Actuation (2026-10): each mode maps to exactly one SetBool wrench gate --
   DOCK          -> `toggle_dock`          (cp_controller       -> freeze, zero wrench)
 All four servers exist. `avoidance_wrench` is NOT gated here -- it is an
 always-on peer source summed by the spacecraft in every mode, so inter-robot
-avoidance never depends on which mode is active. Calls are fire-and-forget and
-only warn if a server is briefly absent at startup.
+avoidance never depends on which mode is active. Calls never block: the wanted
+state is recorded and resent from the tick until the server confirms it, so a
+server that is late at startup or a lost reply no longer leaves a layer off.
 
 DOCK is entered from CAPTURE once `contact_detected` (std_msgs/Bool) goes
 True. Several sources may publish it at once -- geometric_contact.py (virtual
@@ -199,6 +200,10 @@ class ModeSupervisor(Node):
             Mode.CAPTURE: self.capture_client,
             Mode.DOCK: self.dock_client,
         }
+        # client -> wanted state, in call order; client -> last send time. A request without a
+        # success reply is resent after the retry period (engage_wheels acks in up to 3 s on v2).
+        self.pending, self.sent = {}, {}
+        self.retry = {self.engage_client: 4.0}
 
         # Detection inputs.
         self.create_subscription(Markers, "landmarks", self.on_landmarks, qos)
@@ -252,6 +257,8 @@ class ModeSupervisor(Node):
 
     def on_capture_sync(self, msg: Bool):
         self.capture_cleared = bool(msg.data)
+        if self.capture_cleared:
+            self.tick()  # act now, not on the next 5 Hz tick: keeps the swarm's capture in step
 
     def on_mode_cmd(self, msg: String):
         key = msg.data.strip().lower()
@@ -326,6 +333,7 @@ class ModeSupervisor(Node):
         desired = self.decide()
         if desired != self.mode:
             self.apply_mode(desired)
+        self.flush()
 
     # ---------------------------- actuation --------------------------------
     def apply_mode(self, new: Mode):
@@ -348,13 +356,30 @@ class ModeSupervisor(Node):
         self.mode_pub.publish(String(data=self.mode.value))
 
     def call(self, client, state: bool):
-        """Fire-and-forget SetBool request; warn if the service is absent."""
-        if not client.wait_for_service(timeout_sec=0.5):
-            self.get_logger().warn(f"{client.srv_name} not available.")
-            return
-        request = SetBool.Request()
-        request.data = state
-        client.call_async(request)
+        """Record the wanted state; flush() sends it, the latest call wins."""
+        self.pending.pop(client, None)  # re-insert: sends follow call order
+        self.pending[client] = state
+        self.sent.pop(client, None)
+
+    def flush(self):
+        """Send every unconfirmed SetBool without blocking; resend after the retry period."""
+        now = self.get_clock().now().nanoseconds * 1e-9
+        for client, state in list(self.pending.items()):
+            if client in self.sent and now - self.sent[client] < self.retry.get(client, 1.0):
+                continue
+            if not client.service_is_ready():
+                self.get_logger().warn(f"{client.srv_name} not available, retrying.",
+                                       throttle_duration_sec=2.0)
+                continue
+            self.sent[client] = now
+            client.call_async(SetBool.Request(data=state)).add_done_callback(
+                lambda f, c=client, s=state: self.on_reply(c, s, f))
+
+    def on_reply(self, client, state, future):
+        if (future.exception() is None and future.result() is not None and future.result().success
+                and self.pending.get(client) == state):
+            del self.pending[client]
+            self.sent.pop(client, None)
 
 
 def main(args=None):

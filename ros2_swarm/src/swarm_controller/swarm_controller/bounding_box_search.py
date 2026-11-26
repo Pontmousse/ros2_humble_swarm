@@ -11,6 +11,7 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import SetBool
 from swarm_interfaces.msg import TargetEstimate
 from .pointing_guidance2 import SHARE_QOS, SharedTargets, now_s
+from .zero_gate import ZeroGatedPublisher
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -225,9 +226,8 @@ class BoundingBoxSearchNode(Node):
             self.reference_callback,
             qos_profile,
         )
-        self.wrench_publisher = self.create_publisher(
-            Wrench, "spacecraft_wrench", qos_profile
-        )
+        # Zero outside SEARCH, before arm and mid-box: sent once, then silence (zero_gate.py).
+        self.wrench_publisher = ZeroGatedPublisher(self.create_publisher(Wrench, "spacecraft_wrench", qos_profile))
         # Runtime on/off switch so a supervisor can hand control to the capture
         # controller. Disabled means we keep publishing an explicit zero wrench.
         self.enabled = True

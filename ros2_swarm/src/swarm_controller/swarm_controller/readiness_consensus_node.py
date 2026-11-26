@@ -23,7 +23,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
-from std_msgs.msg import Bool, Float64, Int32
+from std_msgs.msg import Bool, Int32
 from swarm_interfaces.msg import Markers, NeighbourStates, Readiness
 
 
@@ -83,6 +83,7 @@ class ReadinessConsensusNode(Node):
         self.armed = False
         self.fired = False
         self.hold = 0.0
+        self.fire_timer = None
 
         best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
                                  history=HistoryPolicy.KEEP_LAST)
@@ -103,7 +104,6 @@ class ReadinessConsensusNode(Node):
 
         self.ready_pub = self.create_publisher(Readiness, "/readiness", bcast)
         self.sync_pub = self.create_publisher(Bool, "capture_sync", latched)
-        self.debug_pub = self.create_publisher(Float64, "consensus_debug", best_effort)
 
         self.dt = 1.0 / float(self.get_parameter("consensus_rate").value)
         self.create_timer(self.dt, self.round)
@@ -182,6 +182,8 @@ class ReadinessConsensusNode(Node):
         self.round_id = round_id
         self.my_t = self.armed_time = self.hold = 0.0
         self.armed = False
+        if self.fire_timer is not None:
+            self.fire_timer.cancel()
 
     def round(self):
         now = self.now()
@@ -232,8 +234,18 @@ class ReadinessConsensusNode(Node):
                     if self.hold >= self.min_consensus_hold:
                         self.armed = True
                         self.armed_time = self.my_t
+                        self.schedule_fire(now)
 
         self.publish_readiness(now, ready, len(participants))
+
+    def schedule_fire(self, now):
+        """One-shot round at armed_time, so the fire is not quantised to the next 5 Hz tick."""
+        if self.fire_timer is not None:
+            self.destroy_timer(self.fire_timer)
+        def once():
+            self.fire_timer.cancel()
+            self.round()
+        self.fire_timer = self.create_timer(max(self.armed_time - now, 0.0) + 1e-3, once)
 
     def publish_readiness(self, now, ready, degree):
         msg = Readiness()
@@ -246,7 +258,6 @@ class ReadinessConsensusNode(Node):
         msg.round_id = self.round_id
         msg.armed = self.armed
         self.ready_pub.publish(msg)
-        self.debug_pub.publish(Float64(data=self.my_t))
 
     # ------------------------------ helpers --------------------------------
     def now(self):

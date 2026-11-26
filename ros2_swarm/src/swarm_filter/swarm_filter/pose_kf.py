@@ -125,9 +125,7 @@ class PoseKalmanFilterNode(Node):
         self.declare_parameter("mm_address", -1)              # -1 = accept any
 
         # --- Timeouts (seconds) --------------------------------------------
-        self.declare_parameter("gps_timeout", 0.25)
-        self.declare_parameter("odometry_timeout", 0.25)
-        self.declare_parameter("gyro_timeout", 0.25)
+        self.declare_parameter("odometry_timeout", 1.0)  # s of wheel-odom silence before output is withheld
         self.declare_parameter("cmd_timeout", 0.25)
 
         # --- Measurement noise ---------------------------------------------
@@ -182,9 +180,7 @@ class PoseKalmanFilterNode(Node):
         self.require_mm_for_init = bool(g("require_mm_for_init").value)
         self.mm_address = int(g("mm_address").value)
 
-        self.gps_timeout = float(g("gps_timeout").value)
         self.odometry_timeout = float(g("odometry_timeout").value)
-        self.gyro_timeout = float(g("gyro_timeout").value)
         self.cmd_timeout = float(g("cmd_timeout").value)
 
         self.gps_position_variance = float(g("gps_position_variance").value)
@@ -581,6 +577,15 @@ class PoseKalmanFilterNode(Node):
             self.get_logger().warn(
                 "pose_kf: no odom yet; withholding localization output.",
                 throttle_duration_sec=2.0)
+            return
+
+        # Dead driver: stop publishing so the downstream staleness guards (virtual_spacecraft
+        # freeze, nav2_pidff stop, state_broadcaster invalid) fire instead of a dead-reckoned pose.
+        # Shorter gaps are bridged by prediction, as before.
+        if (now_ns - self.odom_time) * 1e-9 > self.odometry_timeout:
+            self.get_logger().warn(
+                "pose_kf: no odom for %.1f s; withholding localization output."
+                % ((now_ns - self.odom_time) * 1e-9), throttle_duration_sec=2.0)
             return
 
         self._publish(self.get_clock().now().to_msg())

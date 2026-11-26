@@ -95,7 +95,6 @@ def generate_launch_description():
             f'/{robot_name}/contact_detected',
             f'/{robot_name}/ground_truth/pose',  # SIL only (fake_plant)
             f'/{robot_name}/capture_sync',
-            f'/{robot_name}/consensus_debug',
             f'/{robot_name}/pointing_wrench',
 
             # ArUco perception
@@ -144,8 +143,6 @@ def generate_launch_description():
             f'/{robot_name}/comms/neighbours',
             f'/{robot_name}/comms/diagnostics',
 
-            # Guidance setpoint, i.e. the attractive term's output.
-            f'/{robot_name}/target_position',
         ])
 
     # ~/rosbags/swarm_20260909_185500/

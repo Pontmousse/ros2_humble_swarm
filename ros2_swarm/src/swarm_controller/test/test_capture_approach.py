@@ -673,3 +673,25 @@ def test_the_old_degree_law_limit_cycles():
     tail = trace[len(trace) // 2:]
     assert max(tail) - min(tail) == pytest.approx(MAX_YAW_RATE * TDMA_PERIOD,
                                                   rel=0.5)
+
+
+def test_the_capture_command_expires_when_targets_stop():
+    """A stopped targets stream must not leave the last capture wrench applied forever."""
+    from geometry_msgs.msg import Wrench
+    from swarm_controller.zero_gate import ZeroGatedPublisher
+    sent = []
+    node = stub()
+    node.__dict__.update(
+        init_start_time=Time(nanoseconds=0), init_duration=0.0, preparation_pub=ZeroGatedPublisher(
+            types.SimpleNamespace(publish=lambda m: None)), preparation_wrench=lambda now: Wrench(),
+        dock_mode=False, capture_mode=True, direct_cmd_vel=False, max_translational_speed=MAX_SPEED,
+        max_rotational_speed=MAX_YAW_RATE, craft_vx=0.0, craft_vy=0.0, craft_wz=0.0, velocity_force_gain=6.0,
+        maximum_force=0.5, yaw_rate_torque_gain=1.0, maximum_torque=0.2,
+        wrench_pub=ZeroGatedPublisher(types.SimpleNamespace(publish=lambda m: sent.append((node.seconds, m.force.x)))))
+    node.seconds = 1.0
+    ControllerNode.target_callback(node, markers((150.0, 0.0)))
+    for k in range(20):  # 1.0 s of 20 Hz ticks with no further targets
+        node.seconds = 1.0 + 0.05 * k
+        ControllerNode.publish_cmd(node)
+    assert sent[0][1] > 0.0
+    assert sent[-1] == (pytest.approx(1.45), 0.0)  # one zero just past the 0.4 s hold, then silence

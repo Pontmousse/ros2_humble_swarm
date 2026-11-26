@@ -15,7 +15,7 @@ from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from nav_msgs.msg import Odometry
-from swarm_interfaces.msg import CoordXY, NeighbourState, NeighbourStates, Neighbours
+from swarm_interfaces.msg import NeighbourState, NeighbourStates
 from transforms3d.euler import quat2euler
 
 from swarm_comms.packet import DEFAULT_BROADCAST, DEFAULT_PORT, PACKET_SIZE, decode, encode
@@ -65,9 +65,6 @@ class StateBroadcaster(Node):
         self.create_subscription(Odometry, "localization/odom", self.odom_callback, qos)
 
         self.states_pub = self.create_publisher(NeighbourStates, "comms/neighbours", qos)
-        # Legacy shape, so the existing guidance law can be switched over with a
-        # remap instead of a code change.
-        self.legacy_pub = self.create_publisher(Neighbours, "comms/nbh_pos", qos)
         self.diag_pub = self.create_publisher(DiagnosticArray, "comms/diagnostics", 10)
 
         self._open_sockets(bind_device)
@@ -164,7 +161,6 @@ class StateBroadcaster(Node):
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.header.frame_id = "swarm_map"
 
-        legacy = Neighbours()
         for entry in self.table.entries.values():
             # Published pose is dead-reckoned to now, so consumers can treat it
             # as current rather than having to apply `age` themselves.
@@ -181,13 +177,7 @@ class StateBroadcaster(Node):
             state.valid = entry.valid and entry.pose_valid
             msg.neighbours.append(state)
 
-            if state.valid:
-                coord = CoordXY()
-                coord.x, coord.y = x, y
-                legacy.neighbours.append(coord)
-
         self.states_pub.publish(msg)
-        self.legacy_pub.publish(legacy)
 
     def stats_callback(self):
         diag = DiagnosticArray()

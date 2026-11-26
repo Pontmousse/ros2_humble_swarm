@@ -217,7 +217,7 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
                 'config_files': config_files,
                 'env_vars': env_vars,
                 'topic': 'run_config',
-                'publish_period': 5.0,
+                'publish_period': 0.0,  # publish once: latched (TRANSIENT_LOCAL), ~100 KB
                 'repo_path': _find_repo_root(__file__),
                 'source_launch': source_launch,
                 'robot_names': list(robot_names),
@@ -546,7 +546,7 @@ def generate_launch_description():
                         "bind_device": comms_bind_device,
                         "port": comms_port,
                         "broadcast_rate": 10.0,
-                        "receive_rate": 20.0,  # = avoidance rate; drains all queued packets per tick
+                        "receive_rate": 10.0,  # = broadcast_rate = avoidance rate; drains all queued packets per tick
                         "stale_timeout": 0.5,
                         "drop_timeout": 5.0,
                     }
@@ -607,9 +607,7 @@ def generate_launch_description():
                     "timer_frequency": 0.05,
                     "init_orientation": init_orientation,
                     "global_frame_id": "swarm_map",
-                    "gps_timeout": 0.25,
-                    "odometry_timeout": 0.25,
-                    "gyro_timeout": 0.25,
+                    "odometry_timeout": 1.0,  # wheel odom silent this long = dead driver: output withheld
                     "gps_position_variance": 0.01,
                     "command_tau": 0.25,
                     "q_pos": 1.0e-4,
@@ -978,9 +976,7 @@ def generate_launch_description():
                 ]
             )
         # ENABLED: sole publisher of avoidance_wrench, which virtual_spacecraft
-        # has been subscribing to all along with nothing on the other end. Its
-        # other output, target_position, still has no consumer (ep_control below
-        # stays disabled), so this adds the avoidance wrench and nothing else.
+        # has been subscribing to all along with nothing on the other end.
         ld.add_action(ep_motion_planner)
 
 
@@ -1103,7 +1099,7 @@ def generate_launch_description():
                     # (CAPTURE->ENCAP/SEARCH, ENCAP->SEARCH). Raised 2.0->4.0 to
                     # ride through brief detection dropouts (low-fps flicker) and
                     # stop CAPTURE<->SEARCH oscillation.
-                    "lost_timeout": 4.0,
+                    "lost_timeout": 4.0,  # inert while both estimators keep memory (forget_timeout 0): landmarks/targets never go empty
                     # Empty frames tolerated before the ENTRY streak resets, so a
                     # steadily-held marker that flickers still advances the mode.
                     "miss_tolerance": 3,

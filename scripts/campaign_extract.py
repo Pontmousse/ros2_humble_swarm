@@ -49,7 +49,7 @@ DT = 0.05
 DEFAULTS = dict(R_influence=1.05, R_saturate=0.65, R_contact=0.44, R_flock=0.6, contact_distance=0.25,
                 contact_heading_tolerance=0.26, approach_distance=0.8, mass=5.0, yaw_inertia=0.05,
                 maximum_force=0.02, maximum_torque=0.003, translation_response_scale=1.0,
-                rotation_response_scale=1.0, odometry_timeout=0.25)
+                rotation_response_scale=1.0, odometry_timeout=0.25, wrench_timeout=0.25)
 WANT = re.compile(r"^(/run_config|/ap_bids|/readiness|/tf|/mode_cmd|/RM\d+/(run_config|localization/odom|"
                   r"virtual_spacecraft/(odom|applied_wrench)|\w+_wrench|current_mode|capture_sync|assigned_ap|"
                   r"assignment_locked|mode_cmd|contact_detected|ground_truth/pose|targets))$")
@@ -249,6 +249,15 @@ def extract(bag):
         fin["success"] = bool(fin["docked"] and fin.get("correct_ap", True))
         fin["geom_ok"] = bool(fin["docked"] and fin["final_range"] <= P["contact_distance"] and fin["final_face"] <= P["contact_heading_tolerance"])
         a = d["applied"]
+        # Wrench layers on the grid, summed the way virtual_spacecraft sees them: a value holds for
+        # wrench_timeout after its message, then the silent source counts as zero (publishers send
+        # one zero on the falling edge and then stay silent, swarm_controller/zero_gate.py).
+        layer = {}
+        for L, w in d["layers"].items():
+            if not len(w): continue
+            i = np.searchsorted(w[:, 0], grid, "right") - 1; j = np.clip(i, 0, None)
+            live = (i >= 0) & (grid - w[j, 0] <= P["wrench_timeout"])
+            layer[L] = (np.where(live, w[j, 1], 0.0), np.where(live, w[j, 2], 0.0))
         fmax, tmax = P["maximum_force"] * P["translation_response_scale"], P["maximum_torque"] * P["rotation_response_scale"]
         per = {}
         for k, name in enumerate(PHASES):
@@ -268,10 +277,10 @@ def extract(bag):
             dt = np.minimum(np.diff(a[:, 0], append=a[-1, 0]), 0.1)[s] if len(a) else np.zeros(0)
             row.update(dv=(a[s, 1] * dt).sum() / P["mass"] if len(a) else nan, dw=(a[s, 2] * dt).sum() / P["yaw_inertia"] if len(a) else nan,
                        sat_F=(a[s, 1] >= 0.98 * fmax).mean() if s.any() else nan, sat_T=(a[s, 2] >= 0.98 * tmax).mean() if s.any() else nan)
-            for L, w in d["layers"].items():
-                q = sel(w[:, 0]) if len(w) else np.zeros(0, bool)
-                row.update({f"{L}_F": w[q, 1].mean() if q.any() else nan, f"{L}_T": w[q, 2].mean() if q.any() else nan,
-                            f"{L}_on": ((w[q, 1] > 1e-6) | (w[q, 2] > 1e-6)).mean() if q.any() else nan})
+            for L in d["layers"]:  # time-weighted on the grid; nan for a layer never recorded
+                F, T = layer.get(L, (None, None)); ok = F is not None and m.any()
+                row.update({f"{L}_F": F[m].mean() if ok else nan, f"{L}_T": T[m].mean() if ok else nan,
+                            f"{L}_on": ((F[m] > 1e-6) | (T[m] > 1e-6)).mean() if ok else nan})
             per[name] = row
             rows.append(dict(robot=r, phase=name, **fin, churn=d["churn"], **row))
         robot_out[r] = dict(events={k: rel(v) for k, v in e.items()}, bounds=list(b - t0), final=fin, churn=d["churn"], phases=per)
@@ -346,8 +355,8 @@ def extract(bag):
     # SIL host starvation shows as /tf collapse (>=100 Hz/robot healthy, <=12 starved) before jitter rises
     qc["verdict"] = "DEGRADED" if max(qc["jitter"].values()) > 0.05 or sum(qc["gaps"].values()) or (sil and qc["tf_rate"] / N < 50) else "OK"
 
-    meta = dict(bag=Path(bag).name, mode="SIL" if sil else "HIL", N=N, robots=robots, config_id=cid, commit=rc.get("git", {}).get("commit", "")[:7],
-                dirty=rc.get("git", {}).get("dirty"), source_launch=rc.get("source_launch"), trigger=trigger, params_source=psrc,
+    meta = dict(bag=Path(bag).name, mode="SIL" if sil else "HIL", N=N, robots=robots, config_id=cid, commit=(rc.get("git") or {}).get("commit", "")[:7],
+                dirty=(rc.get("git") or {}).get("dirty"), source_launch=rc.get("source_launch"), trigger=trigger, params_source=psrc,
                 virtual_target=vtarget, position_source="truth" if sil and all(len(R[r]["truth"]) for r in robots) else "kf",
                 duration=te - ts, t_start=ts - t0)
     succ = [robot_out[r]["final"]["success"] for r in robots]

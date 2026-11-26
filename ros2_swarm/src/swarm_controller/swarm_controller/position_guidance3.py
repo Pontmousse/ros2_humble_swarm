@@ -11,10 +11,11 @@ from rclpy.time import Time
 from std_srvs.srv import SetBool
 
 # Custom messages
-from swarm_interfaces.msg import CoordXY, Markers, NeighbourStates
+from swarm_interfaces.msg import Markers, NeighbourStates
 from swarm_interfaces.msg import StatePos as State
 
 from .avoidance import neighbour_repulsion
+from .zero_gate import ZeroGatedPublisher
 
 
 class GuidanceNode(Node):
@@ -82,7 +83,6 @@ class GuidanceNode(Node):
         # Control states
         self.pose = np.array([None, None, None])  # x, y, theta
         self.landmarks = [] # list of landmark coordinates in global reference frame
-        self.target = np.array([None, None])      # target position
         self.neighbours = [] # list of (x, y, vx, vy) neighbour states, map frame
         # Own map-frame velocity, for the damping term. None until the first
         # odometry arrives, which makes the law degrade to the pure potential
@@ -233,14 +233,12 @@ class GuidanceNode(Node):
 
 
         # Publishers
-        self.wrench_nbh_pub = self.create_publisher(Wrench,"avoidance_wrench", 10)
+        # Zero-gated (zero_gate.py): avoidance is exactly zero with nobody within Rant,
+        # flocking outside ENCAPSULATION; a zero goes out once, then silence.
+        self.wrench_nbh_pub = ZeroGatedPublisher(self.create_publisher(Wrench, "avoidance_wrench", 10))
         # Flocking (landmark APF) wrench, summed by the spacecraft as the
-        # ENCAPSULATION layer. Map frame, same frame as vel1. Gated by
-        # encapsulation_enabled: zero Wrench when disabled so it contributes
-        # nothing rather than dropping out (a published zero keeps the source
-        # fresh and the visualizer honest about the layer being present-but-off).
-        self.wrench_flk_pub = self.create_publisher(Wrench, "flocking_wrench", 10)
-        self.pub = self.create_publisher(CoordXY, 'target_position', self.qos_profile_reliable)
+        # ENCAPSULATION layer. Map frame, same frame as vel1. Gated by encapsulation_enabled.
+        self.wrench_flk_pub = ZeroGatedPublisher(self.create_publisher(Wrench, "flocking_wrench", 10))
         self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_position)
 
         # Mode gate. The supervisor calls this to enter/leave ENCAPSULATION; no
@@ -283,6 +281,12 @@ class GuidanceNode(Node):
         # Check if landmarks exist
         if len(msg.markers) == 0:
             # self.get_logger().warn("Received empty landmarks.")
+            self.vel1 = np.array([0, 0])
+            return
+
+        # vel1 only feeds flocking_wrench, which is zero outside ENCAPSULATION: skip the
+        # potential there. On entry the next landmarks message (<= 67 ms at 15 Hz) fills it.
+        if not self.encapsulation_enabled:
             self.vel1 = np.array([0, 0])
             return
 
@@ -467,15 +471,6 @@ class GuidanceNode(Node):
         # holds against the flock but still avoids collisions.
         if self.landmarks_expired():
             self.vel1 = np.array([0, 0])
-
-        # Calculate next waypoint position target
-        self.target = self.pose[:2] + self.step * (self.vel1 + self.vel2)
-        # self.get_logger().warn(f"switched position target to: {self.target}\n") 
-
-        msg = CoordXY()
-        msg.x = self.target[0]
-        msg.y = self.target[1]
-        self.pub.publish(msg)
 
         wmsg = Wrench()
         wmsg.force.x = self.nbh_Fx

@@ -143,9 +143,9 @@ class RunConfigSnapshot(Node):
             f"git={'yes' if document['git'] else 'n/a'})."
         )
 
-        # Publish once now (latched), then re-publish on a slow timer as a
-        # belt-and-suspenders backup for a recorder that negotiated volatile
-        # durability. The payload is a few KB, so the bag cost is negligible.
+        # Publish once now (latched); rosbag2 adopts the TRANSIENT_LOCAL durability, so a
+        # later recorder still gets it. publish_period > 0 re-publishes on a timer (the
+        # payload is ~100 KB, so the launch files use 0).
         self._publisher.publish(self._message)
         if period and period > 0.0:
             self.create_timer(period, self._republish)

@@ -57,7 +57,7 @@
     # Virtual spacecraft properties (independent of RoboMaster hardware)
     mass: 5.0
     yaw_inertia: 0.05       # kg m², transverse-axis approximation
-    timer_frequency: 0.02  # 50 Hz nominal
+    timer_frequency: 0.05  # 20 Hz (was 50): nav2_pidff samples the reference at 20 Hz; integration is exact per step
 
     # Fast, responsive laboratory configuration
     # maximum_force: 1.0      # N
@@ -66,6 +66,8 @@
     # maximum_yaw_rate: 1.0   # rad/s
 
     # 3U CubeSat-inspired configuration (5 kg)
+    # NOTE: the contributor caps (0.5-1.0 N, 0.2 Nm) are not yet scaled to this budget, so any non-zero source
+    # saturates the sum and the layer gains only set its direction. Retune pending (timer-review.md, Tier 4).
     maximum_force: 0.02      # N, 20 mN propulsion
     maximum_torque: 0.003    # N m, 3 mN m attitude control
     maximum_speed: 0.05      # m/s, operational limit
@@ -89,7 +91,7 @@
     # no later than the tracker stops. Raising this one alone reopens the gap.
     odometry_timeout: 0.25
     wrench_timeout: 0.25
-    maximum_time_step: 0.05
+    maximum_time_step: 0.1  # dt clamp, 2x the 0.05 s period so timer jitter never loses simulated time
 
     # Wrench contributors, summed every step. Each declares its own frame:
     # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
