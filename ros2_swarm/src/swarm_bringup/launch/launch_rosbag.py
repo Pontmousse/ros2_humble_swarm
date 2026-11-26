@@ -60,6 +60,7 @@ def generate_launch_description():
         '/run_config',
         '/readiness',
         '/ap_bids',
+        '/target_estimate',  # shared target centres (blind agents in SEARCH)
         # Operator overrides (N=1 capture is manual) and the SIL scene truth.
         '/mode_cmd',
         '/virtual_scene/markers',

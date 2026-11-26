@@ -39,6 +39,8 @@ class GuidanceNode(Node):
         self.declare_parameter("translation_response_scale", 1.0)
         translation_response_scale = float(
             self.get_parameter("translation_response_scale").value)
+        self.declare_parameter("landmark_nearest_k", 5)  # flocking uses the K nearest landmarks; 0 = all
+        self.landmark_nearest_k = int(self.get_parameter("landmark_nearest_k").value)
         if not (math.isfinite(translation_response_scale)
                 and 0.0 < translation_response_scale <= 1.0):
             raise ValueError("translation_response_scale must be in (0, 1]")
@@ -284,8 +286,8 @@ class GuidanceNode(Node):
             self.vel1 = np.array([0, 0])
             return
 
-        # Extract landmarks
-        landmarks = make_array(msg.markers) / 100.0  # Convert cm to m
+        # Extract landmarks, keeping the K nearest (body-frame range == map-frame range)
+        landmarks = nearest_k(make_array(msg.markers) / 100.0, self.landmark_nearest_k)  # cm -> m
 
         # Transform to global frame from local robot frame
         theta_rad = math.radians(self.pose[2])
@@ -531,6 +533,11 @@ def make_array(list_coord):
         arr[i, 0] = list_coord[i].x
         arr[i, 1] = list_coord[i].y
     return arr
+
+
+def nearest_k(points, k):
+    """The k rows of a robot-relative (N, 2) array closest to the robot; all if k <= 0 or N <= k."""
+    return points if k <= 0 or len(points) <= k else points[np.argpartition(np.hypot(points[:, 0], points[:, 1]), k)[:k]]
 
 
 

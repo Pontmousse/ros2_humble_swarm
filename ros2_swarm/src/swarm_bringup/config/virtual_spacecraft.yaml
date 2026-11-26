@@ -37,6 +37,21 @@
     translation_response_scale: 1.0
     rotation_response_scale: 1.0
 
+    # Flocking (position_guidance3) and the pointing centroid (pointing_guidance2)
+    # use only the K landmarks nearest the robot (0 = all). The memory never
+    # forgets, so averaging the whole cloud let far-side points dilute the
+    # near-edge push exactly when the robot closes in; also bounds per-frame CPU.
+    landmark_nearest_k: 5
+
+    # Shared target estimate. pointing_guidance2 broadcasts its landmark-memory
+    # centre on the flat /target_estimate topic while it sees the target; a robot
+    # in SEARCH with no landmarks of its own points at the neighbours' estimate
+    # (pointing_guidance2) and drifts toward it (bounding_box_search). Readiness
+    # still requires the robot's own perception. false = off on both sides.
+    share_target: true
+    share_timeout: 2.0        # s since RECEIPT (HIL clocks are not synced)
+    share_rate: 2.0           # Hz, broadcast rate
+
 /**/virtual_spacecraft:
   ros__parameters:
     # Virtual spacecraft properties (independent of RoboMaster hardware)
@@ -245,6 +260,14 @@
     # Set random_seed non-zero to replay an identical run.
     lateral_kick_fraction: 0.15
     random_seed: 0
+
+    # Blind drift toward the shared target estimate (share_target above): fire
+    # toward it until the closing speed reaches share_drift_speed, then coast.
+    # No firing within share_drift_stop of the centre (own camera takes over);
+    # wall firings keep priority.
+    share_drift_speed: 0.03   # m/s, under the 0.05 m/s cruise cap
+    share_drift_force: 0.5    # N, clamped by maximum_force here and the spacecraft clamp
+    share_drift_stop: 1.0     # m from the shared centre
 
     qos_depth: 10
     qos_reliability: "RELIABLE"

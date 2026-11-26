@@ -9,6 +9,8 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import SetBool
+from swarm_interfaces.msg import TargetEstimate
+from .pointing_guidance2 import SHARE_QOS, SharedTargets, now_s
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -106,6 +108,15 @@ def boundary_firing(
 
     force_x, force_y = limit_vector(force_x, force_y, firing_force)
     return force_x, force_y, near_boundary
+
+
+def drift_firing(x, y, velocity_x, velocity_y, centre_x, centre_y, drift_speed, firing_force, stop_distance):
+    """Fire toward a shared target centre until the closing speed reaches drift_speed, then coast.
+    No firing within stop_distance: the robot's own camera takes over from there."""
+    dx, dy = centre_x - x, centre_y - y
+    distance = math.hypot(dx, dy)
+    if distance <= stop_distance or (velocity_x * dx + velocity_y * dy) / distance >= drift_speed: return 0.0, 0.0
+    return firing_force * dx / distance, firing_force * dy / distance
 
 
 def qos_profile_from_parameters(node: Node) -> QoSProfile:
@@ -223,6 +234,14 @@ class BoundingBoxSearchNode(Node):
         self.enable_service = self.create_service(
             SetBool, "search/enable", self.handle_enable
         )
+        # Drift toward the neighbours' shared target estimate while blind (free drift, not flocking)
+        for name, default in (("share_target", True), ("share_timeout", 2.0), ("share_drift_speed", 0.03),
+                              ("share_drift_force", 0.5), ("share_drift_stop", 1.0)): self.declare_parameter(name, default)
+        self.share_target = bool(self.get_parameter("share_target").value)
+        self.drift_speed, self.drift_force, self.drift_stop = (float(self.get_parameter(n).value) for n in ("share_drift_speed", "share_drift_force", "share_drift_stop"))
+        self.shared = SharedTargets(self.get_namespace().strip("/"), float(self.get_parameter("share_timeout").value))
+        if self.share_target:
+            self.create_subscription(TargetEstimate, "/target_estimate", lambda m: self.shared.add(m, now_s(self)), SHARE_QOS)
         self.create_timer(self.timer_frequency, self.update)
         self.get_logger().info("Bounding-box free-drift search guidance ready")
 
@@ -362,6 +381,10 @@ class BoundingBoxSearchNode(Node):
             global_force_x = throttle * self.initial_force_x
             global_force_y = throttle * self.initial_force_y
             torque = throttle * self.initial_torque
+        elif not near_boundary and self.share_target and (centre := self.shared.centre(now_s(self))) is not None:
+            global_force_x, global_force_y = drift_firing(
+                reference.pose.pose.position.x, reference.pose.pose.position.y, global_velocity_x, global_velocity_y,
+                *centre, self.drift_speed, min(self.drift_force, self.maximum_force), self.drift_stop)
 
         global_force_x, global_force_y = limit_vector(
             global_force_x, global_force_y, self.maximum_force

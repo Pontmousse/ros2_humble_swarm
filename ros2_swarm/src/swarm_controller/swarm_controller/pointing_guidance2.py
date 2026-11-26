@@ -7,10 +7,11 @@ import math, numpy as np
 
 # Custom messages
 from swarm_interfaces.msg import StatePos as State
-from swarm_interfaces.msg import Markers
+from swarm_interfaces.msg import Markers, TargetEstimate
 from std_msgs.msg import Float64, String
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
+from .position_guidance3 import nearest_k
 
 class GuidanceNode(Node):
     def __init__(self):
@@ -57,6 +58,8 @@ class GuidanceNode(Node):
         # successive kicks rang the yaw axis up to ~0.75 rad/s. Ramping the
         # torque (soft-start) lets the error shrink and damping grow before the
         # cap is reached. 0.4 Nm/s reaches the 0.2 Nm cap from zero in ~0.5 s.
+        self.declare_parameter("landmark_nearest_k", 5)  # centroid of the K nearest landmarks; 0 = all
+        self.landmark_nearest_k = int(self.get_parameter("landmark_nearest_k").value)
         self.declare_parameter("torque_slew_rate", 0.4)       # Nm/s
         self.torque_slew_rate = float(self.get_parameter("torque_slew_rate").value)
 
@@ -118,6 +121,19 @@ class GuidanceNode(Node):
                                  QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                                             durability=DurabilityPolicy.TRANSIENT_LOCAL))
 
+        # Shared target estimate (flat /target_estimate broadcast): publish our landmark-memory
+        # centre while we see the target; in SEARCH without own landmarks, point at the neighbours'.
+        self.declare_parameter("share_target", True)
+        self.declare_parameter("share_timeout", 2.0)
+        self.declare_parameter("share_rate", 2.0)  # Hz
+        self.share_target = bool(self.get_parameter("share_target").value)
+        self.shared = SharedTargets(self.get_namespace().strip('/'), float(self.get_parameter("share_timeout").value))
+        self.centre, self.centre_n = None, 0  # own map-frame landmark-memory centre
+        if self.share_target:
+            self.share_pub = self.create_publisher(TargetEstimate, '/target_estimate', SHARE_QOS)
+            self.create_subscription(TargetEstimate, '/target_estimate', lambda m: self.shared.add(m, now_s(self)), SHARE_QOS)
+            self.create_timer(1.0 / float(self.get_parameter("share_rate").value), self.publish_estimate)
+
         # Publishers
         self.pub = self.create_publisher(Float64, 'target_orientation', self.qos_profile)
         self.wrench_pub = self.create_publisher(Wrench, 'pointing_wrench', self.qos_profile)
@@ -161,21 +177,19 @@ class GuidanceNode(Node):
         # empty frame re-arming a stale target_lcd was a direct contributor to
         # the yaw ring-up. target_lcd=None -> damp-only below.
         if len(msg.markers) == 0:
-            self.target_lcd = None
+            self.target_lcd, self.centre = None, None
             return
 
-        # Extract landmarks
-        landmarks = make_array(msg.markers) / 100.0  # Convert cm to m
-
-        # Transform to global frame from local robot frame
+        # Rotate all landmarks (cm -> m) into map-frame offsets from the robot
         theta_rad = math.radians(self.pose[2])
         rot_matrix = np.array([
             [math.cos(theta_rad), -math.sin(theta_rad)],
             [math.sin(theta_rad),  math.cos(theta_rad)]
         ])
-        # self.get_logger().warn(f"rotation: {rot_matrix}\n")
-        # self.get_logger().warn(f"landmarks: {landmarks.T}\n")
-        landmarks_global = self.pose[:2] + np.matmul(rot_matrix, landmarks.T).T
+        rel = np.matmul(rot_matrix, (make_array(msg.markers) / 100.0).T).T
+        self.centre, self.centre_n = self.pose[:2] + rel.mean(axis=0), len(rel)  # whole memory: shared estimate
+        # Pointing uses the K nearest (same set flocking uses); a rotation keeps ranges
+        landmarks_global = self.pose[:2] + nearest_k(rel, self.landmark_nearest_k)
 
         # Calculate landmark centroid in global frame
         self.lc = np.mean(landmarks_global, axis=0)
@@ -252,14 +266,18 @@ class GuidanceNode(Node):
         #   - otherwise (perception lost/stale, no markers, no pose) -> damp-only
         # Damp-only is NOT a hard zero: it keeps -Kd*wz alive so a coasting yaw
         # rate still decays (the fix for the ring-up).
-        if self.landmarks_expired() or self.target_lcd is None or (None in self.pose):
+        target = None if self.landmarks_expired() or None in self.pose else self.target_lcd
+        if target is None and self.share_target and self.current_mode == 'search' and None not in self.pose \
+                and (c := self.shared.centre(now_s(self))) is not None:
+            target = math.degrees(math.atan2(c[1] - self.pose[1], c[0] - self.pose[0]))  # blind: face the neighbours' estimate
+        if target is None:
             desired = self._damping_torque()
         else:
             # Active pointing: publish the advisory setpoint and the PD torque.
             msg = Float64()
-            msg.data = self.target_lcd
+            msg.data = target
             self.pub.publish(msg)
-            err = math.radians(wrap_deg(self.target_lcd - self.pose[2]))
+            err = math.radians(wrap_deg(target - self.pose[2]))
             wz = self.craft_wz if self.craft_wz is not None else 0.0
             desired = bound(
                 self.heading_torque_gain * err - self.yaw_damping_gain * wz,
@@ -268,6 +286,31 @@ class GuidanceNode(Node):
         wmsg = Wrench()
         wmsg.torque.z = self._slew(desired, now)
         self.wrench_pub.publish(wmsg)
+
+    def publish_estimate(self):
+        if self.centre is None or self.landmarks_expired(): return  # only share what we currently see
+        m = TargetEstimate(robot=self.shared.me, x=float(self.centre[0]), y=float(self.centre[1]), count=min(self.centre_n, 65535))
+        m.header.stamp, m.header.frame_id = self.get_clock().now().to_msg(), 'swarm_map'
+        self.share_pub.publish(m)
+
+
+SHARE_QOS = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT)  # flat broadcast, like /readiness
+now_s = lambda node: node.get_clock().now().nanoseconds * 1e-9
+
+
+class SharedTargets:
+    """Neighbours' target-centre estimates, aged by RECEIVE time (HIL clocks are not synced)."""
+    def __init__(self, me, timeout): self.me, self.timeout, self.est = me, timeout, {}
+
+    def add(self, msg, now):
+        if msg.robot != self.me and msg.count > 0: self.est[msg.robot] = (msg.x, msg.y, msg.count, now)
+
+    def centre(self, now):
+        """Count-weighted mean of the fresh estimates, or None."""
+        e = [v for v in self.est.values() if now - v[3] <= self.timeout]
+        if not e: return None
+        w = sum(v[2] for v in e)
+        return sum(v[0] * v[2] for v in e) / w, sum(v[1] * v[2] for v in e) / w
 
 
 def bound(input, limit):

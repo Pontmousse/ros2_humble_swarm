@@ -24,6 +24,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/NeighbourStates.msg"
   "msg/ApBids.msg"
   "msg/Readiness.msg"
+  "msg/TargetEstimate.msg"
   DEPENDENCIES sensor_msgs std_msgs
 )
 

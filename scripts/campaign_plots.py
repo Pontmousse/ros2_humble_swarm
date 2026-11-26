@@ -170,7 +170,10 @@ def main():
            per_robot("trk", 1e3), "tracking err [mm]")
     P = next(iter(R.values()))[0]["params"]
     if any(run["meta"]["N"] > 1 for run, _ in R.values()):
-        def seps(run, s): return [(k[4:], s[k], CAT[i]) for i, k in enumerate(sorted(x for x in s.files if x.startswith("sep/")))]
+        def seps(run, s):  # more pairs than hues (N>=5): all pairs grey, swarm minimum in ink
+            ks = sorted(x for x in s.files if x.startswith("sep/"))
+            return [(k[4:], s[k], CAT[i]) for i, k in enumerate(ks)] if len(ks) <= len(CAT) else \
+                [("_", s[k], "#c3c2bd") for k in ks] + [("min pair", np.nanmin([s[k] for k in ks], 0), INK)]
         R_all = R; R = {k: v for k, v in R_all.items() if v[0]["meta"]["N"] > 1}
         ts_fig("fig04_separation", "pairwise centre distance vs avoidance radii; contact = 2 × robot radius.", seps, "separation [m]",
                [(P["R_influence"], "influence"), (P["R_saturate"], "saturation"), (P["R_contact"], "contact")])

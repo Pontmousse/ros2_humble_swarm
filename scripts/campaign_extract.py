@@ -236,7 +236,8 @@ def extract(bag):
                        range_est=rng_est, lateral=lat, face=face, pointing=pnt, yawrate=yawrate, standoff=standoff, phase=ph,
                        trk=interp(grid, trk_t, trk), trk_true=interp(grid, trk_t, trk_true)).items()})
         # Dock quality at the moment the stack declared DOCK.
-        fin = dict(docked=e["dock"] is not None, final_ap=d["final_ap"], time_to_dock=(e["dock"] - b[0]) if e["dock"] else nan)
+        fin = dict(docked=e["dock"] is not None, final_ap=d["final_ap"], time_to_dock=(e["dock"] - b[0]) if e["dock"] else nan,
+                   search_time=max(0.0, (e["encap"] or end) - e["arm"]) if e["arm"] else nan)  # blind time: arm -> first ENCAPSULATION
         if e["dock"]:
             i = min(np.searchsorted(grid, e["dock"]), len(grid) - 1)
             fin.update(final_range=rng[i], final_range_est=rng_est[i], final_face=abs(face[i]), final_lateral=lat[i])
@@ -353,7 +354,8 @@ def extract(bag):
     run = dict(meta=meta, params=P, qc=qc, warnings=warn, swarm_bounds=list(sb - t0), robots=robot_out, pairs=pairs, swarm=swarm,
                consensus=consensus, auction=auction,
                summary=dict(n_success=sum(succ), n_docked=sum(robot_out[r]["final"]["docked"] for r in robots), success=all(succ),
-                            mission_time=(max(docks) - sb[0]) if all(docks) else nan, min_sep=np.nanmin(msep) if N > 1 else nan,
+                            mission_time=(max(docks) - sb[0]) if all(docks) else nan,
+                            search_time_max=np.nanmax([robot_out[r]["final"]["search_time"] for r in robots]), min_sep=np.nanmin(msep) if N > 1 else nan,
                             min_sep_approach=swarm["approach"]["min_sep"],
                             trk_p95=np.nanmax([robot_out[r]["phases"][p]["trk_p95"] for r in robots for p in PHASES[:3]])))
     if scene: series.update(aps=np.array([(a, *v) for a, v in sorted(scene["aps"].items())]), centroid=scene["centroid"],
