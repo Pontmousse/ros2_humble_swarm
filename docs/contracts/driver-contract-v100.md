@@ -1,6 +1,6 @@
 # Driver contract v1.0.0
 
-The interface between our **control container** (this repo, `DRIVER_STACK=v2`) and the
+The interface between our **control container** (this repo, branch `split-containers`) and the
 **drivers container** (swarm_rover_v2 image, maintained upstream). Anything listed here is what
 our side relies on; a change to any of it is a contract change and gets a new version file
 (`driver-contract-vXYZ.md`), never an edit of this one.
@@ -32,9 +32,9 @@ changelog at the bottom. Re-check the items in [Upgrade checklist](#upgrade-chec
 | Topic | Type | Producer | QoS (pub) | Frame / units | Stamp | Rate | Our consumer |
 |---|---|---|---|---|---|---|---|
 | `odom` | `nav_msgs/Odometry` | chassis | reliable, depth 1 | `RMx/odom` → child `RMx/base_link`; x forward, y left, yaw CCW; twist in body frame, m/s, rad/s | `now()` at decode | 50 Hz (`odom_rate`) | pose_kf / pose_publisher, guidance |
-| `gnss/position` | `geometry_msgs/PointStamped` | gnss | reliable, depth 1 | `marvelmind` (shared map frame, no robot prefix); metres | receive time − `latency_ms` (0) | per valid fix, ~6 Hz; **only published while subscribed** | `gnss_bridge` |
-| `aruco/landmarks` | `swarm_interfaces/ArucoMarkerArray` | aruco_camera_2in1 | reliable, depth 10 | `RMx/camera_optical` (x right, y down, z forward); metres | V4L2 capture time | one per processed frame, capped by `max_rate` (15 Hz in our overlay); **empty arrays included** | `aruco_bridge` |
-| `aruco/markers` | `swarm_interfaces/ArucoMarkerArray` | aruco_camera_2in1 | same | same | same header as `aruco/landmarks` | same | `aruco_bridge` |
+| `gnss/position` | `geometry_msgs/PointStamped` | gnss | reliable, depth 1 | `marvelmind` (shared map frame, no robot prefix); metres | receive time − `latency_ms` (0) | per valid fix, ~6 Hz; **only published while subscribed** | `perception` (`gnss_convert`) |
+| `aruco/landmarks` | `swarm_interfaces/ArucoMarkerArray` | aruco_camera_2in1 | reliable, depth 10 | `RMx/camera_optical` (x right, y down, z forward); metres | V4L2 capture time | one per processed frame, capped by `max_rate` (15 Hz in our overlay); **empty arrays included** | `perception` (`aruco_convert`) |
+| `aruco/markers` | `swarm_interfaces/ArucoMarkerArray` | aruco_camera_2in1 | same | same | same header as `aruco/landmarks` | same | `perception` (`aruco_convert`) |
 
 Optional, not relied on: `imu` (`sensor_msgs/Imu`, off: `imu_rate: 0`), `battery`
 (`sensor_msgs/BatteryState`), `diagnostics` and `health` (`DiagnosticArray`),
@@ -68,19 +68,20 @@ std_msgs/Header header           # copied from the image (timestamp + camera fra
 ArucoMarker[] markers
 ```
 
-## 3. Bridges: drivers contract → our internal topics
+## 3. Conversion: drivers contract → our internal inputs
 
-Run in our container only under `DRIVER_STACK=v2`
-(`launch_decentralized_agent.py` and `launch_centralized_swarm.py`, hardware path only).
+Done inside our `perception` node (`swarm_target/perception_node.py`, `position_input`/`marker_input: v2`),
+which feeds the results straight into its KF and marker memories. With `debug_topics` it also republishes
+them under the old names for bags; `targets_unf` is always republished (readiness_consensus liveness).
 
-| Bridge | In | Out | Mapping |
+| Converter | In | Out | Mapping |
 |---|---|---|---|
-| `swarm_marvelmind/gnss_bridge` | `gnss/position` | `mm_pos_unf` (`marvelmind_ros2_msgs/HedgePositionAddressed`) | `address` = our `BEACON_ADDR`; `timestamp_ms` = header stamp in ms (new per fix, passes pose_kf's fresh gate); `x/y/z_m` copied; `flags` 0. One message per fix, no timer republish |
-| `swarm_aruco/aruco_bridge` | `aruco/landmarks`, `aruco/markers` | `landmarks_unf`, `targets_unf` (`swarm_interfaces/Markers`) | body frame, cm: `x = 100·z·sx`, `y = −100·x·sy`; normal = `(d.x, d.z)` of `direction`, flipped if `d.z < 0`, normalised (`[right, forward]`); NaN poses and poses beyond `max_range` dropped; `ids` kept in order; header copied, empty frames forwarded |
+| `swarm_marvelmind/gnss_convert.to_hedge` | `gnss/position` | KF Marvelmind input (`mm_pos_unf`, `marvelmind_ros2_msgs/HedgePositionAddressed`) | `address` = our `BEACON_ADDR`; `timestamp_ms` = header stamp in ms (new per fix, passes pose_kf's fresh gate); `x/y/z_m` copied; `flags` 0. One message per fix, no timer republish |
+| `swarm_aruco/aruco_convert.to_markers` | `aruco/landmarks`, `aruco/markers` | marker-memory input (`landmarks_unf`, `targets_unf`, `swarm_interfaces/Markers`) | body frame, cm: `x = 100·z·sx`, `y = −100·x·sy`; normal = `(d.x, d.z)` of `direction`, flipped if `d.z < 0`, normalised (`[right, forward]`); NaN poses and poses beyond `max_range` dropped; `ids` kept in order; header copied, empty frames forwarded |
 
 Scale and range per marker set come from `LANDMARK_SCALE/RANGE` and `TARGET_SCALE/RANGE` at the
-top of each launch file (shared with our own detectors). Tests: `swarm_aruco/test/test_aruco_bridge.py`,
-`swarm_marvelmind/test/test_gnss_bridge.py`.
+top of each launch file. Tests: `swarm_aruco/test/test_aruco_convert.py`,
+`swarm_marvelmind/test/test_gnss_convert.py`, `swarm_target/test/test_perception.py`.
 
 ## 4. Marker sets
 
@@ -97,8 +98,8 @@ top of each launch file (shared with our own detectors). Tests: `swarm_aruco/tes
 | Image | `drivers_image` | `swarm_image` |
 | Network / IPC | `host` / `host` | `host` / `host` (shared `/dev/shm` for Fast DDS shared memory) |
 | Privileged | yes, `/dev:/dev` | yes |
-| Env | `ROBOT_NAME`, `SWARM_NODES`, `ROS_DOMAIN_ID`, `RMW_IMPLEMENTATION`, `ROS_LOCALHOST_ONLY`, `OMP/OPENBLAS_NUM_THREADS` | as before, plus `DRIVER_STACK=v2` |
-| Nodes | `SWARM_NODES = chassis,gnss,aruco_camera_2in1,health` | everything except our drivers |
+| Env | `ROBOT_NAME`, `SWARM_NODES`, `ROS_DOMAIN_ID`, `RMW_IMPLEMENTATION`, `ROS_LOCALHOST_ONLY`, `OMP/OPENBLAS_NUM_THREADS` | as before (no driver switch: the drivers container is always deployed) |
+| Nodes | `SWARM_NODES = chassis,gnss,aruco_camera_2in1,health` | everything except drivers (perception, guidance, control, swarm) |
 | Stop | SIGINT (image `STOPSIGNAL`), 30 s timeout | unchanged |
 
 Both containers must use the same `ROS_DOMAIN_ID`, `RMW_IMPLEMENTATION` (`rmw_fastrtps_cpp`) and
@@ -129,9 +130,9 @@ Everything else (other params files, URDF, beacon offsets) comes from the image.
 - `mode_supervisor` waits 0.5 s for `engage_wheels`; the drivers chassis may take up to 3 s to
   ack. The call can be reported as timed out while it still succeeds.
 - No `mm_imu` (Marvelmind IMU) under v2. pose_kf runs without it.
-- No LED greeting or sound: our launch skips them under v2.
+- No LED greeting or sound (they were robomaster_ros features).
 - Calibration files exist only for RM1 (`159CKC50070ECX`) and RM3 (`159CG9J0050797`). Other robots
-  publish IDs with NaN poses (dropped by the bridge) until calibrated.
+  publish IDs with NaN poses (dropped by `aruco_convert`) until calibrated.
 - Our ArUco scale corrections (landmarks 1.0/1.0, targets 1.15/0.8) were tuned for our old camera
   calibration. Re-check them with a tape measure on the USB cameras.
 
@@ -152,3 +153,4 @@ Everything else (other params files, URDF, beacon offsets) comes from the image.
 | Version | Date | Drivers image | Change |
 |---|---|---|---|
 | 1.0.0 | 2026-11-26 | `app-4be73e1-drivers` | First contract: chassis, GNSS, USB camera + ArUco in the drivers container; gnss_bridge and aruco_bridge on our side |
+| 1.0.0 | 2026-11-26 | `app-4be73e1-drivers` | Same topics. Our side: the bridge nodes and the `DRIVER_STACK` switch are gone; `perception` converts the drivers' topics directly (nodes-to-functions Phase 2) |

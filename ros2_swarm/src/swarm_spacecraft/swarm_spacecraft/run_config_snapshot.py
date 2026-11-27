@@ -2,7 +2,7 @@
 
 Nothing in the stack used to record *which configs produced a bag*. The YAMLs that
 parameterize a run (virtual_spacecraft.yaml, the scene file, swarm_config.yaml) and the
-env flags that reshape it (VIRTUAL_*, KF_LOCALIZATION, TARGET_ESTIMATOR, SCENE_FILE, ...)
+env flags that reshape it (VIRTUAL_*, DIRECT_CMD_VEL, SCENE_FILE, ...)
 lived only on disk / in the shell at launch time, so a bag reviewed later could not be
 tied back to the configuration that generated it.
 

@@ -40,15 +40,10 @@
       - container_info.container.Image == image_info.images[0].Id
       - "'ROBOT_NAME=' ~ swarm_env.ROBOT_NAME in container_info.container.Config.Env"
       - "'BEACON_ADDR=' ~ swarm_env.BEACON_ADDR in container_info.container.Config.Env"
-      - "'ROBOT_SERIAL=' ~ swarm_env.ROBOT_SERIAL in container_info.container.Config.Env"
       - "'VIRTUAL_SPACECRAFT=' ~ swarm_env.VIRTUAL_SPACECRAFT in container_info.container.Config.Env"
-      - "'KF_LOCALIZATION=' ~ swarm_env.KF_LOCALIZATION in container_info.container.Config.Env"
-      - "'TARGET_ESTIMATOR=' ~ swarm_env.TARGET_ESTIMATOR in container_info.container.Config.Env"
       - "'ROS_DOMAIN_ID=' ~ swarm_env.ROS_DOMAIN_ID in container_info.container.Config.Env"
       - "'RMW_IMPLEMENTATION=' ~ swarm_env.RMW_IMPLEMENTATION in container_info.container.Config.Env"
       - "'ROS_LOCALHOST_ONLY=' ~ swarm_env.ROS_LOCALHOST_ONLY in container_info.container.Config.Env"
-      - "'CONN_TYPE=' ~ swarm_env.CONN_TYPE in container_info.container.Config.Env"
-      - "'DRIVER_STACK=' ~ swarm_env.DRIVER_STACK in container_info.container.Config.Env"
 
     fail_msg: >
       {{ inventory_hostname }} deployment validation FAILED.
@@ -68,7 +63,7 @@
     name: "{{ inventory_hostname }}-drivers"
   register: drivers_info
 
-- name: Validate drivers container (driver_stack=v2)
+- name: Validate drivers container
   ansible.builtin.assert:
     that:
       - drivers_info.exists
@@ -83,10 +78,3 @@
       {{ inventory_hostname }}-drivers is not running {{ drivers_image }} with
       ROBOT_NAME={{ swarm_env.ROBOT_NAME }} and ipc host (both containers).
     success_msg: "{{ inventory_hostname }}-drivers runs {{ drivers_image }}."
-  when: driver_stack == 'v2'
-
-- name: Validate no drivers container (driver_stack != v2)
-  ansible.builtin.assert:
-    that: not drivers_info.exists
-    fail_msg: "{{ inventory_hostname }}-drivers exists but driver_stack={{ driver_stack }}: two stacks would drive the same robot."
-  when: driver_stack != 'v2'

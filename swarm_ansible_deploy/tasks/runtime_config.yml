@@ -14,31 +14,14 @@
       ROBOT_NAME:         "{{ robot_cfg.name }}"
       LAUNCH_FILE:        "{{ launch_file }}"
       BEACON_ADDR:        "{{ robot_cfg.beacon | string }}"
-      ROBOT_SERIAL:       "{{ robot_cfg.serial }}"
       INITIAL_ORIENT:     "{{ robot_cfg.init_orientation | string }}"
-      ROBOT_IP:           "{{ robot_cfg.ip | default('') }}"
-      MARVELMIND_PORT:    "{{ robot_cfg.marvelmind_port | default('/dev/ttyACM0') }}"
       CONTACT_GPIO:       "{{ robot_cfg.contact_gpio | default(contact_gpio) | string }}"
       ROS_DOMAIN_ID:      "{{ ros_domain_id }}"
       RMW_IMPLEMENTATION: "{{ rmw_implementation }}"
       ROS_LOCALHOST_ONLY: "{{ ros_localhost_only }}"
       VIRTUAL_SPACECRAFT: "{{ virtual_spacecraft }}"
       DIRECT_CMD_VEL:     "{{ direct_cmd_vel }}"
-      KF_LOCALIZATION:    "{{ kf_localization }}"
-      TARGET_ESTIMATOR:   "{{ target_estimator }}"
       GUIDANCE_VIZ:       "{{ guidance_viz }}"
       OMP_NUM_THREADS:        "{{ lib_threads }}"
       OPENBLAS_NUM_THREADS:   "{{ lib_threads }}"
       OPENCV_FOR_THREADS_NUM: "{{ lib_threads }}"
-      # Set explicitly, never left to an implicit default. The launch file's
-      # fallback changed between image versions -- v9.1.5 passed no conn_type
-      # to s1.launch at all, so the driver's own "sta" default won, while HEAD
-      # defaults to "rndis". That is how two robots deployed from the same
-      # playbook ended up on different transports with nothing in this repo
-      # recording the difference. Pinning it here makes the transport a
-      # property of the deployment rather than of whichever image tag happens
-      # to be installed on a given Pi.
-      CONN_TYPE:          "{{ conn_type }}"
-      CAMERA_SOURCE:      "{{ camera_source }}"
-      DRIVER_STACK:       "{{ driver_stack }}"
-      USB_CAM_DEVICE:     "{{ usb_cam_device }}"

@@ -29,10 +29,14 @@ want in a bag anyway.
 
 ## Rules for every phase
 
-- **ROS-free core, thin node.** Algorithms move into plain modules (functions/classes, no rclpy), like
-  `swarm_target/estimators.py`, `swarm_controller/avoidance.py`, `aruco_bridge.convert`. The merged
-  node only wires callbacks to those functions. The modules are unit-tested without ROS
-  (see `test_shared_target.py`, `test_aruco_bridge.py`).
+- **ROS-free core, thin node, one module per job.** Algorithms move into plain modules (functions/classes,
+  ROS-free where possible), like `swarm_target/estimators.py`, `marker_memory.py`, `pose_history.py`,
+  `swarm_controller/avoidance.py`, `aruco_convert.convert`. The merged node file only declares parameters
+  and wires callbacks, timers and publishers to those modules; **no single huge node script**. Each phase
+  plan carries a module-layout table (module → job → origin). The modules are unit-tested without ROS
+  (see `test_shared_target.py`, `test_aruco_convert.py`, `test_perception.py`).
+- **Old path deleted, not switched.** On `split-containers` a merged phase replaces the old nodes and their
+  launch blocks outright; the `hil` branch is the rollback.
 - **Outward contract unchanged per phase.** Topics consumed by nodes outside the merged group keep their
   name, type, QoS and **rate**. Internal topics disappear, unless `debug_topics:=true` republishes them
   for a bag.
@@ -71,6 +75,34 @@ Tiers 1 and 2 of `timer-review.md`:
 Mostly parameters, all reversible. **~165 msg/s less per robot.**
 
 ## Phase 2: perception (#1–5), first priority
+
+**Status: done 2026-11-26 on `split-containers`** (steps 2b–2d in one go; 2a skipped because launch params and remaps
+apply process-wide). One `perception` process per robot replaces pose_kf, both estimators and both bridges. The old
+nodes, the `DRIVER_STACK`/`KF_LOCALIZATION`/`TARGET_ESTIMATOR` switches and the robomaster-stack launch blocks are deleted.
+
+| Module | Job |
+|---|---|
+| `swarm_filter/pose_kf.py` | KF base node, unchanged maths (no executable of its own) |
+| `swarm_target/marker_memory.py` | `MarkerMemory`: frozen-stamp gate, `lift`, `project`, `memory_viz` (moved verbatim from the estimator node) |
+| `swarm_target/pose_history.py` | pose ring buffer for `lift_at_stamp` (default off until a HIL A/B) |
+| `swarm_aruco/aruco_convert.py`, `swarm_marvelmind/gnss_convert.py` | the former bridges' pure conversions |
+| `swarm_target/perception_node.py` | thin node: inputs per `position_input`/`marker_input` (`v2` or `legacy`), projection in the KF's `_publish` |
+
+**Checked:**
+- unit tests (`test_perception.py` and others);
+- launch node lists for the Pi, SIL and HIL with a virtual target;
+- live v2 inputs on an isolated domain: `pose`, `landmarks` and `targets` at 20 Hz, `targets_unf` at the camera rate;
+- SIL N=2: QC OK, 2/2 docked, per-phase `trk_p95` 18–34 mm, capture sync 3 ms.
+
+**CPU** (SIL, both robots):
+- `perception` uses 269% of a core against 277% for pose_kf plus four estimators. The merge alone barely moves CPU on the dev PC.
+- The real cost was OpenBLAS threads spinning in the KF: capped at one thread (as the Pi already is, `lib_threads`),
+  `perception` drops to 43%, and the whole stack from 457% to 238%. `sil_batch.py` now sets the caps.
+
+**Not yet:**
+- HIL on one robot with the rebuilt image;
+- the `lift_at_stamp` A/B;
+- `pidstat` on a Pi.
 
 **Why first:**
 - It is where the freshness guarantee lives.

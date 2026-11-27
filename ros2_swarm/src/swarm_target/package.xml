@@ -3,13 +3,20 @@
 <package format="3">
   <name>swarm_target</name>
   <version>0.0.0</version>
-  <description>Target/landmark providers: the virtual_scene geometric simulator and the ArUco-fused landmark/target memory estimator that feed the controllers' landmarks/targets contract.</description>
+  <description>Target/landmark providers: the virtual_scene geometric simulator and the perception node (localization KF + ArUco-fused landmark/target memories) that feed the controllers' pose and landmarks/targets contracts.</description>
   <maintainer email="elghali@todo.todo">elghali</maintainer>
   <license>TODO: License declaration</license>
 
   <depend>rclpy</depend>
   <depend>swarm_interfaces</depend>
   <depend>visualization_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>marvelmind_ros2_msgs</depend>
+  <!-- perception node: KF base class and the v2 driver-topic converters -->
+  <depend>swarm_filter</depend>
+  <depend>swarm_aruco</depend>
+  <depend>swarm_marvelmind</depend>
   <depend>python3-yaml</depend>
 
   <test_depend>ament_copyright</test_depend>

@@ -2,41 +2,19 @@ from launch import LaunchDescription
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, ExecuteProcess
-from launch.actions import RegisterEventHandler
-from launch.event_handlers import OnProcessExit
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch_xml.launch_description_sources import XMLLaunchDescriptionSource
 
 import os
-from launch.substitutions import LaunchConfiguration
 
 gpio_line = int(os.environ.get("GPIO_LINE", "4"))
 # BCM GPIO lines of the contact limit switches (comma-separated); any pressed = contact.
 contact_gpio_lines = [int(x) for x in os.environ.get("CONTACT_GPIO", "5").split(",") if x.strip()]
-# Camera backend: csi (default) / usb -> ext_camera; robomaster -> the driver's
-# own camera (h264 ON_DEMAND, decoded once by video_processor), as centralized does.
-camera_source = os.getenv("CAMERA_SOURCE", "csi").lower()
-rm_camera = camera_source == "robomaster"
-# DRIVER_STACK=v2: chassis, Marvelmind and USB camera+ArUco run in the separate drivers container
-# (swarm_rover_v2 image). This stack then drops its own drivers and adds gnss_bridge + aruco_bridge.
-v2_drivers = os.getenv("DRIVER_STACK", "robomaster").lower() == "v2"
-# ArUco output scale / max range (m) per marker set, shared by the detectors and aruco_bridge.
+# Chassis, Marvelmind and USB camera + ArUco run in the drivers container (swarm_rover_v2 image); this
+# stack reads its gnss/position and aruco/{landmarks,markers} in the perception node.
+# ArUco output scale / max range (m) per marker set (aruco_convert in perception).
 LANDMARK_SCALE, LANDMARK_RANGE = (1.0, 1.0), 2.5
 TARGET_SCALE, TARGET_RANGE = (1.15, 0.8), 4.0
-
-# KF_LOCALIZATION=1 swaps the localization fuser for pose_kf (two decoupled
-# linear Kalman filters). Same output contract as pose_publisher, so downstream
-# consumers are unchanged. Default off. See pose_kf.py.
-kf_on = os.environ.get("KF_LOCALIZATION", "").lower() in ("1", "true", "yes", "on")
-
-# TARGET_ESTIMATOR=1 inserts the landmark_estimator between the ArUco detectors
-# and the controllers in place of aruco_filter: a map-frame memory keyed by ArUco
-# ID, republished as a steady body-frame cloud through the live pose, so the
-# controller reference persists when markers leave the FOV (killing the
-# perception-starvation yaw limit cycle). Same landmarks/targets output contract
-# and QoS as aruco_filter, so controllers are untouched. Default off.
-estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
 # GUIDANCE_VIZ=false (Pi, headless batch): no RViz markers; the dev PC draws them (launch_dev_viz.py).
 guidance_viz = os.environ.get("GUIDANCE_VIZ", "true").lower() in ("1", "true", "yes", "on")
 
@@ -46,33 +24,6 @@ def _split_env(name, cast=str):
         raise RuntimeError(f"Missing required environment variable: {name}")
     return [cast(x.strip()) for x in val.split(",") if x.strip()]
 
-def _detect_marvelmind_port(fallback):
-    """Return the /dev/ttyACM* whose USB manufacturer is Marvelmind.
-
-    RNDIS adds a DJI CDC-ACM device that can steal /dev/ttyACM0, shifting the
-    Marvelmind modem to ttyACM1 on some boots. A fixed port number then silently
-    opens the DJI serial device. We walk up the /sys device tree from each ACM
-    node (the 'manufacturer' attribute lives on the USB device, a few parents
-    above the tty) and match 'marvelmind' case-insensitively. /dev/serial/by-id
-    is absent in this privileged container, so /sys is the only identity source.
-    Falls back to the given port (MARVELMIND_PORT / ttyACM1) if nothing matches.
-    """
-    import glob
-    for dev in sorted(glob.glob("/dev/ttyACM*")):
-        name = os.path.basename(dev)
-        up = os.path.realpath(f"/sys/class/tty/{name}/device")
-        for _ in range(6):
-            up = os.path.dirname(up)
-            man_path = os.path.join(up, "manufacturer")
-            if os.path.isfile(man_path):
-                try:
-                    if "marvelmind" in open(man_path).read().strip().lower():
-                        return dev
-                except OSError:
-                    pass
-                break
-    return fallback
-
 def load_swarm_config():
     """
     Load swarm configuration from resolved environment variables.
@@ -81,7 +32,6 @@ def load_swarm_config():
 
     robot_names = _split_env("ROBOT_NAME", str)
     beacon_addresses = _split_env("BEACON_ADDR", int)
-    robot_serial_numbers = _split_env("ROBOT_SERIAL", str)
     init_orientations = _split_env("INITIAL_ORIENT", float)
 
     if not robot_names:
@@ -89,40 +39,10 @@ def load_swarm_config():
 
     n = len(robot_names)
 
-    # Optional. Pinning the IP skips SN broadcast discovery (UDP 40927), which
-    # is dropped on networks that filter broadcast between clients.
-    robot_ips = [x.strip() for x in os.getenv("ROBOT_IP", "").split(",")]
-    robot_ips = (robot_ips + [""] * n)[:n]
-
-    # Resolve the Marvelmind modem's serial port by USB identity, not by a fixed
-    # /dev/ttyACMn number. RNDIS matters here: when the RoboMaster is on USB
-    # (RNDIS) instead of WiFi it enumerates a DJI CDC-ACM device that can grab
-    # /dev/ttyACM0 and push the Marvelmind modem to ttyACM1 (or vice versa on a
-    # different boot). A fixed number then silently opens the DJI port, no
-    # Marvelmind fixes arrive, and virtual_spacecraft reports "No fresh
-    # localization odometry". Scan the ACM ports and pick the one whose USB
-    # manufacturer is Marvelmind; fall back to MARVELMIND_PORT / ttyACM1 only if
-    # detection fails. (/dev/serial/by-id is not present inside this privileged
-    # container, so we read the USB descriptor from /sys instead.)
-    marvelmind_port = _detect_marvelmind_port(
-        os.environ.get("MARVELMIND_PORT", "/dev/ttyACM1"))
-
-    if not (
-        len(beacon_addresses) ==
-        len(robot_serial_numbers) ==
-        len(init_orientations) ==
-        n
-    ):
+    if not len(beacon_addresses) == len(init_orientations) == n:
         raise ValueError("ENV var lists must all have the same length")
 
-    return (
-        beacon_addresses,
-        robot_names,
-        robot_serial_numbers,
-        robot_ips,
-        init_orientations,
-        marvelmind_port,
-    )
+    return beacon_addresses, robot_names, init_orientations
 
 
 ##########################################################################################################################################################
@@ -154,17 +74,6 @@ def qos_parameters(depth=5, reliability='BEST_EFFORT', history='KEEP_LAST'):
     }
     
     return qos_params
-
-def rm_preflight(robot_ips, verbose=False):
-    """Network report printed before the drivers start. See rm_preflight.py."""
-    script = os.path.join(
-        get_package_share_directory('swarm_bringup'), 'launch', 'rm_preflight.py')
-    cmd = ['python3', script]
-    if verbose:
-        cmd += ['--listen', '5']
-    cmd += [ip for ip in robot_ips if ip]
-    return ExecuteProcess(cmd=cmd, output='screen')
-
 
 def _find_repo_root(start):
     """Walk up from `start` to the first dir containing .git, else '' ."""
@@ -200,10 +109,8 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
         os.path.join(get_package_share_directory('swarm_bringup'), 'launch', f)
         for f in (os.path.basename(__file__), 'launch_virtual_spacecraft.py', 'launch_virtual_target.py')]
     env_vars = [
-        'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'KF_LOCALIZATION',
-        'TARGET_ESTIMATOR', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX', 'ROBOT_NAME',
-        'BAG_TAG', 'STRICT_CALIBRATION', 'CALIBRATE_CAMERA', 'CONN_TYPE',
-        'CAMERA_SOURCE', 'RM_DIAGNOSTICS', 'CONTACT_GPIO', 'SWARM_BROADCAST_ADDR', 'SWARM_COMMS_PORT', 'GUIDANCE_VIZ',
+        'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX',
+        'ROBOT_NAME', 'BAG_TAG', 'CONTACT_GPIO', 'SWARM_BROADCAST_ADDR', 'SWARM_COMMS_PORT', 'GUIDANCE_VIZ',
     ] + list(extra_env_vars)
     return Node(
         package='swarm_spacecraft',
@@ -227,16 +134,8 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
 
 def generate_launch_description():
     init_period = 2.0 # in seconds
-    alpha = 0.9 # Filter coefficient (1.0 = no filter, 0.0 = freeze first value)
-    # Separate, heavier smoothing for the capture target only. alpha=0.9 is
-    # near-passthrough, so raw solvePnP depth jitter (amplified 1.5x by
-    # aruco_scale) reached the capture law and made the real robot lurch toward
-    # the target in steps. 0.25 trades ~80-120 ms of lag for a smooth setpoint.
-    # Kept distinct from `alpha` so landmark_filter / mm_filtered are unchanged.
-    target_alpha = 0.25
-
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
-    timer_frequency = 0.05 # 20 Hz - drives cp_controller + hedgehog_obs
+    timer_frequency = 0.05 # 20 Hz - drives cp_controller
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
@@ -251,7 +150,7 @@ def generate_launch_description():
         get_package_share_directory('swarm_bringup'),
         'config', 'virtual_spacecraft.yaml')
 
-    beacon_addresses, robot_names, robot_serial_numbers, robot_ips, init_orientations, marvelmind_port = load_swarm_config()
+    beacon_addresses, robot_names, init_orientations = load_swarm_config()
     N = len(robot_names)
 
     ld = LaunchDescription()
@@ -259,18 +158,12 @@ def generate_launch_description():
     # Latched JSON snapshot of this agent's config files + env flags, one per
     # robot namespace (/<ns>/run_config), so each Pi's bag is self-describing and
     # per-agent install drift is captured. See run_config_snapshot_node.
-    decentralized_env = (
-        'GPIO_LINE', 'MARVELMIND_PORT', 'SWARM_BROADCAST_ADDR',
-        'SWARM_BROADCAST_IFACE', 'USB_CAM_DEVICE',
-    )
+    decentralized_env = ('GPIO_LINE', 'SWARM_BROADCAST_ADDR', 'SWARM_BROADCAST_IFACE')
     for robot_name in robot_names:
         ld.add_action(run_config_snapshot_node(
             robot_names, source_launch='decentralized',
             namespace=robot_name, extra_env_vars=decentralized_env))
 
-    # 'off' (default), 'on', or 'verbose'. See rm_preflight.py and
-    # robomaster_ros/diagnostics.py.
-    diagnostics = os.environ.get('RM_DIAGNOSTICS', 'off').lower()
     # When set, cp_controller becomes the sole writer of cmd_vel and muxes the
     # nav chain through it (velocity_smoother is remapped to cmd_vel_nav inside
     # launch_virtual_spacecraft.py, which reads the same env). Must match the
@@ -278,10 +171,6 @@ def generate_launch_description():
     direct_cmd_vel = os.environ.get("DIRECT_CMD_VEL", "").lower() in (
         "1", "true", "yes", "on"
     )
-    preflight_action = None
-    if diagnostics != 'off':
-        preflight_action = rm_preflight(robot_ips, verbose=(diagnostics == 'verbose'))
-        ld.add_action(preflight_action)
 
     ##############################################################################
     ##############################################################################
@@ -297,227 +186,6 @@ def generate_launch_description():
     ##############################################################################
 
     
-
-    for i in range(0 if v2_drivers else N):  # v2: the drivers container owns the robot link
-        robot_name = robot_names[i]
-        serial_number = robot_serial_numbers[i]
-
-        conn_type = os.getenv("CONN_TYPE", "rndis")
-        # rndis reaches the robot over USB at a fixed 192.168.42.2; a pinned WiFi
-        # robot_ip would override that and break the USB link, so drop it.
-        robot_ip = "" if conn_type == "rndis" else robot_ips[i]
-
-        name_arg = DeclareLaunchArgument(f'name_{i}', default_value=robot_name)
-        serial_arg = DeclareLaunchArgument(f'serial_number_{i}', default_value=serial_number)
-        robot_ip_arg = DeclareLaunchArgument(f'robot_ip_{i}', default_value=robot_ip)
-        enable_led_arg = DeclareLaunchArgument(f'enable_led_{i}', default_value='true')
-        enable_speaker_arg = DeclareLaunchArgument(f'enable_speaker_{i}', default_value='true')
-        enable_chassis_arg = DeclareLaunchArgument(f'enable_chassis_{i}', default_value='true')
-        twist_to_wheel_speeds_arg = DeclareLaunchArgument(f'twist2wheel_{i}', default_value='true')
-
-        path = os.path.join(
-            get_package_share_directory('robomaster_ros'),
-            'launch',
-            's1.launch'
-        )
-
-        s1 = IncludeLaunchDescription(
-            XMLLaunchDescriptionSource(path),
-            launch_arguments={
-                'name': LaunchConfiguration(f'name_{i}'),
-                'serial_number': LaunchConfiguration(f'serial_number_{i}'),
-                'conn_type': conn_type,
-                'robot_ip': LaunchConfiguration(f'robot_ip_{i}'),
-                'diagnostics': diagnostics,
-                'leds.enabled': LaunchConfiguration(f'enable_led_{i}'),
-                'speaker.enabled': LaunchConfiguration(f'enable_speaker_{i}'),
-                'chassis.enabled': LaunchConfiguration(f'enable_chassis_{i}'),
-                'chassis.twist_to_wheel_speeds': LaunchConfiguration(f'twist2wheel_{i}'),
-                # CAMERA MODULE UNLOADED. Not "video off" -- the whole module,
-                # via main.launch's `camera` arg (main.launch:106 -> 172
-                # camera.enabled). The per-stream switches below cannot achieve
-                # this on their own: video_ffmpeg defaults to $(var video) == 2,
-                # so leaving it unset silently turns the ffmpeg stream ON. RM6
-                # was found running exactly that way -- h264 -1, raw -1,
-                # ffmpeg 2 -- which is why this is a module-level switch.
-                #
-                # Why it is off: with h264 ON_DEMAND, a PC-side subscriber
-                # starts the stream on every robot at once (camera.py:303-305,
-                # a matched-publisher event, so immediate). The publish path is
-                # unthrottled -- camera.py:494-501 sends every chunk at ~55 Hz,
-                # and video_rate is only honoured in the raw branch at :510, so
-                # it does nothing for h264. The Pi then starves, localization
-                # gaps exceed virtual_spacecraft's 0.25 s odometry_timeout, the
-                # velocity_smoother bond (both ends on the same Pi) misses its
-                # 4 s deadline, lifecycle manager cleans it up, cmd_vel stops.
-                # Observed 2026-10-09: both robots stopped mid-run.
-                #
-                # To restore, set CAMERA_SOURCE=robomaster (wires the streams
-                # below and drops ext_camera).
-                # Note the raw/h264 asymmetry is deliberate: the SDK software
-                # decoder is the only path yielding a usable image_color here,
-                # because the Pi hardware VPU cannot decode the RoboMaster
-                # multi-slice bitstream. And prefer ON_DEMAND (2) over ON (1) --
-                # ON emits SPS/PPS and the first IDR at driver boot, so a
-                # decoder joining later never gets a parameter set and every
-                # packet fails avcodec_send_packet forever.
-                'camera': 'true' if rm_camera else 'false',
-                # ffmpeg set explicitly: unset, it defaults ON (see above).
-                **({'video_h264': '2', 'video_raw': '-1', 'video_ffmpeg': '-1'} if rm_camera else {}),
-                # 'video_raw': '-1',
-                # 'video_h264': '2',
-                # 'video_rate': '6.0',
-                # Onboard vision, which is a different path from video entirely:
-                # robomaster_ros/modules/vision.py calls sub_detect_info(), and
-                # neither it nor the SDK's vision.py mentions video or camera.
-                # Detection runs on the robot's own vision processor and comes
-                # back over the existing DDS-event channel as 9 bytes of header
-                # plus 20 bytes per detection -- 29 bytes for one target. No
-                # H.264 chunk reaches the Pi, so none of the decode cost that
-                # forced video_raw/video_h264 to -1 above applies. main.launch
-                # derives vision.enabled from this list being non-empty, so ''
-                # (the default) leaves the module unloaded exactly as before.
-                #
-                # 'robot' needs no marker on the target at all. UNVERIFIED on
-                # hardware: the source proves the client never asks for video,
-                # but not that the firmware is willing to run detection while no
-                # video stream is subscribed. That is what the /RM2/vision probe
-                # is for; if the topic stays empty, set this back to '' rather
-                # than reaching for video.
-                # Double quotes inside, single quotes outside, and that is not a
-                # style choice. main.launch does
-                #   <let name="vision" value="$(eval 'len($(var vision_targets)) > 0')"/>
-                # so this string is pasted inside a single-quoted $(eval ...).
-                # "['robot']" closes the eval's quote at the quote before robot
-                # and the substitution parser aborts the whole launch -- every
-                # node on the robot, not just vision. '["robot"]' is the same
-                # Python list literal with no quote collision.
-                # Empty: the robot's onboard detector does not work here, and
-                # this was measured, not assumed. With the video stream up
-                # (image_h264 at 55.6 Hz) and both 'robot' and 'person'
-                # subscribed, /RM2/vision produced zero messages over repeated
-                # 30 s windows with a person in frame. The SDK's four failure
-                # paths in sub_detect_info all log and return False, and
-                # robomaster_ros ignores that return value -- but the logs are
-                # clean, so the firmware ACKs ProtoVisionDetectEnable and then
-                # never pushes an event. Nothing left to read in the source.
-                # Leaving a target here costs a pointless handshake per boot.
-                # '[]', not '': this is pasted into $(eval 'len(...) > 0'), so
-                # an empty string makes that len() take no argument at all.
-                'vision_targets': '[]',
-                # CHASSIS_LEAD (2): gimbal yaw follows the chassis heading so the
-                # camera always points out the front of the robot. This is the
-                # desired behaviour. The ~58 deg pitch bob seen earlier was a
-                # symptom of the latched-CAPTURE runaway (the robot circling
-                # violently drove the gimbal pitch stabilizer to the floor), not
-                # inherent to CHASSIS_LEAD; that runaway is fixed upstream by
-                # mode_supervisor.stop_chassis() zeroing cmd_vel around the
-                # velocity_smoother PAUSE. FREE (0) was tried but world-fixes the
-                # yaw, so the camera stops facing forward -> rejected.
-                'gimbal_mode': '2'
-            }.items()
-        )
-
-        ld.add_action(name_arg)
-        ld.add_action(serial_arg)
-        ld.add_action(robot_ip_arg)
-        ld.add_action(enable_led_arg)
-        ld.add_action(enable_speaker_arg)
-        ld.add_action(enable_chassis_arg)
-        ld.add_action(twist_to_wheel_speeds_arg)
-
-        if diagnostics == 'verbose' and preflight_action is not None:
-            # verbose preflight binds UDP 40927 itself (passive SN-broadcast
-            # listen), the same port the driver's own discovery needs. Starting
-            # both at once races for the port and the driver sees a spurious
-            # "Address already in use". Delay the driver until preflight exits.
-            ld.add_action(RegisterEventHandler(
-                OnProcessExit(target_action=preflight_action, on_exit=[s1])))
-        else:
-            ld.add_action(s1)
-
-        topic = '/'+robot_name+'/leds/color'
-        led = ExecuteProcess(
-            cmd=[
-                'ros2', 'topic', 'pub', '--once',
-                topic,
-                'std_msgs/msg/ColorRGBA',
-                '{r: 0.4, g: 0.4, b: 0.0, a: 1.0}'
-            ]
-        )
-        
-        ld.add_action(led)
-
-        ##############################################################################
-
-        action = '/'+robot_name+'/play'
-        speaker = ExecuteProcess(
-            cmd=[
-                'ros2', 'action', 'send_goal',
-                action,
-                'robomaster_msgs/action/PlaySound',
-                '{sound_id: 5, times: 1}'
-            ]
-        )
-        
-        ld.add_action(speaker)
-
-
-    ##############################################################################
-    ##############################################################################
-
-    mm = Node(
-    package="swarm_marvelmind",
-    executable="marvelmind_obs",
-    name="marvelmind_obs",
-    # remappings=[
-    #             ('/mm_all_pos', 'mm_all_pos'),  # Remap global to relative path
-    #             ('/mm_all_imu', 'mm_all_imu')
-    #         ],
-    namespace=robot_name,
-    output="screen",
-    emulate_tty=True,
-    parameters=[
-            {
-                "robot_names": robot_names,
-                "beacon_addresses": beacon_addresses,
-                "port_address": marvelmind_port,
-                **qos_parameters(depth=10, reliability='BEST_EFFORT')  # /mm_all_* interleaves beacons; depth 1 drops fixes
-            }
-        ]
-    )
-
-    if not v2_drivers: ld.add_action(mm)
-
-    ##############################################################################
-    ##############################################################################
-    for i in range(0 if v2_drivers else N):  # v2: gnss_bridge publishes mm_pos_unf instead
-        robot_name = robot_names[i]
-        beacon_address = beacon_addresses[i]
-
-        hedge = Node(
-        package="swarm_marvelmind",
-        executable="hedgehog_obs",
-        name="hedgehog_obs",        
-        output="screen",
-        emulate_tty=True,
-        # remappings=[
-        #         ('/mm_all_pos', 'mm_all_pos'),  # Remap global to relative path
-        #         ('/mm_all_imu', 'mm_all_imu')
-        #     ],
-        namespace=robot_name,
-        parameters=[
-                {
-                    "robot_name": robot_name,
-                    "beacon_address": beacon_address,
-                    "timer_frequency": timer_frequency,
-                    "init_period": init_period,
-                    **qos_parameters(depth=10, reliability='BEST_EFFORT')  # /mm_all_* interleaves beacons; depth 1 drops fixes
-                }
-            ]
-        )
-
-        ld.add_action(hedge)
 
     ##############################################################################
     ########################## - UDP state broadcast - ###########################
@@ -559,53 +227,24 @@ def generate_launch_description():
     # pose_publisher read mm_pos, and pose_kf/pose_publisher use mm_pos_unf.
 
     ##############################################################################
-    ##############################################################################
+    ############## - perception: localization KF + marker memories - ############
+    # One process per robot (nodes-to-functions Phase 2): the KF publishes pose / localization/odom
+    # at 20 Hz and, in the same tick, projects the landmark/target memories through that pose, so the
+    # controllers get a steady marker cloud through camera stalls, never through a stale pose. Inputs
+    # come straight from the drivers container: gnss/position, aruco/landmarks, aruco/markers.
     for i in range(N):
-        robot_name = robot_names[i]
-        init_orientation = init_orientations[i]
-
-        pose = Node(
-        package="swarm_filter",
-
-
-        # executable="kalman_filter",
-        # name="kalman_filter",
-
-        executable="pose_publisher",
-        name="pose_publisher",
-
-
-        namespace=robot_name,
-        output="screen",
-        emulate_tty=True,
-        parameters=[
-                {
-                    "init_period": init_period,
-                    "timer_frequency": 0.05,
-                    "init_orientation": init_orientation,
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "global_frame_id": "swarm_map",
-                    "gps_timeout": 0.25,
-                    "odometry_timeout": 0.25,
-                    "gps_position_variance": 0.01,
-                }
-            ]
-        )
-
-        # Kalman-filter localization (KF_LOCALIZATION=1): same output contract
-        # as pose_publisher, fed by Marvelmind + driver odom/imu.
-        pose_kf = Node(
-            package="swarm_filter",
-            executable="pose_kf",
-            name="pose_kf",
-            namespace=robot_name,
+        ld.add_action(Node(
+            package="swarm_target",
+            executable="perception",
+            name="perception",
+            namespace=robot_names[i],
             output="screen",
             emulate_tty=True,
             parameters=[
                 {
                     "init_period": init_period,
                     "timer_frequency": 0.05,
-                    "init_orientation": init_orientation,
+                    "init_orientation": init_orientations[i],
                     "global_frame_id": "swarm_map",
                     "odometry_timeout": 1.0,  # wheel odom silent this long = dead driver: output withheld
                     "gps_position_variance": 0.01,
@@ -620,294 +259,19 @@ def generate_launch_description():
                     "innovation_gate_chi2": 9.0,
                     "require_mm_for_init": True,
                     **qos_parameters(depth=1, reliability='BEST_EFFORT'),
+                    "position_input": "v2",
+                    "marker_input": "v2",
+                    "beacon": beacon_addresses[i],
+                    "debug_topics": True,     # republish mm_pos_unf / landmarks_unf for bags (targets_unf always)
+                    "lift_at_stamp": False,   # lift at capture stamp: off until a HIL A/B
+                    "memory_viz_rate": 2.0,   # landmark/target_memory/markers for the dev PC (launch_dev_viz.py)
+                    "landmarks": {"min_observations": 2, "forget_timeout": 0.0,
+                                  "scale": list(LANDMARK_SCALE), "max_range": LANDMARK_RANGE},
+                    "targets": {"min_observations": 2, "forget_timeout": 0.0,
+                                "scale": list(TARGET_SCALE), "max_range": TARGET_RANGE},
                 }
             ]
-        )
-
-        if kf_on:
-            ld.add_action(pose_kf)
-        else:
-            ld.add_action(pose)
-
-    ##############################################################################
-    ##############################################################################
-    ##############################################################################
-    ######################### - USB (UVC) camera source - ########################
-    for i in range(N):
-        robot_name = robot_names[i]
-
-        ext_camera = Node(
-            package="swarm_aruco",
-            executable="ext_camera",
-            name="ext_camera",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                {
-                    # Capture backend. Defaults to the Pi Camera Module 3 (csi);
-                    # export CAMERA_SOURCE=usb to use the See3CAM instead. Normal
-                    # runs leave it unset and get csi.
-                    "source": camera_source,
-                    "device": os.getenv("USB_CAM_DEVICE", "/dev/video0"),
-                    # See3CAM_CU30. 640x480 is its lowest mode -- it has no
-                    # 640x360, which is what the stored calibration assumes.
-                    "width": 640,
-                    "height": 480,
-                    # UYVY, not MJPG: luma is a strided copy out of the packed
-                    # 4:2:2 buffer (~1 ms/frame on the Pi 4) against ~25 ms for
-                    # a JPEG decode. Measured 2026-10-19.
-                    "fourcc": "UYVY",
-                    "fps": 30,
-                    # The detectors throttle to detect_max_hz anyway, so
-                    # publishing faster only burns CPU and DDS bandwidth.
-                    "publish_max_hz": 10.0,
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
-                }
-            ],
-        )
-
-        # Replaces the RoboMaster's own camera, which stays off ('camera':
-        # 'false' above): the SDK video path cost ~82% of a core in the driver
-        # and delivered 3-5 fps of frequently-corrupt frames over the double-hop
-        # WiFi. Measured on the Pi 4 with robot2 running, the usb path gives 23.8
-        # fps end to end at 35% of the 4-core machine with a 100% detection rate.
-        # The backend (csi default, usb override) is chosen by CAMERA_SOURCE;
-        # CAMERA_SOURCE=robomaster uses the driver camera instead, so no ext_camera.
-        if not rm_camera and not v2_drivers:
-            ld.add_action(ext_camera)
-
-    ##############################################################################
-    ##############################################################################
-    for i in range(N):
-        robot_name = robot_names[i]
-        serial_number = robot_serial_numbers[i]
-
-        # One H.264 decode per robot, republished as mono8 camera/image_color
-        # (same contract as ext_camera) so both detectors share it.
-        h264_decoder = Node(package="swarm_aruco", executable="video_processor_h264",
-                            name="video_processor", namespace=robot_name, output="screen",
-                            emulate_tty=True, parameters=[{"publish_max_hz": 15.0}])
-
-        landmarks = Node(
-        package="swarm_aruco",
-        executable="aruco_detector",
-        name="landmark_detector",
-        namespace=robot_name,
-        output="screen",
-        remappings=[
-                ('markers_unf', 'landmarks_unf'),  # Remap markers to landmarks
-            ],
-        emulate_tty=True,
-        parameters=[
-                {
-                    "timer_frequency": 0.1,  # republish at camera rate; consumers dedupe by stamp
-                    "serial_number": serial_number,
-                    "aruco_type": "DICT_4X4_100",
-                    "aruco_size": 3.56,
-                    "max_range": LANDMARK_RANGE,  # m; drop degenerate solvePnP poses (km-scale outliers seen 2026-11-24)
-                    "aruco_scale": LANDMARK_SCALE,
-                    "calibrate_camera": 0,
-                    "detect_max_hz": 15.0,  # see target_detector note
-                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
-                }
-            ]
-        )
-
-        if not v2_drivers:
-            ld.add_action(landmarks)
-            if rm_camera:
-                ld.add_action(h264_decoder)
-
-
-    ##############################################################################
-    ##############################################################################
-    for i in range(N):
-        # See the note on targets_filter below: index the list, don't inherit
-        # whatever `robot_name` the previous loop happened to leave behind.
-        robot_name = robot_names[i]
-
-        aruco_landmark_filter = Node(
-        package="swarm_filter",
-        executable="aruco_filter",
-        name="landmark_filter",
-        namespace=robot_name,
-        output="screen",
-        remappings=[
-                ('markers_unf', 'landmarks_unf'),  # Remap markers to landmarks
-                ('markers', 'landmarks')
-            ],
-        emulate_tty=True,
-        parameters=[
-                {
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "alpha": alpha,  # Filter coefficient
-                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
-                }
-            ]
-        )
-
-        # TARGET_ESTIMATOR=1 replaces aruco_filter with landmark_estimator (added
-        # in its own loop below), so the raw filter is gated off here.
-        if not estimator_on:
-            ld.add_action(aruco_landmark_filter)
-
-
-
-    ##############################################################################
-    ##############################################################################
-    for i in range(N):
-        robot_name = robot_names[i]
-        serial_number = robot_serial_numbers[i]
-
-        targets = Node(
-        package="swarm_aruco",
-        executable="aruco_detector",
-        name="target_detector",
-        namespace=robot_name,
-        output="screen",
-        remappings=[
-                ('markers_unf', 'targets_unf'),  # Remap markers to landmarks
-            ],
-        emulate_tty=True,
-        parameters=[
-                {
-                    "timer_frequency": 0.1,  # republish at camera rate; consumers dedupe by stamp
-                    "serial_number": serial_number,
-                    "aruco_type": "DICT_5X5_50",
-                    "aruco_size": 5.76,
-                    "max_range": TARGET_RANGE,  # m; same min pixel size as the 3.56 cm landmarks at 2.5 m
-                    "aruco_scale": TARGET_SCALE,
-                    "calibrate_camera": 0,
-                    # Cap ArUco detection at 5 Hz. solvePnP-per-frame was the #1
-                    # CPU consumer (~116%) on the Pi; dropping frames before
-                    # conversion/detection frees ~a core. publish_markers keeps
-                    # republishing the last markers, so downstream rate is kept.
-                    "detect_max_hz": 5.0,
-                    "use_h264": False,  # read camera/image_color from video_processor / ext_camera
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
-                }
-            ]
-        )
-
-
-        if not v2_drivers:
-            ld.add_action(targets)
-
-    ##############################################################################
-    ##################### - DRIVER_STACK=v2 bridges - ############################
-    # The drivers container publishes gnss/position and aruco/{landmarks,markers};
-    # these republish them in our mm_pos_unf / landmarks_unf / targets_unf contracts.
-    for i in range(N if v2_drivers else 0):
-        ld.add_action(Node(package="swarm_marvelmind", executable="gnss_bridge", name="gnss_bridge",
-                           namespace=robot_names[i], output="screen", emulate_tty=True,
-                           parameters=[{"beacon": beacon_addresses[i]}]))
-        ld.add_action(Node(package="swarm_aruco", executable="aruco_bridge", name="aruco_bridge",
-                           namespace=robot_names[i], output="screen", emulate_tty=True,
-                           parameters=[{"landmark_scale": list(LANDMARK_SCALE), "landmark_max_range": LANDMARK_RANGE,
-                                        "target_scale": list(TARGET_SCALE), "target_max_range": TARGET_RANGE}]))
-
-    ##############################################################################
-    ##############################################################################
-    for i in range(N):
-        # robot_names[i], not the bare `robot_name` leaking from the previous
-        # loop -- that put every filter in the LAST robot's namespace. Invisible
-        # while N == 1 (one container per robot), wrong the moment it is not.
-        robot_name = robot_names[i]
-
-        targets_filter = Node(
-        package="swarm_filter",
-        executable="aruco_filter",
-        name="targets_filter",
-        namespace=robot_name,
-        output="screen",
-        remappings=[
-                ('markers_unf', 'targets_unf'),  # Remap markers to landmarks
-                ('markers', 'targets')
-            ],
-        emulate_tty=True,
-        parameters=[
-                {
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                    "alpha": target_alpha,  # heavier smoothing, see target_alpha
-                    "hold_timeout": 0.0,  # no stale-hold: a dropout emits empty, not a ghost
-                }
-            ]
-        )
-
-        if not estimator_on:
-            ld.add_action(targets_filter)
-
-    ##############################################################################
-    ##############################################################################
-    # TARGET_ESTIMATOR=1: landmark_estimator in place of both aruco_filter
-    # instances. Generic single-stream node instantiated twice via remappings
-    # (landmark + target); keeps a map-frame memory keyed by ArUco ID and
-    # republishes the whole remembered cloud at publish_rate through the live pose,
-    # so the controller reference persists through FOV loss. QoS mirrors the
-    # aruco_filter it replaces, so controllers are untouched.
-    if estimator_on:
-        for i in range(N):
-            robot_name = robot_names[i]
-
-            landmark_estimator = Node(
-                package="swarm_target",
-                executable="landmark_estimator",
-                name="landmark_estimator",
-                namespace=robot_name,
-                output="screen",
-                remappings=[
-                    ('markers_unf', 'landmarks_unf'),
-                    ('markers', 'landmarks'),
-                ],
-                emulate_tty=True,
-                parameters=[
-                    {
-                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                        "estimator_type": "averaging",
-                        "publish_rate": 15.0,
-                        "min_observations": 2,
-                        "forget_timeout": 0.0,
-                        "output_fov_gate": False,
-                        "camera_yaw_offset_deg": 0.0,
-                        "global_frame_id": "swarm_map",
-                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
-                    }
-                ]
-            )
-            ld.add_action(landmark_estimator)
-
-            target_estimator = Node(
-                package="swarm_target",
-                executable="landmark_estimator",
-                name="target_estimator",
-                namespace=robot_name,
-                output="screen",
-                remappings=[
-                    ('markers_unf', 'targets_unf'),
-                    ('markers', 'targets'),
-                    # Distinct memory-viz topic so the two instances in this
-                    # namespace do not collide (rosbag records both).
-                    ('landmark_memory/markers', 'target_memory/markers'),
-                ],
-                emulate_tty=True,
-                parameters=[
-                    {
-                        **qos_parameters(depth=1, reliability='BEST_EFFORT'),
-                        "estimator_type": "averaging",
-                        "publish_rate": 15.0,
-                        "min_observations": 2,
-                        "forget_timeout": 0.0,
-                        "output_fov_gate": False,
-                        "camera_yaw_offset_deg": 0.0,
-                        "global_frame_id": "swarm_map",
-                        "publish_memory_viz": guidance_viz,  # memory markers off with GUIDANCE_VIZ=false (Pi)
-                    }
-                ]
-            )
-            ld.add_action(target_estimator)
-
+        ))
 
     ##############################################################################
     ############################## - Encapsulation Phase - #######################

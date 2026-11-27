@@ -1,5 +1,7 @@
 """Kinematic localization via two decoupled *linear* Kalman filters.
 
+Base class of swarm_target's `perception` node (nodes-to-functions Phase 2); no executable of its own.
+
 Drop-in replacement for ``pose_publisher`` that fuses the same raw inputs
 (Marvelmind ``mm_pos_unf``, RoboMaster ``odom``, chassis/beacon IMU) plus the
 command ``cmd_vel`` into a clean heading, a clean map-frame velocity and a
@@ -46,7 +48,6 @@ from geometry_msgs.msg import Twist
 from marvelmind_ros2_msgs.msg import HedgePositionAddressed
 from nav_msgs.msg import Odometry
 import numpy as np
-import rclpy
 from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import Imu
@@ -112,8 +113,8 @@ def circular_mean(angles) -> float:
 # =============================================================================
 
 class PoseKalmanFilterNode(Node):
-    def __init__(self):
-        super().__init__("pose_kf")
+    def __init__(self, node_name="pose_kf"):
+        super().__init__(node_name)  # swarm_target's perception node subclasses this
 
         # --- Lifecycle / framing -------------------------------------------
         self.declare_parameter("init_period", 1.0)
@@ -620,20 +621,3 @@ class PoseKalmanFilterNode(Node):
             self.tf_broadcaster.sendTransform(tf)
         except ValueError:
             pass                              # odom frame not usable this cycle
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = PoseKalmanFilterNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

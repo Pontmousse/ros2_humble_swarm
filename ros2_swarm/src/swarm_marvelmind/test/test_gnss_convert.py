@@ -1,7 +1,7 @@
-"""gnss_bridge.to_hedge: v2 gnss/position -> mm_pos_unf (pure function, no node)."""
+"""gnss_convert.to_hedge: v2 gnss/position -> mm_pos_unf (pure function, no node)."""
 from geometry_msgs.msg import PointStamped
 
-from swarm_marvelmind.gnss_bridge import to_hedge
+from swarm_marvelmind.gnss_convert import to_hedge
 
 
 def fix(sec, nsec, x, y, z):

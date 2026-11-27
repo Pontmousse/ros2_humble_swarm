@@ -1,4 +1,4 @@
-"""aruco_bridge.convert reproduces aruco_detector's Markers contract from the v2 ArucoMarker.
+"""aruco_convert.convert reproduces aruco_detector's Markers contract from the v2 ArucoMarker.
 
 Pure functions only: no node is constructed (the dev host shares a DDS domain with live robots).
 """
@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from swarm_aruco.aruco_bridge import ArucoBridge, convert
+from swarm_aruco.aruco_convert import convert, to_markers
 from swarm_interfaces.msg import ArucoMarker, ArucoMarkerArray
 
 
@@ -55,5 +55,5 @@ def test_drops_nan_and_out_of_range_keeps_order():
 def test_empty_frame_forwarded_with_header():
     msg = ArucoMarkerArray()
     msg.header.stamp.sec, msg.header.stamp.nanosec, msg.header.frame_id = 12, 345, 'RM3/camera_optical'
-    out = ArucoBridge.to_markers(msg, (1.0, 1.0), 0.0)
+    out = to_markers(msg, (1.0, 1.0), 0.0)
     assert out.header == msg.header and list(out.markers) == list(out.markers_normals) == list(out.ids) == []

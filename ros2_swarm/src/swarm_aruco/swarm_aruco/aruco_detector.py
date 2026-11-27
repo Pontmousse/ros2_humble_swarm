@@ -36,7 +36,7 @@ class ArucoDetectorNode(Node):
         self.serial_number = self.get_parameter("serial_number").value
         self.aruco_scale = self.get_parameter("aruco_scale").value
         # Reject detections beyond this range (m, 0 = off): solvePnP occasionally
-        # returns km-scale poses that permanently poison landmark_estimator's mean.
+        # returns km-scale poses that permanently poison the marker memory's mean.
         self.declare_parameter("max_range", 0.0)
         self.max_range = float(self.get_parameter("max_range").value)
 

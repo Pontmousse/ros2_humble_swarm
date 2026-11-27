@@ -1,4 +1,4 @@
-# Drivers container config overlay (`DRIVER_STACK=v2`)
+# Drivers container config overlay
 
 Only what we override in the swarm_rover_v2 drivers image; everything else comes from the image.
 Ansible (`tasks/drivers_container.yml`) puts these under `/opt/robomaster/drivers_config/` on the Pi and
@@ -15,7 +15,7 @@ node, `nodes:=calibrate`) is never overwritten. Copy it back here and commit it 
 When upgrading the image, diff `params/aruco_camera_2in1.yaml` against the new image's copy.
 Interface contract: `docs/contracts/driver-contract-v100.md`.
 
-## Deploy a robot on v2 (example: RM3, `robot3`, 192.168.50.103)
+## Deploy a robot (example: RM3, `robot3`, 192.168.50.103)
 
 1. **Dev PC:** `git switch split-containers` (rsync copies whatever is checked out).
 2. **Build our image on the Pi** (`swarm_docker_img/docker-run.txt`, "Build native on PI"): rsync to
@@ -25,8 +25,7 @@ Interface contract: `docs/contracts/driver-contract-v100.md`.
    sudo docker buildx build -f swarm_docker_img/Dockerfile.tar.arm64 -t elghaliasri/ros2-humble-swarm:robot-arm64-v9.6.0-split --load .
    sudo docker push elghaliasri/ros2-humble-swarm:robot-arm64-v9.6.0-split
    ```
-3. **Dev PC:** set `swarm_image` to that tag in `vars.yml`, add `driver_stack=v2` to the robot's line
-   in `inventory.ini`, commit with `./push-split.sh "..."`.
+3. **Dev PC:** set `swarm_image` to that tag in `vars.yml`, commit with `./push-split.sh "..."`.
 4. **Robot:** USB camera plugged, `vcgencmd get_throttled` = `0x0`, `usb0` link provisioned
    (`usb_link.yml`), calibration in `calibration/<serial>/`.
 5. **Deploy** (pulls both images; drivers container `robot3-drivers` starts before ours):
@@ -37,7 +36,8 @@ Interface contract: `docs/contracts/driver-contract-v100.md`.
 6. **Check on the Pi:** `docker ps` shows `robot3` and `robot3-drivers`; `docker logs -f robot3-drivers`
    shows chassis connected, GNSS fix, calibration loaded; inside ours
    (`docker exec -it robot3 bash -c "source /ros2_ws/install/setup.bash && ros2 topic hz /RM3/odom"`):
-   `/RM3/odom` ~50 Hz, `/RM3/mm_pos_unf` ~6 Hz, `/RM3/landmarks_unf` <= 15 Hz. Then `ros2 daemon stop`.
+   `/RM3/odom` ~50 Hz, `/RM3/mm_pos_unf` ~6 Hz, `/RM3/landmarks_unf` <= 15 Hz (republished by
+   `perception`), `/RM3/pose` and `/RM3/landmarks` ~20 Hz. Then `ros2 daemon stop`.
 
-**Rollback:** remove `driver_stack=v2` from the inventory line and run `deploy-config.yml`; the
-drivers container is removed and ours runs its own drivers again (same image).
+**Rollback:** this branch has no single-container mode. Go back with the `hil` branch: `git switch hil`,
+set its `swarm_image`, and run its `deploy.yml` (remove `robot3-drivers` first: `docker rm -f robot3-drivers`).

@@ -269,7 +269,7 @@ class VirtualScene(Node):
         self.declare_parameter("noise_std_cm", 0.0)
         self.declare_parameter("global_frame_id", "swarm_map")
 
-        # -- raw-observation sim mode (feeds the landmark_estimator) ----------
+        # -- raw-observation sim mode (feeds perception's marker memories) ----------
         # When emit_raw_observations is on, publish hardware-like noisy / dropped
         # / starved detections on the *_unf topics (the estimator's input), with
         # STABLE per-point ArUco-style IDs tied to ground truth. publish_fused

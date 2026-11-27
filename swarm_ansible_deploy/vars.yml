@@ -20,9 +20,6 @@ container_launch_dir: /ros2_ws/src/swarm_bringup/launch
 # limit switch (centralized run from the dev PC). Needs an image that ships that file.
 launch_file: "launch_decentralized_agent.py"
 
-camera_source: "robomaster"
-usb_cam_device: "/dev/video1"
-
 # COM -> GND, NO -> GPIO; per-robot override: contact_gpio in swarm_config.yaml. GND => PIN 30 | GPIO 5 => PIN 29
 contact_gpio: "5"
 
@@ -32,22 +29,16 @@ ros_localhost_only: "0"
 virtual_spacecraft: "true"
 direct_cmd_vel: "false"
 
-
-kf_localization: "true"
-target_estimator: "true"
 guidance_viz: "false"   # no RViz markers on the Pi; run launch_dev_viz.py on the dev PC
-# Per-process thread pools (OpenBLAS/OpenMP/OpenCV). ~25 processes on 4 cores; the
-# math is 2x2..4x4 matrices and one 640x480 detectMarkers, so 1 thread each.
+# Per-process thread pools (OpenBLAS/OpenMP/OpenCV) in both containers; the math is
+# 2x2..4x4 matrices and one 640x480 detectMarkers, so 1 thread each.
 lib_threads: "1"
 
-
+# Chassis link to the RoboMaster body (drivers swarm_config.yaml + robomaster_link.yml usb0 unit).
 conn_type: "rndis"
 
-# Driver stack. robomaster = our own drivers inside the swarm container (robomaster_ros,
-# Marvelmind, camera + aruco_detector). v2 = the swarm_rover_v2 drivers image runs as a second
-# container "<host>-drivers" (chassis, GNSS, USB camera + ArUco); our launch drops its drivers and
-# adds gnss_bridge + aruco_bridge. Per-robot: set driver_stack=v2 on the host line in inventory.ini.
-driver_stack: "robomaster"
+# Drivers: the swarm_rover_v2 image runs as a second container "<host>-drivers" (chassis, GNSS,
+# USB camera + ArUco); our container's perception node reads its gnss/position and aruco/*.
 # Pinned tag (public on Docker Hub); the git history of this line is the driver version history.
 drivers_image: "hostage03/robomaster_swarm_v2:app-4be73e1-drivers"
 drivers_nodes: "chassis,gnss,aruco_camera_2in1,health"   # robot.launch.py keys; no spacecraft (ours runs control)

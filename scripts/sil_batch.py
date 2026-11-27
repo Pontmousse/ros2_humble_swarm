@@ -88,8 +88,9 @@ def stop(p, grace=20.0):
 def run(node, n, rep):
     names = [f"RM{i}" for i in range(1, n + 1)]
     env = dict(os.environ, ROBOT_IDX=",".join(str(i) for i in range(1, n + 1)), BAG_TAG=a.tag, BAG_DIR=str(ROOT),
-               VIRTUAL_PLANT="1", VIRTUAL_TARGET="1", VIRTUAL_SPACECRAFT="1", KF_LOCALIZATION="1",
-               TARGET_ESTIMATOR="1", DIRECT_CMD_VEL="0", SWARM_BROADCAST_ADDR="127.255.255.255", SWARM_COMMS_PORT=str(a.comms_port), GUIDANCE_VIZ="false")
+               VIRTUAL_PLANT="1", VIRTUAL_TARGET="1", VIRTUAL_SPACECRAFT="1",
+               DIRECT_CMD_VEL="0", SWARM_BROADCAST_ADDR="127.255.255.255", SWARM_COMMS_PORT=str(a.comms_port), GUIDANCE_VIZ="false",
+               OMP_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", OPENCV_FOR_THREADS_NUM="1")  # as on the Pi (lib_threads)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log = open(LOGS / f"N{n}_rep{rep:02d}_{stamp}.log", "w")
     before = set(ROOT.iterdir())

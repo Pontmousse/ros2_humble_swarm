@@ -21,13 +21,13 @@ setup(
     maintainer='elghali',
     maintainer_email='elghali@todo.todo',
     description='Target/landmark providers: virtual scene simulator and the '
-               'ArUco-fused landmark/target memory estimator.',
+               'perception node (localization KF + landmark/target memories).',
     license='TODO: License declaration',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
             'virtual_scene = swarm_target.virtual_scene:main',
-            'landmark_estimator = swarm_target.landmark_estimator:main',
+            'perception = swarm_target.perception_node:main',
         ],
     },
 )

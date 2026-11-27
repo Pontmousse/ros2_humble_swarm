@@ -39,7 +39,6 @@ def virtual_scene_node(robot_names):
     scene_file = os.getenv("SCENE_FILE") or os.path.join(
         get_package_share_directory("swarm_target"),
         "config", "default_scene.yaml")
-    estimator_on = os.environ.get("TARGET_ESTIMATOR", "").lower() in ("1", "true", "yes", "on")
     return Node(
         package="swarm_target",
         executable="virtual_scene",
@@ -55,16 +54,14 @@ def virtual_scene_node(robot_names):
                 "half_fov_deg": 40.0,
                 "max_incidence_deg": 70.0,
                 "camera_yaw_offset_deg": 0.0,
-                # Raw-observation sim mode: when the landmark estimator is on, feed
-                # it hardware-like noisy/dropped/starved observations on the *_unf
-                # topics (with stable ground-truth IDs) instead of the clean fused
-                # landmarks/targets. Defaults below preserve legacy behaviour when
-                # TARGET_ESTIMATOR is off.
-                "emit_raw_observations": estimator_on,
-                "publish_fused": not estimator_on,
-                "noise_std_cm": 10.5 if estimator_on else 0.0,
-                "normal_noise_std": 0.3 if estimator_on else 0.0,
-                "observation_dropout_prob": 0.5 if estimator_on else 0.0,
+                # Raw-observation sim mode: hardware-like noisy/dropped/starved
+                # observations on the *_unf topics (stable ground-truth IDs) for
+                # perception's marker memories, instead of clean fused landmarks/targets.
+                "emit_raw_observations": True,
+                "publish_fused": False,
+                "noise_std_cm": 10.5,
+                "normal_noise_std": 0.3,
+                "observation_dropout_prob": 0.5,
                 "obs_update_rate": 4.0,
                 "global_frame_id": "swarm_map",
             }

@@ -1,7 +1,7 @@
-"""Pluggable landmark/target estimators -- the modelling behind landmark_estimator.
+"""Pluggable landmark/target estimators -- the modelling behind perception's marker memories.
 
-The node (`landmark_estimator.py`) owns all the plumbing: subscriptions, QoS,
-frame transforms (body<->map), timing and publishing. An estimator in this file
+The plumbing lives elsewhere (`marker_memory.py`: body<->map frames and stamp gating;
+`perception_node.py`: subscriptions, QoS, timing and publishing). An estimator in this file
 owns ONLY the model: how a fresh observation updates the remembered state of each
 landmark, and what the current best estimate is. Keeping the two apart means a
 richer model (constant-velocity, Kalman, factor-graph SLAM, inter-agent sharing)

@@ -17,7 +17,7 @@
         that: cmd in ['stop', 'start', 'restart']
         fail_msg: "cmd must be stop, start or restart (got '{{ cmd }}')"
 
-    # driver_stack=v2 also controls "<host>-drivers": stopped after ours, started before it.
+    # Ours and "<host>-drivers": ours stopped first, the drivers started first.
     - name: "{{ cmd | capitalize }} containers"
       community.docker.docker_container:
         name: "{{ item }}"
@@ -25,7 +25,7 @@
         restart: "{{ cmd == 'restart' }}"
       loop: "{{ names if cmd == 'stop' else names | reverse | list }}"
       vars:
-        names: "{{ [inventory_hostname] + ([inventory_hostname ~ '-drivers'] if driver_stack == 'v2' else []) }}"
+        names: "{{ [inventory_hostname, inventory_hostname ~ '-drivers'] }}"
 
 
 # command to stop: ansible-playbook -i swarm_ansible_deploy/inventory.ini swarm_ansible_deploy/container_ctl.yml -e cmd=stop
