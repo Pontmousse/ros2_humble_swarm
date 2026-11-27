@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from std_msgs.msg import Bool, Int32
 
-from swarm_controller.cp_proportional_controller import ControllerNode
+from swarm_controller.capture_law import CaptureLaw
 from test_capture_approach import markers, stub
 
 
@@ -23,14 +23,14 @@ def preparation_node():
     node.preparation_max_force = 0.002
     node.velocity_force_gain = 6.0
     node.craft_vx = node.craft_vy = 0.0
-    node.preparation_wrench = MethodType(ControllerNode.preparation_wrench, node)
+    node.preparation_wrench = MethodType(CaptureLaw.preparation_wrench, node)
     return node
 
 
 def observe(node, positions=((60., 30.),), ids=(42,)):
     msg = markers(*positions)
     msg.ids = list(ids)
-    ControllerNode.target_callback(node, msg)
+    CaptureLaw.target_callback(node, msg)
 
 
 def force(node):
@@ -94,8 +94,8 @@ def test_alignment_damping_is_shared_and_identity_changes_reset_it():
     assert np.asarray(node.frc_cmd, dtype=float) @ tangent == pytest.approx(node.preparation_speed)
     assert force(node) @ tangent == pytest.approx(6.0 * node.preparation_speed)
     # Same array index, different AP: no derivative or velocity history may cross identities.
-    ControllerNode.assigned_ap_callback(node, Int32(data=43))
-    ControllerNode.assignment_locked_callback(node, Bool(data=True))
+    CaptureLaw.assigned_ap_callback(node, Int32(data=43))
+    CaptureLaw.assignment_locked_callback(node, Bool(data=True))
     assert force(node) == pytest.approx([0., 0.])
     node.seconds += .1
     observe(node, positions=((60., -30.),), ids=(43,))

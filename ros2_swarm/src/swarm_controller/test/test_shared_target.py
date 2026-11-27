@@ -1,4 +1,4 @@
-"""Shared target estimate: receiver fusion (pointing_guidance2) and blind drift firing (bounding_box_search).
+"""Shared target estimate: receiver fusion (shared_target) and blind drift firing (bounding_box_search).
 
 Pure functions/classes only: no node is constructed (the dev host shares a DDS domain with live robots).
 """
@@ -6,7 +6,7 @@ Pure functions/classes only: no node is constructed (the dev host shares a DDS d
 import pytest
 
 from swarm_controller.bounding_box_search import drift_firing
-from swarm_controller.pointing_guidance2 import SharedTargets
+from swarm_controller.shared_target import SharedTargets
 
 from swarm_interfaces.msg import TargetEstimate
 

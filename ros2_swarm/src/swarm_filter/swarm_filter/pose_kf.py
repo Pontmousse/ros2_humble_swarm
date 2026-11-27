@@ -6,8 +6,8 @@ Drop-in replacement for ``pose_publisher`` that fuses the same raw inputs
 (Marvelmind ``mm_pos_unf``, RoboMaster ``odom``, chassis/beacon IMU) plus the
 command ``cmd_vel`` into a clean heading, a clean map-frame velocity and a
 covariance-smoothed (jump-free) position. It publishes the identical output
-contract so every downstream consumer (``position_guidance3`` encapsulation,
-``cp_proportional_controller`` chase, avoidance, RViz) is unchanged:
+contract so every downstream consumer (guidance flocking,
+capture, avoidance, RViz) is unchanged:
 
     pose               swarm_interfaces/StatePos   x,y metres; theta DEGREES
     localization/odom  nav_msgs/Odometry           pose in swarm_map,

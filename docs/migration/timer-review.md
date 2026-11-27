@@ -104,12 +104,12 @@ treat a gap the way virtual_spacecraft does (hold 0.25 s, then zero). **Saves ~6
 
 | Timer | Rate | Who depends on it |
 |---|---|---|
-| landmark/target memories (in `perception` since Phase 2, on the KF tick) | 20 Hz (was 15) | **This is the marker memory doing its job.** Guidance drops to damp-only after 0.3 s without `landmarks`; ap_auction stops bidding after 0.4 s; mode_supervisor counts 3 frames; cp_controller's capture command expires 0.4 s after the last `targets` (Tier 4) |
+| landmark/target memories (in `perception` since Phase 2, on the KF tick) | 20 Hz (was 15) | **This is the marker memory doing its job.** Guidance drops to damp-only after 0.3 s without `landmarks`; ap_auction stops bidding after 0.4 s; mode_supervisor counts 3 frames; guidance's capture command expires 0.4 s after the last `targets` (Tier 4) |
 | pose_kf | 20 Hz | virtual_spacecraft freezes at 0.25 s, nav2_pidff stops the chassis at 0.3 s, state_broadcaster drops the robot at 0.5 s; predict `dt` clamps at 0.2 s |
-| ap_auction, readiness_consensus | 5 Hz | Peer timeouts 0.5 s on sender stamps (`/ap_bids`, `/readiness` are heartbeats); cp_controller needs `assigned_ap`/`assignment_locked` younger than 0.5 s |
+| ap_auction, readiness_consensus | 5 Hz | Peer timeouts 0.5 s on sender stamps (`/ap_bids`, `/readiness` are heartbeats); guidance's capture law needs `assigned_ap`/`assignment_locked` younger than 0.5 s |
 | state_broadcaster TX | 10 Hz | `stale_timeout` 0.5 s sets `valid`, which drives auction and consensus membership |
 | velocity_smoother | 10 Hz | pose_kf treats `cmd_vel` older than 0.25 s as zero in its prediction |
-| pointing_planner | 20 Hz | torque slew `dt` already clamped at 0.05 |
+| guidance tick (was pointing_planner, motion_planner, cp_controller; one since Phase 3) | 20 Hz | pointing's torque slew `dt` clamped at 0.05; any non-zero wrench must stream ≥ 4 Hz |
 | any non-zero wrench | ≥ 4 Hz | virtual_spacecraft `wrench_timeout` 0.25 s |
 
 These go away only by **merging** (the timer is replaced by a function call in the same tick), never by slowing

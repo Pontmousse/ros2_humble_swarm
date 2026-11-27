@@ -21,7 +21,7 @@ from .virtual_spacecraft_node import qos_profile_from_parameters
 class GeometricContact(Node):
     def __init__(self):
         super().__init__("geometric_contact")
-        # ref_offset_x/y mirror cp_proportional_controller.py's closest-target
+        # ref_offset_x/y mirror capture_law.py's closest-target
         # pick; contact_distance is kept in sync with it via the launch file.
         self.declare_parameter("ref_offset_x", 10.0)
         self.declare_parameter("ref_offset_y", 0.0)
@@ -49,7 +49,7 @@ class GeometricContact(Node):
         self.latest_targets = msg
 
     def _contact_detected(self) -> bool:
-        """Debounced check, replicating cp_proportional_controller.py's
+        """Debounced check, replicating capture_law.py's
         closest-target pick and heading formula so both agree on "contact"."""
         msg = self.latest_targets
         if msg is None or len(msg.markers) == 0:

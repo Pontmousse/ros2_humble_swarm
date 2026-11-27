@@ -148,6 +148,33 @@ because the outputs are kept at the same rate on purpose. The win is in processe
 
 ## Phase 3: wrench contributors (#8, #9, #13), second priority
 
+**Status: done 2026-11-27 on `split-containers`** (3a–3b in one go; 3c was already done in Tier 3). One `guidance`
+process per robot replaces motion_planner, pointing_planner and cp_controller. The old nodes and seven unlaunched
+guidance alternates (`position_guidance1/2`, `pointing_guidance1/3`, `pointing_controller`, `ep_proportional_controller`,
+`cp_proportional_controller2`) are deleted. Topics, frames, rates and the three mode services are unchanged.
+
+| Module | Job |
+|---|---|
+| `swarm_controller/flocking.py` | `Flocking`: landmark potential (ENCAP only), neighbour repulsion, freshness guards (moved verbatim) |
+| `swarm_controller/pointing.py` | `Pointing`: centroid PD, damp-only fallback, slew limit, CAPTURE/DOCK hand-off, `/target_estimate` (verbatim) |
+| `swarm_controller/capture_law.py` | `CaptureLaw`: target pick, corridor bearing, track + feedforward, preparation wrench, servo / `cmd_vel` mux (verbatim) |
+| `swarm_controller/shared_target.py` | `SharedTargets` (also used by bounding_box_search) |
+| `swarm_controller/guidance_node.py` | thin node: one subscription per input fanned out to the laws, 3 services, one 20 Hz tick |
+
+The laws are plain classes; the node gives them its clock, logger and gated publishers, so the existing tests only changed
+their import. Parameters: shared ones at the top level (incl. the `/**` yaml values); `pointing.*` and `capture.*` nested.
+cp's `target_callback` stays ungated in SEARCH (Tier 3's reason: the 5.25 s track must be warm at CAPTURE).
+
+**Checked:**
+- unit tests: `test_guidance_node.py` plus the moved law tests;
+- launch node lists for the Pi and SIL;
+- live `direct_cmd_vel` passthrough (`cmd_vel_nav` → `cmd_vel`);
+- SIL N=2: QC OK, 2/2 docked on their own APs, per-phase `trk_p95` 17–35 mm, sync 1 ms, ~470–550 messages per wrench topic.
+
+**CPU** (SIL, both robots, BLAS threads = 1): `guidance` 36.5% of a core against 52.8% for the three old processes.
+
+**Not yet:** HIL on one robot (together with Phase 2's).
+
 **Why:**
 - All three read the same inputs (`pose`, `localization/odom`, `landmarks` or `targets`,
   `current_mode`), so `landmarks` is delivered twice and `targets` into two of them.

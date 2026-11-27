@@ -6,7 +6,7 @@ import pytest
 
 from nav_msgs.msg import Odometry
 
-from swarm_controller.position_guidance3 import map_frame_velocity
+from swarm_controller.flocking import map_frame_velocity
 
 
 def odometry(body_vx, body_vy, yaw):

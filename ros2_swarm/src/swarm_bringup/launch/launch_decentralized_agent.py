@@ -135,7 +135,7 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
 def generate_launch_description():
     init_period = 2.0 # in seconds
     # Choose timer period (or timer frequency) for performance testing (higher period = lower CPU usage)
-    timer_frequency = 0.05 # 20 Hz - drives cp_controller
+    timer_frequency = 0.05 # 20 Hz - drives the guidance tick
     # timer_frequency = 0.1 # in seconds
     # timer_frequency = 1.0 # in seconds
 
@@ -164,7 +164,7 @@ def generate_launch_description():
             robot_names, source_launch='decentralized',
             namespace=robot_name, extra_env_vars=decentralized_env))
 
-    # When set, cp_controller becomes the sole writer of cmd_vel and muxes the
+    # When set, guidance (capture) becomes the sole writer of cmd_vel and muxes the
     # nav chain through it (velocity_smoother is remapped to cmd_vel_nav inside
     # launch_virtual_spacecraft.py, which reads the same env). Must match the
     # reads in launch_centralized_swarm.py and launch_virtual_spacecraft.py.
@@ -274,143 +274,40 @@ def generate_launch_description():
         ))
 
     ##############################################################################
-    ############################## - Encapsulation Phase - #######################
+    ########## - guidance: flocking + avoidance, pointing, capture - ############
+    # One process per robot (nodes-to-functions Phase 3; was motion_planner, pointing_planner, cp_controller).
+    # Publishes avoidance/flocking/pointing/capture/preparation_wrench (capture -> cmd_vel with direct_cmd_vel)
+    # and serves encapsulation/enable, toggle_controller, toggle_dock for mode_supervisor.
     for i in range(N):
-        robot_name = robot_names[i]
-
-        ep_control = Node(
+        ld.add_action(Node(
             package="swarm_controller",
-            executable="ep_proportional_controller",
-            name="ep_controller",
-            namespace=robot_name,
+            executable="guidance",
+            name="guidance",
+            namespace=robot_names[i],
             output="screen",
             emulate_tty=True,
             parameters=[
-                    {
-                        "timer_frequency": timer_frequency,
-                        "init_period": init_period,
-                        **qos_parameters(depth=1, reliability='RELIABLE')
-                    }
-                ]
-            )
-
-        # ld.add_action(ep_control)
-
-    ##############################################################################
-    ############################## - Encapsulation Phase - #######################
-    for i in range(N):
-        robot_name = robot_names[i]
-
-        ep_pointing_planner = Node(
-            package="swarm_controller",
-            executable="pointing_guidance2",
-            name="pointing_planner",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                    spacecraft_params,
-                    {
-                        "timer_frequency": timer_frequency,
-                        "init_period": init_period,
-                        **qos_parameters(depth=1, reliability='RELIABLE')
-                    }
-                ]
-            )
-        # Publishes pointing_wrench (heading-hold torque) to the virtual spacecraft.
-        ld.add_action(ep_pointing_planner)
-
-        ###################################
-        ##### - Encapsulation Phase - #####
-
-        ep_motion_planner = Node(
-            package="swarm_controller",
-            executable="position_guidance3",
-            name="motion_planner",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                    spacecraft_params,
-                    {
-                        "timer_frequency": timer_frequency,
-                        "init_period": init_period,
-                        **qos_parameters(depth=1, reliability='RELIABLE')
-                    }
-                ]
-            )
-        # ENABLED: sole publisher of avoidance_wrench, which virtual_spacecraft
-        # has been subscribing to all along with nothing on the other end.
-        ld.add_action(ep_motion_planner)
-
-
-    ##############################################################################
-    ########################### - Capture Phase - ################################
-    for i in range(N):
-        robot_name = robot_names[i]
-
-        cp_control = Node(
-            package="swarm_controller",
-            executable="cp_proportional_controller",
-            name="cp_controller",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                    spacecraft_params,
-                    {
-                        "timer_frequency": timer_frequency,
-                        "init_period": init_period,
-                        # Approach gain, s^-1, bracketed three ways: the
-                        # zero-order-hold budget on the Marvelmind period
-                        # (< 3.3), the body-x cap over the 52 mm noise floor
-                        # (< 0.96, else noise alone saturates the command),
-                        # and tracking lag v_target / gain (> 0.58).
-                        "approach_gain": 0.5,
-                        # Tangential alignment, (m/s)/rad. 0.0 steers by
-                        # rotation alone.
-                        "align_gain": 0.12,
+                spacecraft_params,
+                {
+                    "timer_frequency": timer_frequency,
+                    "init_period": init_period,
+                    **qos_parameters(depth=1, reliability='RELIABLE'),
+                    "capture": {
+                        "approach_gain": 0.5,         # s^-1: < 3.3 ZOH budget, < 0.96 noise cap, > 0.58 lag
+                        "align_gain": 0.12,           # (m/s)/rad; 0.0 steers by rotation alone
                         "align_damping_gain": 0.4,
                         "preparation_max_force": 0.01,
-                        # Heading gain, s^-1. Capped at 2.3 by the rotation
-                        # cap over the bearing noise -- 52 mm of position
-                        # noise subtends 0.087 rad at buffer_radius = 0.60 --
-                        # well under the zero-order-hold budget of 3.3.
-                        "heading_gain": 1.0,
-                        # Target-velocity feedforward. The span is a noise
-                        # budget: a two-point difference on 52 mm fixes at
-                        # 0.35 s carries 0.21 m/s against a 0.03 m/s signal,
-                        # while a slope over 5.25 s (15 independent fixes)
-                        # gives 9 mm/s -- at the cost of lagging a change in
-                        # target velocity by ~2.6 s. SECONDS, not samples:
-                        # target_callback runs at the 10 Hz markers rate, so
-                        # a sample count would silently shrink the span.
-                        # Set feedforward_gain to 0.0 to A/B against the pure
-                        # proportional law.
-                        "target_velocity_span": 5.25,
-                        "feedforward_gain": 1.0,
-                        # Contact equilibrium, metres from the robot centre --
-                        # half the 0.40 m RoboMaster length, matching the
-                        # contact_distance used by geometric_contact.py's
-                        # gate on the centralized/virtual side.
-                        "contact_distance": 0.20,
-                        # Near-target speed envelope: inside capture_slow_radius
-                        # the summed approach command tapers to
-                        # capture_min_speed_frac at contact so the weak thruster
-                        # can track the final corridor run-in.
-                        "capture_slow_radius": 0.5,
+                        "heading_gain": 1.0,          # s^-1, capped at 2.3 by bearing noise
+                        "target_velocity_span": 5.25, # SECONDS of track for the feedforward slope
+                        "feedforward_gain": 1.0,     # 0.0 = pure proportional A/B
+                        "contact_distance": 0.20,  # m from the robot centre: half the 0.40 m RoboMaster
+                        "capture_slow_radius": 0.5,   # inside it the command tapers to capture_min_speed_frac
                         "capture_min_speed_frac": 0.3,
-                        # True bypasses virtual_spacecraft/nav2_pidff and
-                        # publishes straight to cmd_vel for real-hardware
-                        # bench testing; do not also run velocity_smoother on
-                        # cmd_vel at the same time.
-                        "direct_cmd_vel": direct_cmd_vel,
-                        **qos_parameters(depth=1, reliability='RELIABLE')
-                    }
-                ]
-            )
-
-        ld.add_action(cp_control)
+                        "direct_cmd_vel": direct_cmd_vel,   # sole cmd_vel writer, muxing the nav chain (bench tests)
+                    },
+                },
+            ],
+        ))
 
     ##############################################################################
     ################## - AP auction: distinct attachment points - ################

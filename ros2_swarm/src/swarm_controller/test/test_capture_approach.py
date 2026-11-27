@@ -14,7 +14,7 @@ loop closed at the Marvelmind rate converges to it rather than oscillating
 about it.
 
 `target_callback` is called unbound against a stub rather than against a real
-node: constructing `ControllerNode` joins the DDS graph, and the dev host
+node: constructing the guidance node joins the DDS graph, and the dev host
 shares a domain with live robots.
 """
 
@@ -26,10 +26,10 @@ import numpy as np
 import pytest
 from rclpy.time import Time
 
-from swarm_controller.cp_proportional_controller import (
+from swarm_controller.capture_law import (
     TRACK_MAX_GAP,
     TRACK_MAX_JUMP,
-    ControllerNode,
+    CaptureLaw,
 )
 
 from swarm_interfaces.msg import CoordXY, Markers
@@ -86,7 +86,7 @@ def stub(approach_gain=APPROACH_GAIN, align_gain=ALIGN_GAIN,
          heading_gain=HEADING_GAIN, span=TRACK_SPAN,
          feedforward_gain=FEEDFORWARD_GAIN,
          capture_slow_radius=0.0, capture_min_speed_frac=0.3):
-    """Enough of ControllerNode for the laws, with a clock the test drives.
+    """Enough of CaptureLaw for the laws, with a clock the test drives.
 
     The tracking methods are bound onto the namespace rather than reimplemented
     so the tests exercise the shipped arithmetic, and the clock is fake because
@@ -130,7 +130,7 @@ def stub(approach_gain=APPROACH_GAIN, align_gain=ALIGN_GAIN,
         now=lambda: Time(nanoseconds=round(node.seconds * 1e9)))
     for name in ("to_body", "track_target", "target_velocity_map"):
         setattr(node, name,
-                types.MethodType(getattr(ControllerNode, name), node))
+                types.MethodType(getattr(CaptureLaw, name), node))
     return node
 
 
@@ -181,7 +181,7 @@ def command(distance_m, bearing_rad=0.0, face=None, **gains):
     x = 100.0 * distance_m * math.cos(bearing_rad)
     y = 100.0 * distance_m * math.sin(bearing_rad)
     spec = (x, y) if face is None else (x, y, face)
-    ControllerNode.target_callback(node, markers(spec))
+    CaptureLaw.target_callback(node, markers(spec))
     return np.array([float(node.frc_cmd[0]), float(node.frc_cmd[1])])
 
 
@@ -195,7 +195,7 @@ def heading(bearing_rad, distance_m=BUFFER_RADIUS, **gains):
     node = stub(**gains)
     x = 100.0 * distance_m * math.cos(bearing_rad)
     y = 100.0 * distance_m * math.sin(bearing_rad)
-    ControllerNode.target_callback(node, markers((x, y, bearing_rad), flip=False))
+    CaptureLaw.target_callback(node, markers((x, y, bearing_rad), flip=False))
     return float(node.trq_cmd)
 
 
@@ -285,7 +285,7 @@ def test_a_forward_flipped_normal_is_disambiguated_by_the_los():
     msg = markers((100.0 * BUFFER_RADIUS, 0.0))  # default face -> on corridor, flipped
     assert msg.markers_normals[0].y > 0.0  # forward component is positive (flipped)
     node = stub()
-    ControllerNode.target_callback(node, msg)
+    CaptureLaw.target_callback(node, msg)
     tangential = np.array([float(node.frc_cmd[0]),
                            float(node.frc_cmd[1])]) @ u_t
     assert tangential == pytest.approx(0.0, abs=1e-12)
@@ -299,7 +299,7 @@ def test_a_degenerate_normal_falls_back_to_the_los_bearing():
         node = stub()
         x = 100.0 * BUFFER_RADIUS * math.cos(bearing)
         y = 100.0 * BUFFER_RADIUS * math.sin(bearing)
-        ControllerNode.target_callback(node, markers((x, y, None)))
+        CaptureLaw.target_callback(node, markers((x, y, None)))
         u_t = np.array([-math.sin(bearing), math.cos(bearing)])
         tangential = np.array([float(node.frc_cmd[0]),
                                float(node.frc_cmd[1])]) @ u_t
@@ -327,7 +327,7 @@ def test_a_detection_at_the_robot_centre_commands_nothing():
 
 def test_the_closest_target_is_the_one_steered_to():
     node = stub()
-    ControllerNode.target_callback(node, markers((200.0, 0.0), (60.0, 0.0)))
+    CaptureLaw.target_callback(node, markers((200.0, 0.0), (60.0, 0.0)))
     assert node.closest_target_index == 1
     assert float(node.frc_cmd[0]) == pytest.approx(APPROACH_GAIN * (0.60 - BUFFER_RADIUS))
 
@@ -439,7 +439,7 @@ def chase(period=MARKERS_PERIOD, steps=600, start=1.60, target_speed=0.0,
     for _ in range(steps):
         node.seconds += period
         node.pose_x = robot_x
-        ControllerNode.target_callback(
+        CaptureLaw.target_callback(
             node, markers((100.0 * (target_x - robot_x), 0.0)))
         speed = min(max(float(node.frc_cmd[0]), -MAX_SPEED[0]), MAX_SPEED[0])
         robot_x += speed * period
@@ -689,9 +689,9 @@ def test_the_capture_command_expires_when_targets_stop():
         maximum_force=0.5, yaw_rate_torque_gain=1.0, maximum_torque=0.2,
         wrench_pub=ZeroGatedPublisher(types.SimpleNamespace(publish=lambda m: sent.append((node.seconds, m.force.x)))))
     node.seconds = 1.0
-    ControllerNode.target_callback(node, markers((150.0, 0.0)))
+    CaptureLaw.target_callback(node, markers((150.0, 0.0)))
     for k in range(20):  # 1.0 s of 20 Hz ticks with no further targets
         node.seconds = 1.0 + 0.05 * k
-        ControllerNode.publish_cmd(node)
+        CaptureLaw.publish_cmd(node)
     assert sent[0][1] > 0.0
     assert sent[-1] == (pytest.approx(1.45), 0.0)  # one zero just past the 0.4 s hold, then silence

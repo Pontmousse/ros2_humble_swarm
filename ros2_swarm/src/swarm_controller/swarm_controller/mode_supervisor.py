@@ -30,9 +30,9 @@ mode and publishes it to every robot's `mode_cmd`. Nothing else here changes.
 
 Actuation (2026-10): each mode maps to exactly one SetBool wrench gate --
   SEARCH        -> `search/enable`        (bounding_box_search -> spacecraft_wrench)
-  ENCAPSULATION -> `encapsulation/enable` (position_guidance3  -> flocking_wrench)
-  CAPTURE       -> `toggle_controller`    (cp_controller       -> capture_wrench)
-  DOCK          -> `toggle_dock`          (cp_controller       -> freeze, zero wrench)
+  ENCAPSULATION -> `encapsulation/enable` (guidance: flocking -> flocking_wrench)
+  CAPTURE       -> `toggle_controller`    (guidance: capture  -> capture_wrench)
+  DOCK          -> `toggle_dock`          (guidance: capture  -> freeze, zero wrench)
 All four servers exist. `avoidance_wrench` is NOT gated here -- it is an
 always-on peer source summed by the spacecraft in every mode, so inter-robot
 avoidance never depends on which mode is active. Calls never block: the wanted
@@ -186,8 +186,8 @@ class ModeSupervisor(Node):
         # under the launch namespace into /RMx/<name>.
         #  - search/enable          : bounding_box_search wrench (SEARCH)
         #  - encapsulation/enable   : flocking wrench           (ENCAPSULATION)
-        #  - toggle_controller      : cp_controller capture wrench (CAPTURE)
-        #  - toggle_dock            : cp_controller freeze         (DOCK)
+        #  - toggle_controller      : guidance capture wrench     (CAPTURE)
+        #  - toggle_dock            : guidance capture freeze      (DOCK)
         self.search_client = self.create_client(SetBool, "search/enable")
         self.encap_client = self.create_client(SetBool, "encapsulation/enable")
         self.capture_client = self.create_client(SetBool, "toggle_controller")

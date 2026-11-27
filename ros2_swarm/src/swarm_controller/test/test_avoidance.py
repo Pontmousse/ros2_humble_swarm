@@ -8,7 +8,7 @@ from swarm_controller.avoidance import closest_approach
 from swarm_controller.avoidance import neighbour_repulsion
 
 
-# position_guidance3 settings: influence radius, potential gain, damping gain,
+# flocking.py settings: influence radius, potential gain, damping gain,
 # envelope, virtual mass, and chassis contact at 2 x the 0.22 m robot_radius.
 RANT = 1.05
 GAIN = 0.78

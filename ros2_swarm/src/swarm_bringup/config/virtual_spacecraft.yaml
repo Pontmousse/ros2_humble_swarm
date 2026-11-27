@@ -37,16 +37,16 @@
     translation_response_scale: 1.0
     rotation_response_scale: 1.0
 
-    # Flocking (position_guidance3) and the pointing centroid (pointing_guidance2)
+    # Flocking and the pointing centroid (guidance: flocking.py, pointing.py)
     # use only the K landmarks nearest the robot (0 = all). The memory never
     # forgets, so averaging the whole cloud let far-side points dilute the
     # near-edge push exactly when the robot closes in; also bounds per-frame CPU.
     landmark_nearest_k: 5
 
-    # Shared target estimate. pointing_guidance2 broadcasts its landmark-memory
+    # Shared target estimate. guidance (pointing.py) broadcasts its landmark-memory
     # centre on the flat /target_estimate topic while it sees the target; a robot
     # in SEARCH with no landmarks of its own points at the neighbours' estimate
-    # (pointing_guidance2) and drifts toward it (bounding_box_search). Readiness
+    # (pointing.py) and drifts toward it (bounding_box_search). Readiness
     # still requires the robot's own perception. false = off on both sides.
     share_target: true
     share_timeout: 2.0        # s since RECEIPT (HIL clocks are not synced)

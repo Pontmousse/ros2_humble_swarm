@@ -22,7 +22,7 @@ Conventions (verified against swarm_aruco):
     (aruco.py: x = tvec_z, y = -tvec_x).
   * Marker NORMAL is published as [X_cam, Z_cam] = [right, forward], flipped so
     the forward component is positive (aruco_detector projects the marker z-axis
-    and forces z>=0). cp_proportional_controller reads markers_normals[closest]
+    and forces z>=0). the capture law (capture_law.py) reads markers_normals[closest]
     and drives the right component to zero to face the marker head-on.
   * Pose is /<ns>/pose = StatePos (x,y metres; theta DEGREES), the same source
     the controllers use, so projection errors cancel and the sim is consistent.

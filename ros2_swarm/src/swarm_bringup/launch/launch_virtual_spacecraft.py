@@ -24,7 +24,7 @@ def robot_names_from_environment():
 
 def generate_launch_description():
     """Create namespaced spacecraft simulator and tracker nodes."""
-    # In direct_cmd_vel capture, cp_controller is the sole writer of cmd_vel and
+    # In direct_cmd_vel capture, guidance (capture) is the sole writer of cmd_vel and
     # muxes the nav chain through it; the smoother must publish cmd_vel_nav instead
     # so the two publishers don't fight over cmd_vel. Must match the same env read
     # in launch_centralized_swarm.py.

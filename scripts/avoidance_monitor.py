@@ -7,7 +7,7 @@ separation would stall exactly when the robots are closing. Forces still have
 to come from ROS, since avoidance_wrench is not on the wire -- they are read
 BEST_EFFORT so a lost sample is skipped instead of blocking.
 
-The expected force is recomputed from position_guidance3.py at startup, so
+The expected force is recomputed from flocking.py at startup, so
 retuning the law cannot silently desynchronise this display from it.
 
     python3 scripts/avoidance_monitor.py            # robots 2 and 6
@@ -27,7 +27,7 @@ sys.path.insert(0, str(REPO / "ros2_swarm/src/swarm_comms"))
 
 from swarm_comms.packet import DEFAULT_PORT, decode  # noqa: E402
 
-GUIDANCE_SRC = REPO / "ros2_swarm/src/swarm_controller/swarm_controller/position_guidance3.py"
+GUIDANCE_SRC = REPO / "ros2_swarm/src/swarm_controller/swarm_controller/flocking.py"
 # 2 x robot_radius from virtual_spacecraft.yaml: chassis contact.
 CONTACT_DISTANCE = 0.44
 

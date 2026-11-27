@@ -10,7 +10,7 @@ from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import SetBool
 from swarm_interfaces.msg import TargetEstimate
-from .pointing_guidance2 import SHARE_QOS, SharedTargets, now_s
+from .shared_target import SHARE_QOS, SharedTargets, now_s
 from .zero_gate import ZeroGatedPublisher
 
 

@@ -14,7 +14,7 @@ change these tests exist to survive. So the ownership is asserted directly
 instead of through any observable the current wiring happens to make constant.
 
 The callbacks are called unbound against a stub rather than against a real
-node: constructing `GuidanceNode` joins the DDS graph, and the dev host shares
+node: constructing `Flocking` joins the DDS graph, and the dev host shares
 a domain with live robots.
 """
 
@@ -22,7 +22,7 @@ import numpy as np
 
 import pytest
 
-from swarm_controller.position_guidance3 import GuidanceNode
+from swarm_controller.flocking import Flocking
 
 from swarm_interfaces.msg import Markers, NeighbourState, NeighbourStates
 
@@ -69,7 +69,7 @@ def neighbour_table(*neighbours):
 
 def test_the_neighbour_guard_leaves_the_landmark_force_alone():
     node = StubNode()
-    GuidanceNode.neighbours_callback(node, neighbour_table())
+    Flocking.neighbours_callback(node, neighbour_table())
 
     assert node.vel1 == pytest.approx(LANDMARK_FORCE)
     assert node.vel2 == pytest.approx([0.0, 0.0])
@@ -80,7 +80,7 @@ def test_the_landmark_guard_leaves_the_avoidance_force_alone():
     # The mirror image, so the pair pins the ownership rather than one side of
     # it -- this is the guard the broken one was copied from.
     node = StubNode()
-    GuidanceNode.landmarks_callback(node, Markers())
+    Flocking.landmarks_callback(node, Markers())
 
     assert node.vel1 == pytest.approx([0.0, 0.0])
     assert node.vel2 == pytest.approx(AVOIDANCE_FORCE)
@@ -92,7 +92,7 @@ def test_an_empty_landmark_list_is_not_an_uninitialised_pose():
     # for "pose is fine, there is nothing to see". Both must clear vel1 only,
     # or one of them becomes a way back into the bug.
     node = StubNode(pose=np.array([1.0, 2.0, 0.0]))
-    GuidanceNode.landmarks_callback(node, Markers())
+    Flocking.landmarks_callback(node, Markers())
 
     assert node.vel1 == pytest.approx([0.0, 0.0])
     assert node.vel2 == pytest.approx(AVOIDANCE_FORCE)
@@ -106,7 +106,7 @@ def test_an_emptied_neighbour_table_holds_rather_than_zeroes():
     node.last_nbh_time = object()   # non-None, so the hold is consulted
     node.held_force_expired = lambda: False
 
-    GuidanceNode.neighbours_callback(node, neighbour_table((5.0, 5.0, False)))
+    Flocking.neighbours_callback(node, neighbour_table((5.0, 5.0, False)))
 
     assert node.vel1 == pytest.approx(LANDMARK_FORCE)
     assert node.vel2 == pytest.approx(AVOIDANCE_FORCE)
@@ -117,7 +117,7 @@ def test_an_expired_hold_clears_the_avoidance_force_only():
     node = StubNode(pose=np.array([1.0, 2.0, 0.0]))
     node.held_force_expired = lambda: True
 
-    GuidanceNode.neighbours_callback(node, neighbour_table((5.0, 5.0, False)))
+    Flocking.neighbours_callback(node, neighbour_table((5.0, 5.0, False)))
 
     assert node.vel1 == pytest.approx(LANDMARK_FORCE)
     assert node.vel2 == pytest.approx([0.0, 0.0])

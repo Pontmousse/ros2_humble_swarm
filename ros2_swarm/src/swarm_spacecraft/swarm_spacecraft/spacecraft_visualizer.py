@@ -16,8 +16,8 @@ plus the perception overlays this node adds:
 Frame discipline: the only yaw this node ever reads comes from odometry
 QUATERNIONS, never from StatePos.theta (which is in degrees -- the standing trap
 in this stack). Landmarks and targets arrive as BODY-frame Markers in
-CENTIMETRES (the convention target_bridge, position_guidance3 and
-cp_proportional_controller all share); they are lifted into the global frame
+CENTIMETRES (the convention target_bridge, flocking.py and
+capture_law.py all share); they are lifted into the global frame
 with the physical robot's own pose from localization/odom, so they are only
 drawn while that pose is fresh and actually in the global frame.
 

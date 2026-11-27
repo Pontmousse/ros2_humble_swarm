@@ -24,20 +24,7 @@ setup(
             'bounding_box_search = swarm_controller.bounding_box_search:main',
             'bounding_box_visualizer = swarm_controller.bounding_box_visualizer:main',
 
-            'pointing_guidance1 = swarm_controller.pointing_guidance1:main',
-            'pointing_guidance2 = swarm_controller.pointing_guidance2:main',
-            'pointing_guidance3 = swarm_controller.pointing_guidance3:main',
-
-            'position_guidance1 = swarm_controller.position_guidance1:main',
-            'position_guidance2 = swarm_controller.position_guidance2:main',
-            'position_guidance3 = swarm_controller.position_guidance3:main',
-
-            #########################################################################
-
-            'pointing_controller = swarm_controller.pointing_controller:main',
-            'ep_proportional_controller = swarm_controller.ep_proportional_controller:main',
-            'cp_proportional_controller = swarm_controller.cp_proportional_controller:main',
-            'cp_proportional_controller2 = swarm_controller.cp_proportional_controller2:main',
+            'guidance = swarm_controller.guidance_node:main',
 
             #########################################################################
 

@@ -8,7 +8,7 @@ perception blink). Bids are broadcast on the flat `/ap_bids` topic keyed by
 peers using a deterministic `(bid, robot_id)` tuple compare (higher id wins
 ties), so the distributed system converges to DISTINCT claims over a few rounds
 without any central coordinator. The locked claim is published on `assigned_ap`
-(consumed by cp_controller to pick its dock target) and `assignment_locked`
+(consumed by guidance's capture law to pick its dock target) and `assignment_locked`
 (consumed by the readiness consensus node).
 
 Bids and geometry are purely body-frame local, so the node behaves identically

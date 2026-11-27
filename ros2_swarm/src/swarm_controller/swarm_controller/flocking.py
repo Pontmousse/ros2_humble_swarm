@@ -1,84 +1,29 @@
+"""Flocking (landmark spring-damper potential, ENCAPSULATION only) and neighbour avoidance: the
+flocking_wrench and avoidance_wrench contributors. Plain class driven by the guidance node."""
 import math
 
 import numpy as np
-import rclpy
-
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
-from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
-from std_srvs.srv import SetBool
-
-# Custom messages
 from swarm_interfaces.msg import Markers, NeighbourStates
 from swarm_interfaces.msg import StatePos as State
 
 from .avoidance import neighbour_repulsion
-from .zero_gate import ZeroGatedPublisher
 
 
-class GuidanceNode(Node):
-    def __init__(self):
-        super().__init__('target_position_controller')
-        self.get_logger().info("Target position controller has been started.")
-
-        # For initial pose initialization using GPS / Odometry readings
-        self.declare_parameter("init_period", 1.0)
-        self.init_duration = self.get_parameter("init_period").value
-        self.init_start_time = self.get_clock().now()
-
-        # For timer
-        self.declare_parameter("timer_frequency", 0.01)
-        self.timer_frequency = self.get_parameter("timer_frequency").value
-
-        # Shared response-scale knob from the global /** block of
-        # virtual_spacecraft.yaml. The spacecraft node scales this layer's
-        # integrated wrench by this factor, which drops the damping ratio by
-        # sqrt(scale); flk_damping_gain is boosted by 1/sqrt(scale) below to hold
-        # zeta constant across the sweep. 1.0 = no-op.
-        self.declare_parameter("translation_response_scale", 1.0)
-        translation_response_scale = float(
-            self.get_parameter("translation_response_scale").value)
-        self.declare_parameter("landmark_nearest_k", 5)  # flocking uses the K nearest landmarks; 0 = all
-        self.landmark_nearest_k = int(self.get_parameter("landmark_nearest_k").value)
+class Flocking:
+    def __init__(self, node, wrench_nbh_pub, wrench_flk_pub, init_duration=1.0, translation_response_scale=1.0,
+                 landmark_nearest_k=5, landmarks_freshness_timeout=0.3):
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.init_duration, self.init_start_time = init_duration, self.get_clock().now()
+        self.landmark_nearest_k = int(landmark_nearest_k)
         if not (math.isfinite(translation_response_scale)
                 and 0.0 < translation_response_scale <= 1.0):
             raise ValueError("translation_response_scale must be in (0, 1]")
-
-        # # # # # # # # # # # # # # # # # # # # # # # # # # # 
-        # For QoS
-        self.declare_parameter('qos_depth', 10)
-        self.declare_parameter('qos_reliability', 'RELIABLE')
-        self.declare_parameter('qos_history', 'KEEP_LAST') 
-
-        qos_depth = self.get_parameter('qos_depth').value
-        qos_reliability = self.get_parameter('qos_reliability').value
-        qos_history = self.get_parameter('qos_history').value
-
-        # Validate QoS settings       
-        valid_reliabilities = ['RELIABLE', 'BEST_EFFORT']
-        valid_histories = ['KEEP_LAST', 'KEEP_ALL']
-
-        if qos_reliability not in valid_reliabilities:
-            raise ValueError(f"Invalid qos_reliability: {qos_reliability}")
-        if qos_history not in valid_histories:
-            raise ValueError(f"Invalid qos_history: {qos_history}")
-
-        # QoS Settings 
-        self.qos_profile_reliable = QoSProfile(
-            depth=qos_depth,
-            reliability=ReliabilityPolicy.RELIABLE,
-            history=HistoryPolicy.KEEP_LAST
-        )
-
-        self.qos_profile_best_effort = QoSProfile(
-            depth=qos_depth,
-            reliability=ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST
-        )
-        
-        # # # # # # # # # # # # # # # # # # # # # # # # # # #
+        # Zero-gated (zero_gate.py): avoidance is exactly zero with nobody within Rant,
+        # flocking outside ENCAPSULATION; a zero goes out once, then silence.
+        self.wrench_nbh_pub, self.wrench_flk_pub = wrench_nbh_pub, wrench_flk_pub
 
         # Control states
         self.pose = np.array([None, None, None])  # x, y, theta
@@ -198,56 +143,10 @@ class GuidanceNode(Node):
         self.nbh_hold_timeout = 0.75
 
         # Perception freshness. landmarks carries header.stamp = the time the
-        # detector last produced a frame (frozen on a stalled pipeline, not the
-        # 100 Hz republish time). Past this age the camera is treated as lost:
-        # the flocking term is zeroed and stale local markers are NOT reprojected
-        # by the live pose, mirroring the localization freeze in the spacecraft.
-        self.declare_parameter("landmarks_freshness_timeout", 0.3)  # seconds
-        self.landmarks_freshness_timeout = float(
-            self.get_parameter("landmarks_freshness_timeout").value)
+        # detector last produced a frame. Past this age the camera is treated as lost:
+        # the flocking term is zeroed and stale local markers are NOT reprojected.
+        self.landmarks_freshness_timeout = float(landmarks_freshness_timeout)
         self.last_landmarks_time = None
-
-        # Subscribers
-        self.create_subscription(State, 'pose', self.pose_callback, self.qos_profile_best_effort)
-        self.create_subscription(Markers, 'landmarks', self.landmarks_callback, self.qos_profile_best_effort)
-        # Own velocity for the damping term. Taken from localization/odom rather
-        # than differentiated from `pose`, which would add filter noise straight
-        # into a force, and whose .theta is in DEGREES -- a trap that would
-        # silently rotate the body-to-map transform below.
-        self.create_subscription(Odometry, 'localization/odom', self.odom_callback,
-                                 self.qos_profile_best_effort)
-        # comms/neighbours (UDP broadcast), not nbh_pos (Marvelmind). The modem's
-        # real fix rate with two hedgehogs in the TDMA cycle measures 0.63-0.78
-        # Hz, and neighbours_callback only recomputes the avoidance force when a
-        # message arrives -- so the force stays frozen for ~1.6 s while the robot
-        # keeps moving. The UDP table publishes 50 Hz of valid, dead-reckoned
-        # neighbour states over the same link.
-        #
-        # NeighbourStates, not the legacy position-only Neighbours: the damping
-        # term needs the neighbour's velocity to form a relative closing speed.
-        # Differencing positions here instead would make a pair travelling
-        # together in convoy brake against each other for nothing.
-        self.create_subscription(NeighbourStates, 'comms/neighbours',
-                                 self.neighbours_callback, self.qos_profile_best_effort)
-
-
-
-        # Publishers
-        # Zero-gated (zero_gate.py): avoidance is exactly zero with nobody within Rant,
-        # flocking outside ENCAPSULATION; a zero goes out once, then silence.
-        self.wrench_nbh_pub = ZeroGatedPublisher(self.create_publisher(Wrench, "avoidance_wrench", 10))
-        # Flocking (landmark APF) wrench, summed by the spacecraft as the
-        # ENCAPSULATION layer. Map frame, same frame as vel1. Gated by encapsulation_enabled.
-        self.wrench_flk_pub = ZeroGatedPublisher(self.create_publisher(Wrench, "flocking_wrench", 10))
-        self.pub_timer = self.create_timer(self.timer_frequency, self.publish_target_position)
-
-        # Mode gate. The supervisor calls this to enter/leave ENCAPSULATION; no
-        # other node writes self.encapsulation_enabled. Kept deliberately thin so
-        # the longer-term switch condition (manual trigger, consensus) can live
-        # entirely in the supervisor without touching this node.
-        self.encap_srv = self.create_service(
-            SetBool, "encapsulation/enable", self.set_encapsulation)
-        
 
     def pose_callback(self, msg: State):
         self.pose = np.array([msg.x, msg.y, msg.theta])
@@ -533,15 +432,3 @@ def make_array(list_coord):
 def nearest_k(points, k):
     """The k rows of a robot-relative (N, 2) array closest to the robot; all if k <= 0 or N <= k."""
     return points if k <= 0 or len(points) <= k else points[np.argpartition(np.hypot(points[:, 0], points[:, 1]), k)[:k]]
-
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = GuidanceNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()

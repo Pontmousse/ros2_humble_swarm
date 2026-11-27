@@ -1,20 +1,19 @@
+"""Capture law (formerly cp_controller): drive to CONTACT with the auction-assigned attachment point.
+
+Approach/align/heading law with a corridor (face-normal) bearing, bearing-rate damping, a least-squares target
+velocity feedforward and a near-target speed taper, output as a velocity-servo capture_wrench gated by
+toggle_controller (or straight to cmd_vel with direct_cmd_vel, muxing the nav chain's cmd_vel_nav), a DOCK freeze
+(toggle_dock), and the separately capped ENCAPSULATION preparation_wrench along the assigned AP's tangent.
+Contact itself is detected elsewhere (geometric_contact.py / contact_switch_node). Plain class driven by guidance.
+"""
 from collections import deque
 
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 import numpy as np
-
-# Built-in messages
 from geometry_msgs.msg import Twist, Wrench
 from nav_msgs.msg import Odometry
-from std_srvs.srv import SetBool
 from std_msgs.msg import Bool, Int32, String
-
-# Custom messages for target position
-from swarm_interfaces.msg import StatePos as State
 from swarm_interfaces.msg import CoordXY, Markers
-from .zero_gate import ZeroGatedPublisher
+from swarm_interfaces.msg import StatePos as State
 
 # Outlier guards on the target track. Not tuning knobs: the gap is longer than
 # the 0.61 s frozen-fix period seen on RM6, so only a real dropout trips it.
@@ -31,211 +30,68 @@ BEARING_DT_MIN = 0.02
 NORMAL_MIN = 1e-6
 
 
-class ControllerNode(Node):
-    """Same approach/heading law and output architecture as
-    cp_proportional_controller2.py (velocity-servo wrench, gated by
-    capture_mode), but aimed at CONTACT rather than a standoff circle: the
-    radial equilibrium sits at contact_distance from the target instead of
-    buffer_radius. Adds a DOCK freeze (toggle_dock) and an optional direct
-    cmd_vel output for real-hardware bench testing without the wrench sum.
-    Contact itself is NOT detected here -- see geometric_contact.py / the
-    hardware contact_switch_node, which publish contact_detected independently
-    of this controller. During encapsulation, the assigned AP's shared tangential
-    law also supplies a separately capped preparation wrench, without approach or torque.
-    """
-
-    def __init__(self):
-        super().__init__('target_orientation_controller')
-        self.get_logger().info("Target orientation controller (contact) has been started.")
-
-        self.declare_parameter("init_period", 1.0)
-        self.init_duration = self.get_parameter("init_period").value
-
-        self.declare_parameter("timer_frequency", 0.01)
-        self.timer_frequency = self.get_parameter("timer_frequency").value
-
-        self.declare_parameter('qos_depth', 10)
-        self.declare_parameter('qos_reliability', 'RELIABLE')
-        self.declare_parameter('qos_history', 'KEEP_LAST')
-
-        qos_depth = self.get_parameter('qos_depth').value
-        qos_reliability = self.get_parameter('qos_reliability').value
-        qos_history = self.get_parameter('qos_history').value
-
-        valid_reliabilities = ['RELIABLE', 'BEST_EFFORT']
-        valid_histories = ['KEEP_LAST', 'KEEP_ALL']
-
-        if qos_reliability not in valid_reliabilities:
-            raise ValueError(f"Invalid qos_reliability: {qos_reliability}")
-        if qos_history not in valid_histories:
-            raise ValueError(f"Invalid qos_history: {qos_history}")
-
-        self.qos_profile = QoSProfile(
-            depth=qos_depth,
-            reliability=ReliabilityPolicy.RELIABLE if qos_reliability == 'RELIABLE' else ReliabilityPolicy.BEST_EFFORT,
-            history=HistoryPolicy.KEEP_LAST if qos_history == 'KEEP_LAST' else HistoryPolicy.KEEP_ALL
-        )
-
-        # Gains & Limits
-        self.init_start_time = self.get_clock().now()
+class CaptureLaw:
+    def __init__(self, node, p, wrench_pub, preparation_pub, cmd_vel_pub=None, init_duration=1.0,
+                 translation_response_scale=1.0, rotation_response_scale=1.0):
+        """p(name, default) reads this law's parameters (capture.*). cmd_vel_pub is set iff direct_cmd_vel."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.init_duration, self.init_start_time = init_duration, self.get_clock().now()
         self.max_rotational_speed = 0.2
         self.max_translational_speed = [0.05, 0.15]  # x and y max speeds
-
-        # Standoff point ahead of the robot centre, in cm to match Markers.
-        # Used only to pick the closest target, where the units cancel inside
-        # argmin.
+        # Standoff point ahead of the robot centre, cm (units cancel inside the closest-target argmin).
         self.closest_target_index = None
-        self.ref_offset_x = 10.0
-        self.ref_offset_y = 0.0
-
-        # Radial equilibrium, METRES, measured from the robot CENTRE. Unlike
-        # cp_proportional_controller2.py's buffer_radius (a keep-out circle),
-        # this is where we WANT contact: half the RoboMaster's 0.40 m length
-        # (spacecraft_visualizer.py robot_length), since the marker sits on
-        # the target's surface and the robot's front edge is the contact
-        # point. Declared so it can be kept in sync with fake_plant.py's own
-        # contact_distance from the launch file, without coupling the two
-        # nodes directly.
-        self.declare_parameter("contact_distance", 0.20)
-        self.contact_distance = self.get_parameter("contact_distance").value
-
-        # Approach / alignment / heading gains, unchanged from
-        # cp_proportional_controller2.py -- already validated in metres/
-        # radians against the real noise floor and chassis caps; only the
-        # equilibrium point above changes, not the law shape.
-        self.declare_parameter("approach_gain", 0.9)
-        self.declare_parameter("align_gain", 0.2)
-        self.declare_parameter("heading_gain", 1.0)
-        self.declare_parameter("target_velocity_span", 5.25)
-        self.declare_parameter("feedforward_gain", 1.0)
-
-        # Derivative (rate) term on the bearing, damping the tangential "sidling"
-        # command so it backs off before the bearing reaches zero (the pure-P
-        # align term saturates the lateral cap at large bearing and overshoots
-        # across center). Default 0.0 => byte-for-byte current behaviour. NOT
-        # coupled to translation_response_scale: that scales the inner velocity
-        # servo (velocity_force_gain), this lives in the outer velocity-command
-        # loop. align_rate_filter_alpha is a single-pole EMA on the rate
-        # (1.0 = passthrough, smaller = heavier smoothing) since differentiating
-        # a ~10 Hz noisy bearing amplifies noise.
-        # Near-target speed envelope: inside capture_slow_radius the summed
-        # velocity command (radial + sidling) is scaled down linearly to
-        # capture_min_speed_frac at contact, so the weak thruster can actually
-        # track the final corridor run-in instead of commanding a speed it
-        # cannot realise. Outside the radius the law is unchanged.
-        self.declare_parameter("capture_slow_radius", 0.5)
-        self.declare_parameter("capture_min_speed_frac", 0.3)
-        self.capture_slow_radius = float(
-            self.get_parameter("capture_slow_radius").value)
-        self.capture_min_speed_frac = float(
-            self.get_parameter("capture_min_speed_frac").value)
-
-        self.declare_parameter("align_damping_gain", 0.6)
-        self.declare_parameter("align_rate_filter_alpha", 0.5)
-        self.align_damping_gain = float(
-            self.get_parameter("align_damping_gain").value)
-        self.align_rate_filter_alpha = float(
-            self.get_parameter("align_rate_filter_alpha").value)
-
-        self.approach_gain = self.get_parameter("approach_gain").value
-        self.align_gain = self.get_parameter("align_gain").value
-        self.heading_gain = self.get_parameter("heading_gain").value
-        self.target_velocity_span = self.get_parameter(
-            "target_velocity_span").value
-        self.feedforward_gain = self.get_parameter("feedforward_gain").value
-
-        # Capture-wrench output stage (see cp_proportional_controller2.py for
-        # the full rationale on the velocity-servo design).
-        self.declare_parameter("velocity_force_gain", 6.0)
-        self.declare_parameter("yaw_rate_torque_gain", 1.0)
-        self.declare_parameter("maximum_force", 0.5)
-        self.declare_parameter("maximum_torque", 0.2)
-        self.velocity_force_gain = self.get_parameter("velocity_force_gain").value
-        self.yaw_rate_torque_gain = self.get_parameter("yaw_rate_torque_gain").value
-        self.maximum_force = self.get_parameter("maximum_force").value
-        self.maximum_torque = self.get_parameter("maximum_torque").value
-        self.declare_parameter("preparation_max_force", 0.002)
-        self.preparation_max_force = float(self.get_parameter("preparation_max_force").value)
+        self.ref_offset_x, self.ref_offset_y = 10.0, 0.0
+        # Radial equilibrium, metres from the robot CENTRE: where we WANT contact (half the 0.40 m RoboMaster).
+        self.contact_distance = p("contact_distance", 0.20)
+        self.approach_gain = p("approach_gain", 0.9)
+        self.align_gain = p("align_gain", 0.2)
+        self.heading_gain = p("heading_gain", 1.0)
+        self.target_velocity_span = p("target_velocity_span", 5.25)  # SECONDS of track for the feedforward slope
+        self.feedforward_gain = p("feedforward_gain", 1.0)
+        # Near-target envelope: inside capture_slow_radius the command tapers to capture_min_speed_frac at contact.
+        self.capture_slow_radius = float(p("capture_slow_radius", 0.5))
+        self.capture_min_speed_frac = float(p("capture_min_speed_frac", 0.3))
+        # D on the sidling term (bearing rate), EMA-filtered (1.0 = passthrough).
+        self.align_damping_gain = float(p("align_damping_gain", 0.6))
+        self.align_rate_filter_alpha = float(p("align_rate_filter_alpha", 0.5))
+        # Velocity-servo output stage, capped by maximum_force / maximum_torque.
+        self.velocity_force_gain = p("velocity_force_gain", 6.0)
+        self.yaw_rate_torque_gain = p("yaw_rate_torque_gain", 1.0)
+        self.maximum_force = p("maximum_force", 0.5)
+        self.maximum_torque = p("maximum_torque", 0.2)
+        self.preparation_max_force = float(p("preparation_max_force", 0.002))
         if not np.isfinite(self.preparation_max_force) or self.preparation_max_force < 0.0:
             raise ValueError("preparation_max_force must be finite and nonnegative")
-
-        # Shared response-scale knobs from the global /** block of
-        # virtual_spacecraft.yaml. The spacecraft node scales this layer's
-        # force/torque by the matching factor, dropping each axis' damping ratio
-        # by sqrt(scale). Capture is a cascaded velocity servo, so velocity_force_gain
-        # is its damping-like gain (translation) and yaw_rate_torque_gain the
-        # rotation one; boosting each by 1/sqrt(scale) restores its baseline zeta
-        # as the craft is slowed. 1.0 = no-op. Output stays clamped by
-        # maximum_force/maximum_torque, so the higher gain only reduces inner-loop
-        # lag, it cannot exceed the envelope.
-        self.declare_parameter("translation_response_scale", 1.0)
-        self.declare_parameter("rotation_response_scale", 1.0)
-        t_scale = float(self.get_parameter("translation_response_scale").value)
-        r_scale = float(self.get_parameter("rotation_response_scale").value)
+        # The spacecraft scales this layer by the response scales; boosting each servo gain by 1/sqrt(scale)
+        # restores its damping ratio (output stays clamped, so it cannot exceed the envelope).
+        t_scale, r_scale = float(translation_response_scale), float(rotation_response_scale)
         if not (np.isfinite(t_scale) and 0.0 < t_scale <= 1.0):
             raise ValueError("translation_response_scale must be in (0, 1]")
         if not (np.isfinite(r_scale) and 0.0 < r_scale <= 1.0):
             raise ValueError("rotation_response_scale must be in (0, 1]")
         self.velocity_force_gain = self.velocity_force_gain / np.sqrt(t_scale)
         self.yaw_rate_torque_gain = self.yaw_rate_torque_gain / np.sqrt(r_scale)
-
-        # direct_cmd_vel: this node becomes the SOLE writer of cmd_vel and acts
-        # as a mode-selected mux so virtual_spacecraft and direct capture can
-        # run simultaneously. The nav chain (nav2_pidff -> velocity_smoother) is
-        # remapped to publish `cmd_vel_nav` instead of `cmd_vel`; this node
-        # republishes that onto `cmd_vel` in every non-capturing mode, and
-        # overrides it with its own approach-law Twist while capturing. One
-        # writer on cmd_vel, so the two never fight. With direct_cmd_vel False
-        # the node publishes capture_wrench and the smoother owns cmd_vel as
-        # before.
-        self.declare_parameter("direct_cmd_vel", False)
-        self.direct_cmd_vel = bool(self.get_parameter("direct_cmd_vel").value)
-        # Latest passthrough command from the nav chain (direct mode only).
+        # direct_cmd_vel: sole writer of cmd_vel, muxing the nav chain (cmd_vel_nav) outside capture.
+        self.direct_cmd_vel = cmd_vel_pub is not None
+        self.cmd_vel_pub, self.wrench_pub, self.preparation_pub = cmd_vel_pub, wrench_pub, preparation_pub
         self.cmd_vel_nav = Twist()
 
-        # Velocity commands
         self.trq_cmd = None
         self.frc_cmd = np.array([None, None])
-
-        # Our heading, for the map->body rotation of the target-velocity
-        # feedforward. StatePos.theta is in DEGREES.
-        self.pose_x = None
-        self.pose_y = None
-        self.pose_theta = None
-
-        # Spacecraft body-frame velocity, the servo sets v_desired against.
-        self.craft_vx = None
-        self.craft_vy = None
-        self.craft_wz = None
-
-        # Map-frame track of the closest target, for the velocity estimate.
-        self.target_track = deque()
-
-        # Bearing-rate damping state (see target_callback). Reset to None/0.0 on
-        # any track discontinuity so the next frame never differentiates across a
-        # gap, target switch, or clock anomaly.
+        self.pose_x = self.pose_y = self.pose_theta = None  # StatePos.theta is DEGREES
+        self.craft_vx = self.craft_vy = self.craft_wz = None  # virtual spacecraft body-frame velocity
+        self.target_track = deque()  # map-frame track of the closest target, for the velocity estimate
+        # Bearing-rate state, reset on any track discontinuity.
         self._prev_bearing = None
         self._prev_bearing_time = None
         self._prev_closest_index = None
         self._prev_target_identity = None
         self._bearing_rate_filt = 0.0
 
-        # Diagnostic state for the [dbg] log: last body-frame target (for the
-        # per-frame jump metric), the worst jump seen since the last print, and
-        # the time of the last print (self-throttle). Purely observational.
-        self._dbg_prev_target = None
-        self._dbg_max_jump = 0.0
-        self._dbg_last_log = 0.0
-
-        self.declare_parameter("target_hold_timeout", 0.4)   # seconds
-        self.target_hold_timeout = float(self.get_parameter("target_hold_timeout").value)
+        self.target_hold_timeout = float(p("target_hold_timeout", 0.4))   # seconds
         self.last_target_time = None
-
-        # Auction-assigned attachment point. When fresh+visible, the closest-target
-        # pick is restricted to this AP id so the robot docks its OWN point rather
-        # than greedily grabbing the nearest. Stale/absent -> today's behaviour.
-        self.declare_parameter("assignment_timeout", 0.5)
-        self.assignment_timeout = float(self.get_parameter("assignment_timeout").value)
+        # Auction-assigned AP: when fresh and visible, the closest-target pick is restricted to it.
+        self.assignment_timeout = float(p("assignment_timeout", 0.5))
         self.assigned_ap_id = -1
         self.assigned_ap_time = None
         self.assignment_locked = False
@@ -245,49 +101,9 @@ class ControllerNode(Node):
         self.preparation_speed = 0.0
         self.preparation_target_id = -1
         self.preparation_target_time = None
-
-        # Subscribers
-        self.create_subscription(Markers, 'targets', self.target_callback, self.qos_profile)
-        self.create_subscription(Int32, 'assigned_ap', self.assigned_ap_callback, self.qos_profile)
-        self.create_subscription(Bool, 'assignment_locked', self.assignment_locked_callback,
-                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE))
-        self.create_subscription(String, 'current_mode', self.mode_callback,
-                                 QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                                            durability=DurabilityPolicy.TRANSIENT_LOCAL))
-        qos_latest = QoSProfile(depth=1,
-                                reliability=ReliabilityPolicy.BEST_EFFORT,
-                                history=HistoryPolicy.KEEP_LAST)
-        self.create_subscription(State, 'pose', self.pose_callback, qos_latest)
-        self.create_subscription(Odometry, 'virtual_spacecraft/odom',
-                                 self.spacecraft_callback, qos_latest)
-
-        # Exactly one output sink, chosen by direct_cmd_vel. In direct mode this
-        # node owns cmd_vel and muxes the nav passthrough (cmd_vel_nav) against
-        # its own capture command; otherwise it feeds the summed capture_wrench
-        # and the smoother owns cmd_vel directly.
-        if self.direct_cmd_vel:
-            self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel',
-                                                     self.qos_profile)
-            self.create_subscription(Twist, 'cmd_vel_nav',
-                                     self.cmd_vel_nav_callback, self.qos_profile)
-        else:
-            self.wrench_pub = ZeroGatedPublisher(self.create_publisher(Wrench, 'capture_wrench', self.qos_profile))
-        # Both wrenches are zero outside their mode: one zero on the falling edge, then silence (zero_gate.py).
-        self.preparation_pub = ZeroGatedPublisher(self.create_publisher(Wrench, 'preparation_wrench', self.qos_profile))
-        self.cmd_pub_timer = self.create_timer(self.timer_frequency, self.publish_cmd)
-
-        # Capture mode and dock freeze. DOCK wins over CAPTURE: once docked
-        # the approach law is skipped and a zero Wrench/Twist is published
-        # regardless of capture_mode, so a still-enabled capture_mode (e.g.
-        # from a stale/duplicate service call) can never re-energize the
-        # output while docked.
+        # DOCK wins over CAPTURE: once docked the output is zero whatever capture_mode says.
         self.capture_mode = False
         self.dock_mode = False
-        self.srv = self.create_service(SetBool, 'toggle_controller', self.handle_controller)
-        self.dock_srv = self.create_service(SetBool, 'toggle_dock', self.handle_dock)
-
-        # Magnet Client
-        self.magnet_client = self.create_client(SetBool, 'toggle_magnet')
 
     def pose_callback(self, msg: State):
         self.pose_x = msg.x
@@ -466,7 +282,7 @@ class ControllerNode(Node):
                 bearing = los_bearing
 
             # Radial: zero at contact_distance, not buffer_radius -- the only
-            # change from cp_proportional_controller2.py's approach law.
+            # change from the old standoff (buffer_radius) approach law.
             vel = self.approach_gain * (distance - self.contact_distance) * u_r
 
             # Bearing-rate damping (D on the pure-P sidling term). Rate comes from
@@ -641,30 +457,7 @@ class ControllerNode(Node):
         response.message = f'Dock mode {"enabled" if self.dock_mode else "disabled"}'
         return response
 
-    def call_service(self, client, state: bool, name: str):
-        if not client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().warn(f'{name} service not available.')
-            return
-
-        request = SetBool.Request()
-        request.data = state
-
-        future = client.call_async(request)
-        future.add_done_callback(lambda f: self.get_logger().info(
-            f'{name} response: {f.result().success if f.result() else "No response"}'))
-
 
 def bound(input, bound):
     output = max(min(input, bound), -bound)
     return output
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ControllerNode()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-if __name__ == '__main__':
-    main()
