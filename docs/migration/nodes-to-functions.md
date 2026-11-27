@@ -272,6 +272,40 @@ needs it fresher than 0.25 s.
 
 ## Phase 5: swarm logic (#14–16, #18, #19)
 
+**Status: done 2026-11-27 on `split-containers`** (baseline: commit `b0d3085`). One `swarm` process per robot
+replaces ap_auction, readiness_consensus, mode_supervisor, the contact source (`contact_switch` on the Pi,
+`geometric_contact` in SIL) and run_config_snapshot. **End state reached: 5 processes per Pi** (`state_broadcaster`,
+`perception`, `guidance`, `control`, `swarm`); SIL has those plus `fake_plant` per robot.
+
+| Module | Job |
+|---|---|
+| `swarm_controller/ap_auction.py` | `Auction`: bids, deconfliction, lock hysteresis (moved verbatim) |
+| `swarm_controller/readiness_consensus.py` | `ReadinessConsensus`: readiness, min-time consensus, rounds, one-shot fire (verbatim) |
+| `swarm_controller/mode_supervisor.py` | `ModeSupervisor`: `decide()`, non-blocking SetBool calls (same file, plain class) |
+| `swarm_controller/geometric_contact.py`, `swarm_magnet/contact_switch.py` | contact sources: SIL geometric, Pi GPIO (20 Hz debounced polling, verbatim) |
+| `swarm_controller/run_config.py` | the latched run_config snapshot |
+| `swarm_controller/swarm_node.py` | thin node: one 5 Hz tick auction → consensus → supervisor, in-process fan-outs |
+
+Outward topics are unchanged (`/ap_bids`, `/readiness`, `assigned_ap`, `assignment_locked`, `capture_sync`, `current_mode`,
+`contact_detected`, `/<ns>/run_config`); the centralized launch's global `/run_config` became per robot, like the Pi's.
+The deliberate change: consensus reads the auction's result from the same tick, and the supervisor acts in the tick
+`capture_sync` fires. `contact.source` is `gpio` (Pi), `geometric` (SIL) or `none`; `swarm_magnet`'s standalone
+`contact_switch_node` stays for centralized HIL (`launch_contact_switch.py`).
+
+**Checked:**
+- golden traces: one shared driver (`test/golden_swarm.py`, with peers that react to what the robot publishes and a timer
+  scheduler for the consensus one-shot) recorded the old nodes at `b0d3085`; the new classes reproduce every message and
+  service call exactly; nine targeted mutations are each caught;
+- `test_swarm_node.py` (wiring, fan-outs, contact sources, run_config latched once), `test_contact_switch.py` (fake gpiod);
+- live `swarm` on an isolated domain: `/ap_bids`, `/readiness`, `assigned_ap` at 5 Hz, lock, SEARCH→ENCAP held by the sync gate;
+- SIL N=3 ×2 against the two Phase 4 runs: QC OK, 3/3 docked on the same APs, per-phase `trk_p95` ≤ 26 mm, sync 0 ms,
+  all locked at 38 s (37–42 s before), churn 8–10 (10–22 before).
+
+**CPU** (SIL, 3 robots): swarm logic 53% of a core against 80–84% for the old processes; whole stack 262–265% (was 316–326%).
+
+**Not yet:** the GPIO contact path inside `swarm` on a Pi with the lever; HIL; `consensus_benchmark` still drives the old
+node classes (its tests are skipped) and needs porting.
+
 **Design:**
 - auction and consensus run on the same 5 Hz tick, and consensus reads the auction's result directly
   (the `assigned_ap`/`assignment_locked` hop goes away internally).
@@ -304,5 +338,5 @@ state_broadcaster can stay on its own: socket work, a different failure mode, sm
 | 4 control | 4–5 days | 9 | **high** | 4 processes, −150 ms feedback latency, no bond |
 | 5 swarm | 2–3 days | 5 | low–medium | 4 processes, capture skew fix |
 
-Each phase ships on its own and is reverted by a launch flag. Measure CPU after each one: if Phases 1–3
+Each phase ships as its own commit on `split-containers` (the `hil` branch is the rollback; no launch flags). Measure CPU after each one: if Phases 1–3
 already put the Pi comfortably under budget, Phase 4 can wait for its own campaign.

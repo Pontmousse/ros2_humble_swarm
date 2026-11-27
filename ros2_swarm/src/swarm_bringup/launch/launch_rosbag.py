@@ -55,8 +55,9 @@ def generate_launch_description():
 
         # Latched JSON snapshot of the configs this run was launched with
         # (config YAMLs + env flags + git HEAD), so the bag is self-describing.
-        # Published by the centralized swarm launch; the per-robot variant below
-        # covers decentralized runs. See swarm_spacecraft/run_config_snapshot.py.
+        # Since Phase 5 every robot's swarm node publishes /<ns>/run_config (below),
+        # in both launches; the global one is kept for bags of older launches.
+        # See swarm_controller/run_config.py.
         '/run_config',
         '/readiness',
         '/ap_bids',

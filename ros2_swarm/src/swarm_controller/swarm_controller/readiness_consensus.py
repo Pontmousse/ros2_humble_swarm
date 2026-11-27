@@ -1,5 +1,5 @@
-#!/usr/bin/env python3
-"""Distributed synchronized-capture trigger via action-time consensus.
+"""Distributed synchronized-capture trigger via action-time consensus. Plain class driven by the swarm node
+(formerly the readiness_consensus node).
 
 Once this agent has LOCKED an attachment point (from the auction), has that AP in
 range (estimated `targets`), and is ACTUALLY seeing it right now (raw `targets_unf`
@@ -19,13 +19,8 @@ Pure coordination layer: identical under VIRTUAL_PLANT and real hardware.
 """
 import math
 
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-
 from std_msgs.msg import Bool, Int32
 from swarm_interfaces.msg import Markers, NeighbourStates, Readiness
-
 
 class PeerReady:
     __slots__ = ("stamp", "action_time", "ready", "round_id", "armed")
@@ -38,28 +33,19 @@ class PeerReady:
         self.armed = armed
 
 
-class ReadinessConsensusNode(Node):
-    def __init__(self):
-        super().__init__("readiness_consensus")
-
-        self.declare_parameter("robot_id", 1)
-        self.declare_parameter("consensus_rate", 5.0)
-        self.declare_parameter("approach_distance", 0.8)
-        self.declare_parameter("perception_stale_timeout", 2.0)
-        self.declare_parameter("action_lead", 2.0)
-        self.declare_parameter("min_lead", 0.5)
-        self.declare_parameter("time_tol", 0.05)
-        self.declare_parameter("neighbor_timeout", 0.5)
-        self.declare_parameter("min_consensus_hold", 0.3)
-
-        self.robot_id = int(self.get_parameter("robot_id").value)
-        self.approach_distance = float(self.get_parameter("approach_distance").value)
-        self.perception_stale_timeout = float(self.get_parameter("perception_stale_timeout").value)
-        self.action_lead = float(self.get_parameter("action_lead").value)
-        self.min_lead = float(self.get_parameter("min_lead").value)
-        self.time_tol = float(self.get_parameter("time_tol").value)
-        self.neighbor_timeout = float(self.get_parameter("neighbor_timeout").value)
-        self.min_consensus_hold = float(self.get_parameter("min_consensus_hold").value)
+class ReadinessConsensus:
+    def __init__(self, node, p, ready_pub, sync_pub):
+        """p(name, default) reads consensus.* (robot_id is shared); node gives the clock and one-shot timers."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.create_timer, self.destroy_timer = node.create_timer, node.destroy_timer
+        self.robot_id = int(p("robot_id", 1))
+        self.approach_distance = float(p("approach_distance", 0.8))
+        self.perception_stale_timeout = float(p("perception_stale_timeout", 2.0))
+        self.action_lead = float(p("action_lead", 2.0))
+        self.min_lead = float(p("min_lead", 0.5))
+        self.time_tol = float(p("time_tol", 0.05))
+        self.neighbor_timeout = float(p("neighbor_timeout", 0.5))
+        self.min_consensus_hold = float(p("min_consensus_hold", 0.3))
 
         # Auction outputs
         self.assigned_ap = -1
@@ -85,28 +71,8 @@ class ReadinessConsensusNode(Node):
         self.hold = 0.0
         self.fire_timer = None
 
-        best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
-                                 history=HistoryPolicy.KEEP_LAST)
-        reliable = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                              history=HistoryPolicy.KEEP_LAST)
-        bcast = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
-                           history=HistoryPolicy.KEEP_LAST)
-        latched = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                             durability=DurabilityPolicy.TRANSIENT_LOCAL,
-                             history=HistoryPolicy.KEEP_LAST)
-
-        self.create_subscription(Bool, "assignment_locked", self.on_locked, reliable)
-        self.create_subscription(Int32, "assigned_ap", self.on_assigned, reliable)
-        self.create_subscription(Markers, "targets", self.on_targets, best_effort)
-        self.create_subscription(Markers, "targets_unf", self.on_targets_unf, best_effort)
-        self.create_subscription(NeighbourStates, "comms/neighbours", self.on_neighbours, best_effort)
-        self.create_subscription(Readiness, "/readiness", self.on_peer, bcast)
-
-        self.ready_pub = self.create_publisher(Readiness, "/readiness", bcast)
-        self.sync_pub = self.create_publisher(Bool, "capture_sync", latched)
-
-        self.dt = 1.0 / float(self.get_parameter("consensus_rate").value)
-        self.create_timer(self.dt, self.round)
+        self.ready_pub, self.sync_pub = ready_pub, sync_pub
+        self.dt = 1.0 / float(p("consensus_rate", 5.0))     # the swarm tick period: hold accumulates per round
         self.get_logger().info(f"readiness_consensus robot_id={self.robot_id} up")
 
     # ------------------------------ inputs ---------------------------------
@@ -265,19 +231,3 @@ class ReadinessConsensusNode(Node):
 
     def stamp_sec(self, header):
         return header.stamp.sec + header.stamp.nanosec * 1e-9
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ReadinessConsensusNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

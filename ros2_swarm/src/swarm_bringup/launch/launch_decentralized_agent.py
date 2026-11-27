@@ -87,15 +87,14 @@ def _find_repo_root(start):
         path = parent
 
 
-def run_config_snapshot_node(robot_names, source_launch, namespace=None,
-                             extra_env_vars=()):
-    """Node that latches a JSON snapshot of this run's config files + env vars.
+def run_config_params(robot_names, source_launch, extra_env_vars=()):
+    """swarm node params: latch a JSON snapshot of this run's config files + env vars (run_config.py).
 
     On a decentralized run this executes on each Pi, so it captures that Pi's own
     env flags, its own on-disk config bytes and (best-effort) its own git HEAD --
     exactly the per-agent install drift worth recording. Published latched under
     the robot namespace (/<ns>/run_config); the rosbag launch records it. See
-    swarm_spacecraft/run_config_snapshot.py.
+    swarm_controller/run_config.py.
     """
     scene_file = os.getenv('SCENE_FILE') or os.path.join(
         get_package_share_directory('swarm_target'), 'config', 'default_scene.yaml')
@@ -112,25 +111,14 @@ def run_config_snapshot_node(robot_names, source_launch, namespace=None,
         'VIRTUAL_TARGET', 'VIRTUAL_PLANT', 'VIRTUAL_SPACECRAFT', 'DIRECT_CMD_VEL', 'SCENE_FILE', 'ROBOT_IDX',
         'ROBOT_NAME', 'BAG_TAG', 'CONTACT_GPIO', 'SWARM_BROADCAST_ADDR', 'SWARM_COMMS_PORT', 'GUIDANCE_VIZ',
     ] + list(extra_env_vars)
-    return Node(
-        package='swarm_spacecraft',
-        executable='run_config_snapshot',
-        name='run_config_snapshot',
-        namespace=namespace,
-        output='screen',
-        emulate_tty=True,
-        parameters=[
-            {
-                'config_files': config_files,
-                'env_vars': env_vars,
-                'topic': 'run_config',
-                'publish_period': 0.0,  # publish once: latched (TRANSIENT_LOCAL), ~100 KB
-                'repo_path': _find_repo_root(__file__),
-                'source_launch': source_launch,
-                'robot_names': list(robot_names),
-            }
-        ],
-    )
+    return {
+        'config_files': config_files,
+        'env_vars': env_vars,
+        'repo_path': _find_repo_root(__file__),
+        'source_launch': source_launch,
+        'robot_names': list(robot_names),
+    }
+
 
 def generate_launch_description():
     init_period = 2.0 # in seconds
@@ -154,15 +142,6 @@ def generate_launch_description():
     N = len(robot_names)
 
     ld = LaunchDescription()
-
-    # Latched JSON snapshot of this agent's config files + env flags, one per
-    # robot namespace (/<ns>/run_config), so each Pi's bag is self-describing and
-    # per-agent install drift is captured. See run_config_snapshot_node.
-    decentralized_env = ('GPIO_LINE', 'SWARM_BROADCAST_ADDR', 'SWARM_BROADCAST_IFACE')
-    for robot_name in robot_names:
-        ld.add_action(run_config_snapshot_node(
-            robot_names, source_launch='decentralized',
-            namespace=robot_name, extra_env_vars=decentralized_env))
 
     # When set, guidance (capture) becomes the sole writer of cmd_vel and muxes the
     # nav chain through it (control then publishes cmd_vel_nav, see
@@ -310,21 +289,20 @@ def generate_launch_description():
         ))
 
     ##############################################################################
-    ################## - AP auction: distinct attachment points - ################
+    ######## - swarm: AP auction, readiness consensus, mode supervisor - #########
+    # One process per robot (nodes-to-functions Phase 5; was ap_auction, readiness_consensus, mode_supervisor,
+    # the contact source and the run_config snapshot). One 5 Hz tick: auction -> consensus -> supervisor.
     for i in range(N):
-        robot_name = robot_names[i]
         ld.add_action(Node(
             package="swarm_controller",
-            executable="ap_auction",
-            name="ap_auction",
-            namespace=robot_name,
+            executable="swarm",
+            name="swarm",
+            namespace=robot_names[i],
             output="screen",
             emulate_tty=True,
-            parameters=[
-                spacecraft_params,
-                {
-                    "robot_id": beacon_addresses[i],
-                    "bid_rate": 5.0,
+            parameters=[{
+                "robot_id": beacon_addresses[i],
+                "auction": {
                     "approach_distance": 0.8,
                     "w_proximity": 0.3,
                     "w_velocity_align": 0.3,
@@ -335,60 +313,36 @@ def generate_launch_description():
                     "lock_hysteresis": 0.1,
                     "lock_rounds": 3,
                     "allow_reassignment_on_dropout": True,
-                    **qos_parameters(depth=1, reliability='RELIABLE')
-                }
-            ]
-        ))
-
-    ##############################################################################
-    ####### - Mode supervisor: SEARCH -> ENCAPSULATION -> CAPTURE - ##############
-    for i in range(N):
-        robot_name = robot_names[i]
-
-        mode_supervisor = Node(
-            package="swarm_controller",
-            executable="mode_supervisor",
-            name="mode_supervisor",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                {
-                    # Consecutive detected frames before advancing a mode.
-                    "detect_frames": 3,
-                    # Seconds a signal may be lost before a backward transition
-                    # (CAPTURE->ENCAP/SEARCH, ENCAP->SEARCH). Raised 2.0->4.0 to
-                    # ride through brief detection dropouts (low-fps flicker) and
-                    # stop CAPTURE<->SEARCH oscillation.
-                    "lost_timeout": 4.0,  # inert while both estimators keep memory (forget_timeout 0): landmarks/targets never go empty
-                    # Empty frames tolerated before the ENTRY streak resets, so a
-                    # steadily-held marker that flickers still advances the mode.
-                    "miss_tolerance": 3,
-                    # False so losing the target falls back after lost_timeout.
-                    # Required to validate following a MOVING target: latched,
-                    # the robot would stay in CAPTURE driving on a stale marker
-                    # instead of re-acquiring.
+                },
+                "consensus": {
+                    "consensus_rate": 5.0,          # the swarm tick (auction and supervisor run on it too)
+                    "approach_distance": 0.8,
+                    "perception_stale_timeout": 2.0,
+                    "action_lead": 5.0,
+                    "min_lead": 0.5,
+                    "time_tol": 0.05,
+                    "neighbor_timeout": 0.5,
+                    "min_consensus_hold": 0.3,
+                },
+                "supervisor": {
+                    "detect_frames": 3,             # consecutive detected frames before advancing a mode
+                    # Seconds a signal may be lost before a backward transition (rides through detection dropouts).
+                    "lost_timeout": 4.0,  # inert while both memories never forget (forget_timeout 0): landmarks/targets never go empty
+                    "miss_tolerance": 3,            # empty frames tolerated before the entry streak resets
+                    # False so losing the target falls back after lost_timeout (needed to follow a MOVING target).
                     "latch_capture": False,
-                    # Distributed synchronized capture: detection drives SEARCH<->ENCAP
-                    # and stages a stable target, but CAPTURE promotion is held until
-                    # readiness_consensus clears capture_sync, so the whole swarm flips
-                    # together. latch_capture=False keeps per-robot fallback on AP loss.
+                    # Detection drives SEARCH<->ENCAP and stages a stable target, but CAPTURE waits for the
+                    # consensus capture_sync, so the whole swarm flips together.
                     "auto_capture": True,
                     "require_capture_sync": True,
-                    # Mode assumed at startup; launch brings up search-enabled /
-                    # capture-disabled, so SEARCH matches reality with no forced
-                    # service call on boot.
-                    "initial_mode": "search",
-                    # Match the BEST_EFFORT publisher on the detection topics.
-                    "qos_reliability": "BEST_EFFORT",
-                    # Cut the wheel motors on DOCK (real hardware; no VIRTUAL_PLANT here).
-                    "disengage_wheels_on_dock": True,
-                }
-            ],
-        )
-
-        ld.add_action(mode_supervisor)
-
+                    "initial_mode": "search",       # launch brings up search-enabled / capture-disabled
+                    "disengage_wheels_on_dock": True,   # cut the wheel motors on DOCK (real hardware)
+                },
+                "contact": {"source": "gpio", "gpio_lines": contact_gpio_lines},   # limit switches: pressed = LOW, pull-up
+                "run_config": run_config_params(robot_names, 'decentralized',
+                                                 extra_env_vars=('GPIO_LINE', 'SWARM_BROADCAST_ADDR', 'SWARM_BROADCAST_IFACE')),
+            }],
+        ))
 
     ##############################################################################
     ############################ - Magnet node - #################################
@@ -408,53 +362,6 @@ def generate_launch_description():
         )
 
         # ld.add_action(magnet_node)
-
-
-    ##############################################################################
-    ###################### - Contact limit switch node - #########################
-    # Publishes contact_detected from the GPIO limit switches (pressed = LOW,
-    # internal pull-up). No VIRTUAL_PLANT here, so always on (see centralized).
-    for i in range(N):
-        ld.add_action(Node(
-            package="swarm_magnet",
-            executable="contact_switch_node",
-            name="contact_switch",
-            namespace=robot_names[i],
-            output="screen",
-            emulate_tty=True,
-            parameters=[{"gpio_lines": contact_gpio_lines}],
-        ))
-
-
-
-    ##############################################################################
-    ############ - Readiness consensus: synchronized capture trigger - ###########
-    for i in range(N):
-        robot_name = robot_names[i]
-        ld.add_action(Node(
-            package="swarm_controller",
-            executable="readiness_consensus",
-            name="readiness_consensus",
-            namespace=robot_name,
-            output="screen",
-            emulate_tty=True,
-            parameters=[
-                spacecraft_params,
-                {
-                    "robot_id": beacon_addresses[i],
-                    "consensus_rate": 5.0,
-                    "approach_distance": 0.8,
-                    "perception_stale_timeout": 2.0,
-                    "action_lead": 5.0,
-                    "min_lead": 0.5,
-                    "time_tol": 0.05,
-                    "neighbor_timeout": 0.5,
-                    "min_consensus_hold": 0.3,
-                    **qos_parameters(depth=1, reliability='BEST_EFFORT')
-                }
-            ]
-        ))
-
 
 
     ##############################################################################

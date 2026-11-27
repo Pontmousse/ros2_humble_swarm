@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 from rclpy.time import Time
 
-from swarm_controller.readiness_consensus_node import ReadinessConsensusNode
+from swarm_controller.readiness_consensus import ReadinessConsensus
 from swarm_interfaces.msg import Readiness
 
 
@@ -18,12 +18,12 @@ class Publisher:
 
 
 class Agent:
-    round = ReadinessConsensusNode.round
-    reset_round = ReadinessConsensusNode.reset_round
-    on_peer = ReadinessConsensusNode.on_peer
-    publish_readiness = ReadinessConsensusNode.publish_readiness
-    stamp_sec = ReadinessConsensusNode.stamp_sec
-    schedule_fire = ReadinessConsensusNode.schedule_fire
+    round = ReadinessConsensus.round
+    reset_round = ReadinessConsensus.reset_round
+    on_peer = ReadinessConsensus.on_peer
+    publish_readiness = ReadinessConsensus.publish_readiness
+    stamp_sec = ReadinessConsensus.stamp_sec
+    schedule_fire = ReadinessConsensus.schedule_fire
 
     def __init__(self, robot_id=1, neighbours=(2,)):
         self.robot_id = robot_id

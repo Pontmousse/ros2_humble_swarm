@@ -1,5 +1,4 @@
-#!/usr/bin/env python3
-"""Distributed attachment-point (AP) auction.
+"""Distributed attachment-point (AP) auction. Plain class driven by the swarm node (formerly the ap_auction node).
 
 Each agent bids on every AP it can currently reach (from the ESTIMATED `targets`
 stream, which is map-frame memory keyed by ArUco id so a claim survives a
@@ -9,16 +8,12 @@ peers using a deterministic `(bid, robot_id)` tuple compare (higher id wins
 ties), so the distributed system converges to DISTINCT claims over a few rounds
 without any central coordinator. The locked claim is published on `assigned_ap`
 (consumed by guidance's capture law to pick its dock target) and `assignment_locked`
-(consumed by the readiness consensus node).
+(consumed by the readiness consensus, in the same process).
 
-Bids and geometry are purely body-frame local, so the node behaves identically
+Bids and geometry are purely body-frame local, so it behaves identically
 under VIRTUAL_PLANT and on real hardware.
 """
 import math
-
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Bool, Int32
@@ -37,33 +32,21 @@ class PeerBid:
         self.locked = locked
 
 
-class ApAuctionNode(Node):
-    def __init__(self):
-        super().__init__("ap_auction")
-
-        self.declare_parameter("robot_id", 1)
-        self.declare_parameter("bid_rate", 5.0)
-        self.declare_parameter("w_proximity", 1.0)
-        self.declare_parameter("w_velocity_align", 0.3)
-        self.declare_parameter("w_normal_align", 0.3)
-        self.declare_parameter("velocity_min_speed", 0.05)
-        self.declare_parameter("approach_distance", 0.8)
-        self.declare_parameter("neighbor_bid_timeout", 0.5)
-        self.declare_parameter("target_hold_timeout", 0.4)
-        self.declare_parameter("lock_hysteresis", 0.1)
-        self.declare_parameter("lock_rounds", 3)
-        self.declare_parameter("allow_reassignment_on_dropout", True)
-
-        self.robot_id = int(self.get_parameter("robot_id").value)
-        self.w_prox = float(self.get_parameter("w_proximity").value)
-        self.w_vel = float(self.get_parameter("w_velocity_align").value)
-        self.w_norm = float(self.get_parameter("w_normal_align").value)
-        self.vel_min_speed = float(self.get_parameter("velocity_min_speed").value)
-        self.approach_distance = float(self.get_parameter("approach_distance").value)
-        self.neighbor_bid_timeout = float(self.get_parameter("neighbor_bid_timeout").value)
-        self.target_hold_timeout = float(self.get_parameter("target_hold_timeout").value)
-        self.lock_hysteresis = float(self.get_parameter("lock_hysteresis").value)
-        self.lock_rounds = int(self.get_parameter("lock_rounds").value)
+class Auction:
+    def __init__(self, node, p, bids_pub, assigned_pub, locked_pub):
+        """p(name, default) reads auction.* (robot_id is shared)."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.robot_id = int(p("robot_id", 1))
+        self.w_prox = float(p("w_proximity", 1.0))
+        self.w_vel = float(p("w_velocity_align", 0.3))
+        self.w_norm = float(p("w_normal_align", 0.3))
+        self.vel_min_speed = float(p("velocity_min_speed", 0.05))
+        self.approach_distance = float(p("approach_distance", 0.8))
+        self.neighbor_bid_timeout = float(p("neighbor_bid_timeout", 0.5))
+        self.target_hold_timeout = float(p("target_hold_timeout", 0.4))
+        self.lock_hysteresis = float(p("lock_hysteresis", 0.1))
+        self.lock_rounds = int(p("lock_rounds", 3))
+        p("allow_reassignment_on_dropout", True)
 
         # State
         self.last_targets = None
@@ -76,23 +59,7 @@ class ApAuctionNode(Node):
         self.locked = False
         self.miss_rounds = 0
 
-        best_effort = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT,
-                                 history=HistoryPolicy.KEEP_LAST)
-        bcast = QoSProfile(depth=10, reliability=ReliabilityPolicy.BEST_EFFORT,
-                           history=HistoryPolicy.KEEP_LAST)
-        reliable = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
-                              history=HistoryPolicy.KEEP_LAST)
-
-        self.create_subscription(Markers, "targets", self.on_targets, best_effort)
-        self.create_subscription(Odometry, "localization/odom", self.on_odom, best_effort)
-        self.create_subscription(NeighbourStates, "comms/neighbours", self.on_neighbours, best_effort)
-        self.create_subscription(ApBids, "/ap_bids", self.on_peer_bids, bcast)
-
-        self.bids_pub = self.create_publisher(ApBids, "/ap_bids", bcast)
-        self.assigned_pub = self.create_publisher(Int32, "assigned_ap", reliable)
-        self.locked_pub = self.create_publisher(Bool, "assignment_locked", reliable)
-
-        self.create_timer(1.0 / float(self.get_parameter("bid_rate").value), self.round)
+        self.bids_pub, self.assigned_pub, self.locked_pub = bids_pub, assigned_pub, locked_pub
         self.get_logger().info(f"ap_auction robot_id={self.robot_id} up")
 
     # ------------------------------ inputs ---------------------------------
@@ -227,19 +194,3 @@ class ApAuctionNode(Node):
 
     def stamp_sec(self, header):
         return header.stamp.sec + header.stamp.nanosec * 1e-9
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ApAuctionNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

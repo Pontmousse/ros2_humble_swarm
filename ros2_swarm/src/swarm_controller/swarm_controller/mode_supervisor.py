@@ -1,4 +1,5 @@
 """Drive the three-mode mission state machine: SEARCH -> ENCAPSULATION -> CAPTURE.
+Plain class driven by the swarm node (formerly the mode_supervisor node).
 
 Each mode is a different wrench source on the shared virtual spacecraft; the
 physical robot tracks the spacecraft the same way in every mode (the control
@@ -51,13 +52,9 @@ driver's `engage_wheels` false, and leaving it calls it true.
 
 from enum import Enum
 
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 from std_srvs.srv import SetBool
 from std_msgs.msg import Bool, String
 from swarm_interfaces.msg import Markers
-
 
 class Mode(Enum):
     SEARCH = "search"
@@ -115,57 +112,29 @@ class DetectionGate:
         return (now - self.last_seen).nanoseconds * 1e-9
 
 
-class ModeSupervisor(Node):
+
+class ModeSupervisor:
     """Three-mode mission supervisor with a pluggable transition policy."""
 
-    def __init__(self):
-        super().__init__("mode_supervisor")
-
+    def __init__(self, node, p, mode_pub):
+        """p(name, default) reads supervisor.*; the node subscribes the inputs and owns the latched mode_pub."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
         # Detection hysteresis (shared by the landmark and target gates).
-        self.declare_parameter("detect_frames", 5)
-        # Seconds a signal may stay lost before a backward transition fires.
-        self.declare_parameter("lost_timeout", 2.0)
+        detect_frames = int(p("detect_frames", 5))
         # Consecutive EMPTY frames tolerated before an entry streak resets.
-        self.declare_parameter("miss_tolerance", 3)
-        # Sticky capture: once latched into CAPTURE, never auto-fall-back on
-        # target loss. Kills CAPTURE<->SEARCH oscillation from low-fps flicker.
-        self.declare_parameter("latch_capture", True)
-        # When False, detection never auto-promotes to CAPTURE; capture is reached
-        # only via a mode_cmd override (manual go-signal now, swarm consensus later).
-        self.declare_parameter("auto_capture", True)
-        # Gate the auto_capture promotion behind the distributed capture-sync
-        # clearance (readiness_consensus -> capture_sync). False = today's behaviour
-        # (promote as soon as targets are stable). True = hold until the swarm's
-        # synchronized trigger clears the gate, so all robots promote together.
-        self.declare_parameter("require_capture_sync", False)
-        # Mode the node assumes it starts in. The launch is expected to bring up
-        # search-enabled / capture-disabled, so SEARCH matches reality without
-        # the supervisor forcing any service call at startup.
-        self.declare_parameter("initial_mode", "search")
-        self.declare_parameter("qos_reliability", "BEST_EFFORT")
-        # Real hardware only: cut the RoboMaster wheel motors (engage_wheels
-        # false) on entering DOCK, re-engage on leaving it. Off in sim, where no
-        # driver serves engage_wheels.
-        self.declare_parameter("disengage_wheels_on_dock", False)
-        self.disengage_on_dock = bool(self.get_parameter("disengage_wheels_on_dock").value)
-
-        detect_frames = int(self.get_parameter("detect_frames").value)
-        miss_tolerance = int(self.get_parameter("miss_tolerance").value)
-        self.lost_timeout = float(self.get_parameter("lost_timeout").value)
-        self.latch_capture = bool(self.get_parameter("latch_capture").value)
-        self.auto_capture = bool(self.get_parameter("auto_capture").value)
-        self.require_capture_sync = bool(self.get_parameter("require_capture_sync").value)
-        reliability = str(self.get_parameter("qos_reliability").value)
-        self.mode = _MODE_ALIASES.get(
-            str(self.get_parameter("initial_mode").value).lower()) or Mode.SEARCH
-
-        qos = QoSProfile(
-            depth=10,
-            reliability=(ReliabilityPolicy.RELIABLE
-                         if reliability == "RELIABLE"
-                         else ReliabilityPolicy.BEST_EFFORT),
-            history=HistoryPolicy.KEEP_LAST,
-        )
+        miss_tolerance = int(p("miss_tolerance", 3))
+        # Seconds a signal may stay lost before a backward transition fires.
+        self.lost_timeout = float(p("lost_timeout", 2.0))
+        # Sticky capture: once latched into CAPTURE, never auto-fall-back on target loss.
+        self.latch_capture = bool(p("latch_capture", True))
+        # When False, detection never auto-promotes to CAPTURE; only a mode_cmd override does.
+        self.auto_capture = bool(p("auto_capture", True))
+        # Hold the auto_capture promotion until the swarm's synchronized trigger (capture_sync) clears it.
+        self.require_capture_sync = bool(p("require_capture_sync", False))
+        # Mode assumed at startup (the launch brings up search-enabled / capture-disabled).
+        self.mode = _MODE_ALIASES.get(str(p("initial_mode", "search")).lower()) or Mode.SEARCH
+        # Real hardware only: cut the wheel motors (engage_wheels false) on entering DOCK, re-engage on leaving.
+        self.disengage_on_dock = bool(p("disengage_wheels_on_dock", False))
 
         # Detection gates. One per signal that can drive a transition.
         self.landmarks = DetectionGate(detect_frames, miss_tolerance)
@@ -184,15 +153,15 @@ class ModeSupervisor(Node):
 
         # Service clients, one SetBool gate per mode. Relative names resolve
         # under the launch namespace into /RMx/<name>.
-        #  - search/enable          : bounding_box_search wrench (SEARCH)
-        #  - encapsulation/enable   : flocking wrench           (ENCAPSULATION)
-        #  - toggle_controller      : guidance capture wrench     (CAPTURE)
+        #  - search/enable          : bounding-box search wrench   (SEARCH, control)
+        #  - encapsulation/enable   : flocking wrench              (ENCAPSULATION, guidance)
+        #  - toggle_controller      : guidance capture wrench      (CAPTURE)
         #  - toggle_dock            : guidance capture freeze      (DOCK)
-        self.search_client = self.create_client(SetBool, "search/enable")
-        self.encap_client = self.create_client(SetBool, "encapsulation/enable")
-        self.capture_client = self.create_client(SetBool, "toggle_controller")
-        self.dock_client = self.create_client(SetBool, "toggle_dock")
-        self.engage_client = self.create_client(SetBool, "engage_wheels")
+        self.search_client = node.create_client(SetBool, "search/enable")
+        self.encap_client = node.create_client(SetBool, "encapsulation/enable")
+        self.capture_client = node.create_client(SetBool, "toggle_controller")
+        self.dock_client = node.create_client(SetBool, "toggle_dock")
+        self.engage_client = node.create_client(SetBool, "engage_wheels")
         # One client per mode, keyed so apply_mode is a two-line toggle.
         self.mode_clients = {
             Mode.SEARCH: self.search_client,
@@ -205,41 +174,10 @@ class ModeSupervisor(Node):
         self.pending, self.sent = {}, {}
         self.retry = {self.engage_client: 4.0}
 
-        # Detection inputs.
-        self.create_subscription(Markers, "landmarks", self.on_landmarks, qos)
-        self.create_subscription(Markers, "targets", self.on_targets, qos)
-        self.create_subscription(Bool, "contact_detected", self.on_contact, qos)
-
-        # Mode override channel (manual trigger / consensus). Latched so a
-        # single `ros2 topic pub --once` (or a late consensus message) sticks.
-        override_qos = QoSProfile(
-            depth=1,
-            reliability=ReliabilityPolicy.RELIABLE,
-            durability=DurabilityPolicy.TRANSIENT_LOCAL,
-            history=HistoryPolicy.KEEP_LAST,
-        )
-        self.create_subscription(
-            String, "mode_cmd", self.on_mode_cmd, override_qos)
-        # Absolute twin: one `/mode_cmd` publish triggers every robot at once
-        # (manual go-signal for simultaneous capture), same callback/QoS.
-        self.create_subscription(
-            String, "/mode_cmd", self.on_mode_cmd, override_qos)
-
-        # Capture-sync clearance from this robot's readiness_consensus node.
-        # Latched (same QoS as the override) so a late/recovering supervisor
-        # still receives a clearance published before it subscribed.
-        self.create_subscription(
-            Bool, "capture_sync", self.on_capture_sync, override_qos)
-
         # Current mission mode, latched so a late visualizer still colours the
         # spacecraft by the active mode.
-        self.mode_pub = self.create_publisher(String, "current_mode", override_qos)
+        self.mode_pub = mode_pub
         self.mode_pub.publish(String(data=self.mode.value))
-
-        # Evaluate the policy at 5 Hz. Detection gates are updated in the topic
-        # callbacks; this timer only decides + actuates.
-        self.create_timer(0.2, self.tick)
-
         self.get_logger().info(
             f"Mode supervisor ready in {self.mode.value.upper()} "
             "(publish mode_cmd to override; empty string = auto).")
@@ -380,15 +318,3 @@ class ModeSupervisor(Node):
                 and self.pending.get(client) == state):
             del self.pending[client]
             self.sent.pop(client, None)
-
-
-def main(args=None):
-    rclpy.init(args=args)
-    node = ModeSupervisor()
-    rclpy.spin(node)
-    node.destroy_node()
-    rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()
