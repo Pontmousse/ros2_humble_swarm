@@ -1,8 +1,8 @@
 """Drive the three-mode mission state machine: SEARCH -> ENCAPSULATION -> CAPTURE.
 
 Each mode is a different wrench source on the shared virtual spacecraft; the
-physical robot tracks the spacecraft the same way in every mode (pidff +
-velocity_smoother), so switching modes is nothing more than toggling which
+physical robot tracks the spacecraft the same way in every mode (the control
+node's tracker + smoother), so switching modes is nothing more than toggling which
 wrench sources are enabled. There is no cmd_vel handoff, no smoother pause, and
 no spacecraft reset: every layer publishes into the summed spacecraft input and
 a disabled layer simply publishes zero (gating by zero), so a transition is two

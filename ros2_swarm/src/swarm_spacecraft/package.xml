@@ -17,6 +17,8 @@
   <depend>swarm_interfaces</depend>
   <depend>marvelmind_ros2_msgs</depend>
   <depend>tf2_ros</depend>
+  <exec_depend>swarm_controller</exec_depend>
+  <exec_depend>swarm_nav2_controller</exec_depend>
 
   <test_depend>ament_flake8</test_depend>
   <test_depend>ament_pep257</test_depend>

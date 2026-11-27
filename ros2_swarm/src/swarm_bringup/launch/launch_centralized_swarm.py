@@ -52,8 +52,8 @@ CONTACT_MARGIN = 0.05
 
 # DIRECT_CMD_VEL=1 lets virtual_spacecraft and direct capture run together:
 # guidance (capture) becomes the sole cmd_vel writer and muxes the nav chain
-# (remapped to cmd_vel_nav, see launch_virtual_spacecraft.py) against its own
-# capture command. Must match on both this node and the smoother, so it is a
+# (control publishes cmd_vel_nav, see launch_virtual_spacecraft.py) against its own
+# capture command. Must match on both guidance and control, so it is a
 # single env flag read in both launch files.
 DIRECT_CMD_VEL = os.environ.get("DIRECT_CMD_VEL", "").lower() in ("1", "true", "yes", "on")
 

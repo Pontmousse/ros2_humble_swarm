@@ -5,8 +5,8 @@ Marvelmind chain and pose_publisher, and starts one of these per robot instead.
 It subscribes to the same `cmd_vel` the real chassis would and republishes the
 exact two topics pose_publisher produced -- `pose` (StatePos, theta in DEGREES)
 and `localization/odom` (Odometry, body-frame twist) -- so the whole mission loop
-(virtual_scene -> guidance -> mode_supervisor -> virtual_spacecraft -> nav2 ->
-velocity_smoother -> cmd_vel) closes with no hardware.
+(virtual_scene -> perception -> guidance -> mode_supervisor -> control -> cmd_vel)
+closes with no hardware.
 
 The model is a rate/accel-limited holonomic integrator: the commanded body twist
 is reached through a bounded acceleration and capped speed, so motion resembles a
@@ -31,7 +31,7 @@ from tf2_ros import TransformBroadcaster
 from swarm_interfaces.msg import StatePos
 
 from .dynamics import rotate_body_to_inertial, wrap_angle
-from .virtual_spacecraft_node import (
+from .virtual_craft import (
     quaternion_from_yaw,
     qos_profile_from_parameters,
 )

@@ -20,11 +20,6 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            #########################################################################
-            'nav2_pff = swarm_nav2_controller.nav2_pff:main', # P-error position + feedforward velocity
-            'nav2_pidff = swarm_nav2_controller.nav2_pidff:main', # PID position + feedforward velocity
-            'nav2_dwb_path = swarm_nav2_controller.nav2_dwb_path:main', # One-pose moving goal for DWB
-            #########################################################################
         ],
     },
 )

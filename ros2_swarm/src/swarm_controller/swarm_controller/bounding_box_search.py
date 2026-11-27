@@ -1,17 +1,13 @@
-"""Generate intermittent wrench commands for a bounded free-drift search."""
+"""Bounded free-drift search: an initial burn, then finite firings near the box walls (and a blind drift toward
+the shared target estimate), as the spacecraft_wrench contributor. Plain class driven by the control node."""
 
 import math
 import random
 
 from geometry_msgs.msg import Wrench
 from nav_msgs.msg import Odometry
-import rclpy
-from rclpy.node import Node
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from std_srvs.srv import SetBool
-from swarm_interfaces.msg import TargetEstimate
-from .shared_target import SHARE_QOS, SharedTargets, now_s
-from .zero_gate import ZeroGatedPublisher
+from .shared_target import SharedTargets, now_s
 
 
 def yaw_from_quaternion(quaternion) -> float:
@@ -120,7 +116,8 @@ def drift_firing(x, y, velocity_x, velocity_y, centre_x, centre_y, drift_speed, 
     return firing_force * dx / distance, firing_force * dy / distance
 
 
-def qos_profile_from_parameters(node: Node) -> QoSProfile:
+
+def qos_profile_from_parameters(node) -> QoSProfile:
     """Build a configurable QoS profile with reliable defaults."""
     depth = int(node.get_parameter("qos_depth").value)
     reliability = str(node.get_parameter("qos_reliability").value)
@@ -146,69 +143,28 @@ def qos_profile_from_parameters(node: Node) -> QoSProfile:
     )
 
 
-class BoundingBoxSearchNode(Node):
+class BoxSearch:
     """Fire briefly at startup and near search-box boundaries."""
 
-    def __init__(self):
-        super().__init__("bounding_box_search")
-        self.declare_parameter("timer_frequency", 0.02)
-        self.declare_parameter("reference_timeout", 0.25)
-        self.declare_parameter("global_frame_id", "swarm_map")
-        self.declare_parameter("x_min", -1.0)
-        self.declare_parameter("x_max", 1.0)
-        self.declare_parameter("y_min", -1.0)
-        self.declare_parameter("y_max", 1.0)
-        self.declare_parameter("boundary_margin", 0.25)
-        self.declare_parameter("boundary_force", 1.0)
-        self.declare_parameter("rebound_speed", 0.15)
-        self.declare_parameter("maximum_force", 1.0)
-        self.declare_parameter("maximum_torque", 0.2)
-        self.declare_parameter("initial_burn_duration", 1.0)
-        self.declare_parameter("initial_burn_ramp", 0.0)
-        self.declare_parameter("initial_force_x", 0.8)
-        self.declare_parameter("initial_force_y", 0.4)
-        self.declare_parameter("initial_torque", 0.1)
-        self.declare_parameter("lateral_kick_fraction", 0.15)
-        self.declare_parameter("random_seed", 0)
-        self.declare_parameter("qos_depth", 10)
-        self.declare_parameter("qos_reliability", "RELIABLE")
-        self.declare_parameter("qos_history", "KEEP_LAST")
-
-        self.timer_frequency = float(self.get_parameter("timer_frequency").value)
-        self.reference_timeout = float(
-            self.get_parameter("reference_timeout").value
-        )
-        self.global_frame_id = str(
-            self.get_parameter("global_frame_id").value
-        ).strip("/")
-        self.x_min = float(self.get_parameter("x_min").value)
-        self.x_max = float(self.get_parameter("x_max").value)
-        self.y_min = float(self.get_parameter("y_min").value)
-        self.y_max = float(self.get_parameter("y_max").value)
-        self.boundary_margin = float(
-            self.get_parameter("boundary_margin").value
-        )
-        self.boundary_force = float(self.get_parameter("boundary_force").value)
-        self.rebound_speed = float(self.get_parameter("rebound_speed").value)
-        self.maximum_force = float(self.get_parameter("maximum_force").value)
-        self.maximum_torque = float(self.get_parameter("maximum_torque").value)
-        self.initial_burn_duration = float(
-            self.get_parameter("initial_burn_duration").value
-        )
-        self.initial_force_x = float(
-            self.get_parameter("initial_force_x").value
-        )
-        self.initial_force_y = float(
-            self.get_parameter("initial_force_y").value
-        )
-        self.initial_burn_ramp = float(
-            self.get_parameter("initial_burn_ramp").value
-        )
-        self.initial_torque = float(self.get_parameter("initial_torque").value)
-        self.lateral_kick_fraction = float(
-            self.get_parameter("lateral_kick_fraction").value
-        )
-        seed = int(self.get_parameter("random_seed").value)
+    def __init__(self, node, p, wrench_publisher):
+        """p(name, default) reads bounding_box_search.* and the shared /** box and share_* values."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.reference_timeout = float(p("reference_timeout", 0.25))
+        self.global_frame_id = str(p("global_frame_id", "swarm_map")).strip("/")
+        self.x_min, self.x_max = float(p("x_min", -1.0)), float(p("x_max", 1.0))
+        self.y_min, self.y_max = float(p("y_min", -1.0)), float(p("y_max", 1.0))
+        self.boundary_margin = float(p("boundary_margin", 0.25))
+        self.boundary_force = float(p("boundary_force", 1.0))
+        self.rebound_speed = float(p("rebound_speed", 0.15))
+        self.maximum_force = float(p("maximum_force", 1.0))
+        self.maximum_torque = float(p("maximum_torque", 0.2))
+        self.initial_burn_duration = float(p("initial_burn_duration", 1.0))
+        self.initial_force_x = float(p("initial_force_x", 0.8))
+        self.initial_force_y = float(p("initial_force_y", 0.4))
+        self.initial_burn_ramp = float(p("initial_burn_ramp", 0.0))
+        self.initial_torque = float(p("initial_torque", 0.1))
+        self.lateral_kick_fraction = float(p("lateral_kick_fraction", 0.15))
+        seed = int(p("random_seed", 0))
         self.validate_parameters()
 
         # Seed 0 means a fresh sequence each run; any other value is reproducible.
@@ -219,31 +175,17 @@ class BoundingBoxSearchNode(Node):
         self.last_reference_time = None
         self.initial_burn_start = None
 
-        qos_profile = qos_profile_from_parameters(self)
-        self.create_subscription(
-            Odometry,
-            "virtual_spacecraft/odom",
-            self.reference_callback,
-            qos_profile,
-        )
-        # Zero outside SEARCH, before arm and mid-box: sent once, then silence (zero_gate.py).
-        self.wrench_publisher = ZeroGatedPublisher(self.create_publisher(Wrench, "spacecraft_wrench", qos_profile))
+        # Zero outside SEARCH, before arm and mid-box (the node zero-gates the debug topic).
+        self.wrench_publisher = wrench_publisher
         # Runtime on/off switch so a supervisor can hand control to the capture
         # controller. Disabled means we keep publishing an explicit zero wrench.
         self.enabled = True
-        self.enable_service = self.create_service(
-            SetBool, "search/enable", self.handle_enable
-        )
         # Drift toward the neighbours' shared target estimate while blind (free drift, not flocking)
-        for name, default in (("share_target", True), ("share_timeout", 2.0), ("share_drift_speed", 0.03),
-                              ("share_drift_force", 0.5), ("share_drift_stop", 1.0)): self.declare_parameter(name, default)
-        self.share_target = bool(self.get_parameter("share_target").value)
-        self.drift_speed, self.drift_force, self.drift_stop = (float(self.get_parameter(n).value) for n in ("share_drift_speed", "share_drift_force", "share_drift_stop"))
-        self.shared = SharedTargets(self.get_namespace().strip("/"), float(self.get_parameter("share_timeout").value))
-        if self.share_target:
-            self.create_subscription(TargetEstimate, "/target_estimate", lambda m: self.shared.add(m, now_s(self)), SHARE_QOS)
-        self.create_timer(self.timer_frequency, self.update)
-        self.get_logger().info("Bounding-box free-drift search guidance ready")
+        self.share_target = bool(p("share_target", True))
+        self.drift_speed, self.drift_force, self.drift_stop = (
+            float(p(n, d)) for n, d in (("share_drift_speed", 0.03), ("share_drift_force", 0.5), ("share_drift_stop", 1.0)))
+        self.shared = SharedTargets(node.get_namespace().strip("/"), float(p("share_timeout", 2.0)))
+
 
     def handle_enable(self, request, response):
         """Enable or disable the search wrench at runtime."""
@@ -256,7 +198,6 @@ class BoundingBoxSearchNode(Node):
     def validate_parameters(self) -> None:
         """Reject inconsistent search geometry and firing parameters."""
         values = (
-            self.timer_frequency,
             self.reference_timeout,
             self.x_min,
             self.x_max,
@@ -287,7 +228,6 @@ class BoundingBoxSearchNode(Node):
         ):
             raise ValueError("boundary_margin is inconsistent with the box")
         positive = (
-            self.timer_frequency,
             self.reference_timeout,
             self.boundary_force,
             self.rebound_speed,
@@ -399,19 +339,3 @@ class BoundingBoxSearchNode(Node):
         wrench.force.y = body_force_y
         wrench.torque.z = torque
         self.wrench_publisher.publish(wrench)
-
-
-def main(args=None):
-    """Run the bounded-search guidance node."""
-    rclpy.init(args=args)
-    node = BoundingBoxSearchNode()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.wrench_publisher.publish(Wrench())
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

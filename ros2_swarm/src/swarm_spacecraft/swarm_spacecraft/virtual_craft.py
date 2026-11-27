@@ -1,14 +1,12 @@
-"""ROS 2 node that renders virtual free-floating dynamics on a chassis."""
+"""Virtual free-floating spacecraft: wrench-source hold and sum, arm/reset, freeze on stale localization,
+exact integration, published as the reference odometry the tracker renders. Plain class driven by the
+control node (formerly the virtual_spacecraft node)."""
 
-from functools import partial
 import math
 
 from geometry_msgs.msg import Wrench
-from nav_msgs.msg import Odometry 
-import rclpy
-from rclpy.node import Node
+from nav_msgs.msg import Odometry
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
-from std_srvs.srv import Trigger
 
 from .dynamics import PlanarState
 from .dynamics import chw_force
@@ -18,7 +16,6 @@ from .dynamics import limit_planar_velocity
 from .dynamics import mean_motion
 from .dynamics import rotate_body_to_inertial
 from .dynamics import rotate_inertial_to_body
-
 
 def yaw_from_quaternion(quaternion) -> float:
     """Extract planar yaw from a geometry_msgs quaternion."""
@@ -32,7 +29,7 @@ def quaternion_from_yaw(yaw: float):
     return math.sin(0.5 * yaw), math.cos(0.5 * yaw)
 
 
-def qos_profile_from_parameters(node: Node) -> QoSProfile:
+def qos_profile_from_parameters(node) -> QoSProfile:
     """Build the repository-standard configurable QoS profile."""
     qos_depth = int(node.get_parameter("qos_depth").value)
     qos_reliability = str(node.get_parameter("qos_reliability").value)
@@ -83,59 +80,31 @@ INERTIAL_FRAME = "inertial"
 WRENCH_FRAMES = (BODY_FRAME, INERTIAL_FRAME)
 
 
-class VirtualSpacecraftNode(Node):
+class VirtualCraft:
     """Integrate and publish the state of an ideal planar spacecraft."""
 
-    def __init__(self):
-        super().__init__("virtual_spacecraft")
-        self.declare_parameter("mass", 5.0)
-        self.declare_parameter("yaw_inertia", 0.25)
-        self.declare_parameter("timer_frequency", 0.01)
-        self.declare_parameter("maximum_force", 2.0)
-        self.declare_parameter("maximum_torque", 0.5)
+    def __init__(self, node, p, reference_publisher, applied_wrench_publisher):
+        """p(name, default) reads this class's parameters (virtual_spacecraft.* and the shared /** scales)."""
+        self.get_clock, self.get_logger, self.get_namespace = node.get_clock, node.get_logger, node.get_namespace
+        self.mass = float(p("mass", 5.0))
+        self.inertia = float(p("yaw_inertia", 0.25))
+        timer_frequency = self.timer_frequency = float(p("timer_frequency", 0.01))
+        self.maximum_force = float(p("maximum_force", 2.0))
+        self.maximum_torque = float(p("maximum_torque", 0.5))
         # Keep these strictly below the tracking controller's own limits
         # (nav2_pidff.maximum_speed / maximum_yaw_rate). The reference must
         # stay catchable: whatever margin is left here is the entire
         # authority the physical robot has to close a tracking error.
-        self.declare_parameter("maximum_speed", 0.25)
-        self.declare_parameter("maximum_yaw_rate", 0.5)
+        self.maximum_speed = float(p("maximum_speed", 0.25))
+        self.maximum_yaw_rate = float(p("maximum_yaw_rate", 0.5))
         # Slow the virtual reference without changing what guidance decides:
         # each scale (0, 1] multiplies its axis' integrated wrench *and* cruise
         # cap, so 1.0 is today's behavior and smaller is a heavier, slower craft.
-        self.declare_parameter("translation_response_scale", 1.0)
-        self.declare_parameter("rotation_response_scale", 1.0)
-        self.declare_parameter("odometry_timeout", 0.25)
-        self.declare_parameter("wrench_timeout", 0.25)
-        self.declare_parameter("maximum_time_step", 0.05)
-        self.declare_parameter("wrench_sources", ["bounding_box"])
-        self.declare_parameter("enable_chw", False)
-        self.declare_parameter("orbit_altitude", 400000.0)
-        self.declare_parameter("gravity", 9.80665)
-        self.declare_parameter("earth_radius", 6371000.0)
-        self.declare_parameter("qos_depth", 10)
-        self.declare_parameter("qos_reliability", "RELIABLE")
-        self.declare_parameter("qos_history", "KEEP_LAST")
-
-        self.mass = float(self.get_parameter("mass").value)
-        self.inertia = float(self.get_parameter("yaw_inertia").value)
-        timer_frequency = float(self.get_parameter("timer_frequency").value)
-        self.maximum_force = float(self.get_parameter("maximum_force").value)
-        self.maximum_torque = float(self.get_parameter("maximum_torque").value)
-        self.maximum_speed = float(self.get_parameter("maximum_speed").value)
-        self.maximum_yaw_rate = float(
-            self.get_parameter("maximum_yaw_rate").value
-        )
-        self.translation_response_scale = float(
-            self.get_parameter("translation_response_scale").value
-        )
-        self.rotation_response_scale = float(
-            self.get_parameter("rotation_response_scale").value
-        )
-        self.odometry_timeout = float(
-            self.get_parameter("odometry_timeout").value
-        )
-        self.wrench_timeout = float(self.get_parameter("wrench_timeout").value)
-        self.maximum_time_step = float(self.get_parameter("maximum_time_step").value)
+        self.translation_response_scale = float(p("translation_response_scale", 1.0))
+        self.rotation_response_scale = float(p("rotation_response_scale", 1.0))
+        self.odometry_timeout = float(p("odometry_timeout", 0.25))
+        self.wrench_timeout = float(p("wrench_timeout", 0.25))
+        self.maximum_time_step = float(p("maximum_time_step", 0.05))
         positive_values = (
             self.mass,
             self.inertia,
@@ -165,10 +134,10 @@ class VirtualSpacecraftNode(Node):
         # needs no change -- a slower craft also has a lower top speed.
         self.maximum_speed *= self.translation_response_scale
         self.maximum_yaw_rate *= self.rotation_response_scale
-        self.enable_chw = bool(self.get_parameter("enable_chw").value)
-        self.orbit_altitude = float(self.get_parameter("orbit_altitude").value)
-        self.gravity = float(self.get_parameter("gravity").value)
-        self.earth_radius = float(self.get_parameter("earth_radius").value)
+        self.enable_chw = bool(p("enable_chw", False))
+        self.orbit_altitude = float(p("orbit_altitude", 400000.0))
+        self.gravity = float(p("gravity", 9.80665))
+        self.earth_radius = float(p("earth_radius", 6371000.0))
         self.mean_motion = mean_motion(
             self.orbit_altitude, self.gravity, self.earth_radius
         )
@@ -189,26 +158,10 @@ class VirtualSpacecraftNode(Node):
         self.frozen = False
         self.last_odometry_time = None
         self.last_update_time = self.get_clock().now()
-
-        qos_profile = qos_profile_from_parameters(self)
-        self.create_subscription(
-            Odometry,
-            "localization/odom",
-            self.odometry_callback,
-            qos_profile,
-        )
-        self.subscribe_wrench_sources(qos_profile)
-        self.reference_publisher = self.create_publisher(
-            Odometry, "virtual_spacecraft/odom", qos_profile
-        )
+        self.reference_publisher = reference_publisher
         # Summed, clamped, inertial-frame wrench actually integrated this step.
-        self.applied_wrench_publisher = self.create_publisher(
-            Wrench, "virtual_spacecraft/applied_wrench", qos_profile
-        )
-        self.create_service(Trigger, "virtual_spacecraft/reset", self.reset_callback)
-        self.create_service(Trigger, "virtual_spacecraft/arm", self.arm_callback)
-        self.create_timer(timer_frequency, self.update)
-        self.get_logger().info("Virtual spacecraft simulator ready")
+        self.applied_wrench_publisher = applied_wrench_publisher
+        self.configure_wrench_sources(list(p("wrench_sources", ["bounding_box"])), p)
 
     def odometry_callback(self, message: Odometry) -> None:
         """Store the latest physical chassis state."""
@@ -222,29 +175,25 @@ class VirtualSpacecraftNode(Node):
         if not self.armed and self.measured_frame_id:
             self.reset_reference()
 
-    def subscribe_wrench_sources(self, qos_profile) -> None:
-        """Subscribe to every configured wrench contributor.
+    def configure_wrench_sources(self, source_names, p) -> None:
+        """Read every configured wrench contributor; the node subscribes self.wrench_topics.
 
         Each source declares its own frame because contributors disagree:
         box guidance commands thrust in the body frame, while neighbour
         avoidance is computed from map coordinates.
         """
-        source_names = list(self.get_parameter("wrench_sources").value)
         if not source_names:
             raise ValueError("wrench_sources must name at least one contributor")
         if len(set(source_names)) != len(source_names):
             raise ValueError("wrench_sources names must be unique")
 
         self.wrench_frames = {}
+        self.wrench_topics = {}
         self.wrench_values = {}
         self.wrench_update_times = {}
         for name in source_names:
-            self.declare_parameter(f"wrench_sources.{name}.topic", "")
-            self.declare_parameter(f"wrench_sources.{name}.frame", BODY_FRAME)
-            topic = str(
-                self.get_parameter(f"wrench_sources.{name}.topic").value
-            ).strip()
-            frame = str(self.get_parameter(f"wrench_sources.{name}.frame").value)
+            topic = str(p(f"wrench_sources.{name}.topic", "")).strip()
+            frame = str(p(f"wrench_sources.{name}.frame", BODY_FRAME))
             if not topic:
                 raise ValueError(f"wrench source '{name}' requires a topic")
             if frame not in WRENCH_FRAMES:
@@ -252,14 +201,9 @@ class VirtualSpacecraftNode(Node):
                     f"wrench source '{name}' frame must be one of {WRENCH_FRAMES}"
                 )
             self.wrench_frames[name] = frame
+            self.wrench_topics[name] = topic
             self.wrench_values[name] = (0.0, 0.0, 0.0)
             self.wrench_update_times[name] = None
-            self.create_subscription(
-                Wrench,
-                topic,
-                partial(self.wrench_callback, name),
-                qos_profile,
-            )
             self.get_logger().info(
                 f"Wrench source '{name}' on '{topic}' in the {frame} frame"
             )
@@ -460,18 +404,3 @@ class VirtualSpacecraftNode(Node):
         message.twist.twist.linear.y = body_vy
         message.twist.twist.angular.z = state.yaw_rate
         self.reference_publisher.publish(message)
-
-
-def main(args=None):
-    """Run the virtual spacecraft node."""
-    rclpy.init(args=args)
-    node = VirtualSpacecraftNode()
-    try:
-        rclpy.spin(node)
-    finally:
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()

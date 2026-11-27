@@ -21,7 +21,6 @@ setup(
     entry_points={
         'console_scripts': [
             #########################################################################
-            'bounding_box_search = swarm_controller.bounding_box_search:main',
             'bounding_box_visualizer = swarm_controller.bounding_box_visualizer:main',
 
             'guidance = swarm_controller.guidance_node:main',

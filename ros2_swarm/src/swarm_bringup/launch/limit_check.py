@@ -51,9 +51,8 @@ class Report:
 
 def main(path):
     doc = yaml.safe_load(open(path))
-    vs = block(doc, "/**/virtual_spacecraft")
-    bb = block(doc, "/**/bounding_box_search")
-    sm = block(doc, "/**/velocity_smoother")
+    control = block(doc, "/**/control")   # one node since Phase 4; the old node blocks are its sub-dicts
+    vs, bb, sm = (control.get(k, {}) for k in ("virtual_spacecraft", "bounding_box_search", "velocity_smoother"))
     viz = block(doc, "/**/spacecraft_visualizer") or block(
         doc, "/**/bounding_box_visualizer")
     cap = block(doc, "/**/chassis_capability")

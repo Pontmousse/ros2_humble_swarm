@@ -52,228 +52,222 @@
     share_timeout: 2.0        # s since RECEIPT (HIL clocks are not synced)
     share_rate: 2.0           # Hz, broadcast rate
 
-/**/virtual_spacecraft:
+/**/control:
   ros__parameters:
-    # Virtual spacecraft properties (independent of RoboMaster hardware)
-    mass: 5.0
-    yaw_inertia: 0.05       # kg m², transverse-axis approximation
-    timer_frequency: 0.05  # 20 Hz (was 50): nav2_pidff samples the reference at 20 Hz; integration is exact per step
+    # One process per robot (nodes-to-functions Phase 4). The old node names are kept as sub-blocks, so every
+    # parameter below reads as before with that prefix (virtual_spacecraft.mass, nav2_pidff.position_gain, ...).
+    debug_topics: true      # also publish spacecraft_wrench and cmd_vel_raw (internal now) for bags and plots
 
-    # Fast, responsive laboratory configuration
-    # maximum_force: 1.0      # N
-    # maximum_torque: 0.2     # N m
-    # maximum_speed: 0.5      # m/s
-    # maximum_yaw_rate: 1.0   # rad/s
+    virtual_spacecraft:
+      # Virtual spacecraft properties (independent of RoboMaster hardware)
+      mass: 5.0
+      yaw_inertia: 0.05       # kg m², transverse-axis approximation
+      timer_frequency: 0.05  # 20 Hz control loop: box, craft, tracker and smoother all step on it
 
-    # 3U CubeSat-inspired configuration (5 kg)
-    # NOTE: the contributor caps (0.5-1.0 N, 0.2 Nm) are not yet scaled to this budget, so any non-zero source
-    # saturates the sum and the layer gains only set its direction. Retune pending (timer-review.md, Tier 4).
-    maximum_force: 0.02      # N, 20 mN propulsion
-    maximum_torque: 0.003    # N m, 3 mN m attitude control
-    maximum_speed: 0.05      # m/s, operational limit
-    maximum_yaw_rate: 0.1    # rad/s, operational limit
+      # Fast, responsive laboratory configuration
+      # maximum_force: 1.0      # N
+      # maximum_torque: 0.2     # N m
+      # maximum_speed: 0.5      # m/s
+      # maximum_yaw_rate: 1.0   # rad/s
 
-
-    # Clohessy-Wiltshire equations for relative motion in orbit.
-    enable_chw: true
-    orbit_altitude: 400000.0
-    gravity: 9.80665
-    earth_radius: 6371000.0
-
-    # odometry_timeout now gates integration, not just arming: past it the
-    # reference freezes in place instead of coasting on. nav2_pidff stops the
-    # chassis on the same staleness, so a reference that kept integrating
-    # would walk away from a robot nobody is commanding -- measured 2026-10-07,
-    # RM6 lost localization for 14.2 s and the runaway peaked at 3.95 m of
-    # tracking error against a 0.072 m median while the stream was healthy.
-    #
-    # MUST stay <= nav2_pidff.odometry_timeout (0.3), so the reference freezes
-    # no later than the tracker stops. Raising this one alone reopens the gap.
-    odometry_timeout: 0.25
-    wrench_timeout: 0.25
-    maximum_time_step: 0.1  # dt clamp, 2x the 0.05 s period so timer jitter never loses simulated time
-
-    # Wrench contributors, summed every step. Each declares its own frame:
-    # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
-    # Add a term by naming it here plus a topic/frame pair; a source that stops
-    # publishing simply drops out after wrench_timeout.
-    # Contributors, one per behaviour layer. All are summed every step and
-    # the SUM is clamped to maximum_force / maximum_torque, so each layer may
-    # saturate its own publisher-side cap without the total ever exceeding the
-    # validated envelope. The mode_supervisor does not route or mux these: it
-    # only enables/disables the guidance nodes that publish flocking/capture, and
-    # a disabled layer publishes an explicit zero Wrench so it drops to 0 N in
-    # the sum (and, after wrench_timeout, drops out entirely if it stops).
-    #   bounding_box  SEARCH-phase box-keeping burn      (body, always on)
-    #   flocking      ENCAPSULATION landmark APF         (inertial, gated)
-    #   preparation   ENCAPSULATION assigned-AP alignment (body, gated)
-    #   capture       CAPTURE approach/align velocity    (body, gated)
-    #   avoidance     inter-robot anti-flocking          (inertial, always on)
-    #   pointing      heading-hold torque                (inertial, always on)
-    wrench_sources: ["bounding_box", "flocking", "preparation", "capture", "avoidance", "pointing"]
-    wrench_sources.bounding_box.topic: "spacecraft_wrench"
-    wrench_sources.bounding_box.frame: "body"
-    wrench_sources.flocking.topic: "flocking_wrench"
-    wrench_sources.flocking.frame: "inertial"
-    wrench_sources.preparation.topic: "preparation_wrench"
-    wrench_sources.preparation.frame: "body"
-    wrench_sources.capture.topic: "capture_wrench"
-    wrench_sources.capture.frame: "body"
-    wrench_sources.avoidance.topic: "avoidance_wrench"
-    wrench_sources.avoidance.frame: "inertial"
-    wrench_sources.pointing.topic: "pointing_wrench"
-    wrench_sources.pointing.frame: "inertial"
-
-    qos_depth: 10
-    qos_reliability: "RELIABLE"
-    qos_history: "KEEP_LAST"
-
-/**/nav2_pff:
-  ros__parameters:
-    timer_frequency: 0.01
-
-    # Outer-loop gains. Start low and identify the real velocity-loop bandwidth.
-    position_gain: 1.0
-    yaw_gain: 0.5
-
-    # Conservative RoboMaster motion-rendering limits.
-    maximum_speed: 0.4
-    maximum_yaw_rate: 0.8
-
-    # Stop the physical chassis when either input becomes stale.
-    odometry_timeout: 0.25
-    reference_timeout: 0.25
-
-    qos_depth: 10
-    qos_reliability: "RELIABLE"
-    qos_history: "KEEP_LAST"
+      # 3U CubeSat-inspired configuration (5 kg)
+      # NOTE: the contributor caps (0.5-1.0 N, 0.2 Nm) are not yet scaled to this budget, so any non-zero source
+      # saturates the sum and the layer gains only set its direction. Retune pending (timer-review.md, Tier 4).
+      maximum_force: 0.02      # N, 20 mN propulsion
+      maximum_torque: 0.003    # N m, 3 mN m attitude control
+      maximum_speed: 0.05      # m/s, operational limit
+      maximum_yaw_rate: 0.1    # rad/s, operational limit
 
 
-/**/nav2_pidff:
-  ros__parameters:
-    # 20 Hz (was 5 Hz). The old comment justified 5 Hz with "robot can't react
-    # faster", which is true of the chassis but not of this loop: the rate also
-    # sets how long a spurious stop lasts. update() publishes a zero Twist
-    # whenever an input is older than odometry_timeout, so at 5 Hz every such
-    # misfire cost a full 200 ms of standstill. Measured 2026-10-07 on RM2:
-    # 24 gaps >0.25 s in 25 s on localization/odom, i.e. roughly one stop per
-    # second, against a virtual reference coasting at 0.46 m/s.
-    #
-    # 0.2 s period against a 0.25 s timeout also left only 50 ms of margin --
-    # the loop was barely faster than its own staleness gate. At 0.05 s the
-    # timeout is 5 control periods away.
-    #
-    # dt is measured from the clock, so the gains are unaffected by this change.
-    timer_frequency: 0.05
+      # Clohessy-Wiltshire equations for relative motion in orbit.
+      enable_chw: true
+      orbit_altitude: 400000.0
+      gravity: 9.80665
+      earth_radius: 6371000.0
 
-    enable_pid: true
+      # odometry_timeout now gates integration, not just arming: past it the
+      # reference freezes in place instead of coasting on. nav2_pidff stops the
+      # chassis on the same staleness, so a reference that kept integrating
+      # would walk away from a robot nobody is commanding -- measured 2026-10-07,
+      # RM6 lost localization for 14.2 s and the runaway peaked at 3.95 m of
+      # tracking error against a 0.072 m median while the stream was healthy.
+      #
+      # MUST stay <= nav2_pidff.odometry_timeout (0.3), so the reference freezes
+      # no later than the tracker stops. Raising this one alone reopens the gap.
+      odometry_timeout: 0.25
+      wrench_timeout: 0.25
+      maximum_time_step: 0.1  # dt clamp, 2x the 0.05 s period so timer jitter never loses simulated time
 
-    # Translation: PID + velocity feedforward
-    position_gain: 1.5
-    position_integral_gain: 0.15
-    velocity_error_gain: 0.30
-
-    # Yaw: PID + angular-rate feedforward
-    yaw_gain: 1.5
-    yaw_integral_gain: 0.08
-    yaw_rate_error_gain: 1.0
-
-    # Give feedback controller some recovery authority. Keep these at or below
-    # velocity_smoother.max_velocity: the smoother is downstream and its limits
-    # are invisible to this node's anti-windup, so the tighter cap belongs here.
-    #
-    # 2026-11-02: lifted 2x (0.5->1.0, 1.0->2.0) as the tracker rung of the
-    # ladder. This is the cap whose breach logs "Physical velocity command is
-    # saturated"; at 0.5 it was clipping continuously near the target. Stays
-    # 2x the reference (virtual_spacecraft.maximum_speed 0.5) and == the
-    # velocity_smoother.max_velocity 1.0 below, so the invariant chain holds.
-    maximum_speed: 1.0
-    maximum_yaw_rate: 2.0
-
-    # 0.3 (was 0.25). update() publishes a zero Twist and wipes the integral
-    # whenever either input is older than this, so the value is not a safety
-    # margin -- it is the length of input dropout the controller rides through.
-    # Measured 2026-10-07 on RM2: 24 breaches in 25 s on localization/odom,
-    # worst gap 0.936 s, which is roughly one spurious stop per second.
-    #
-    # The cost of looser gating is acting on a stale pose, and that cost fell
-    # sharply once virtual_spacecraft.maximum_speed capped the reference at
-    # 0.25 m/s: 0.3 s of staleness is now 0.075 m of reference travel, against
-    # 0.28 m at the old uncapped 0.46 m/s coast. That is what makes 0.3
-    # affordable; it would not have been before the cap.
-    #
-    # Deliberately conservative. The gap distribution is unknown, so this may
-    # only catch the shortest of the 24 breaches -- measure the percentiles
-    # before reaching for a larger number.
-    odometry_timeout: 0.3
-    reference_timeout: 0.3
-
-    qos_depth: 10
-    qos_reliability: "RELIABLE"
-    qos_history: "KEEP_LAST"
+      # Wrench contributors, summed every step. Each declares its own frame:
+      # "body" thrust rotates with the craft, "inertial" is fixed in swarm_map.
+      # Add a term by naming it here plus a topic/frame pair; a source that stops
+      # publishing simply drops out after wrench_timeout.
+      # Contributors, one per behaviour layer. All are summed every step and
+      # the SUM is clamped to maximum_force / maximum_torque, so each layer may
+      # saturate its own publisher-side cap without the total ever exceeding the
+      # validated envelope. The mode_supervisor does not route or mux these: it
+      # only enables/disables the guidance nodes that publish flocking/capture, and
+      # a disabled layer publishes an explicit zero Wrench so it drops to 0 N in
+      # the sum (and, after wrench_timeout, drops out entirely if it stops).
+      #   bounding_box  SEARCH-phase box-keeping burn      (body, always on)
+      #   flocking      ENCAPSULATION landmark APF         (inertial, gated)
+      #   preparation   ENCAPSULATION assigned-AP alignment (body, gated)
+      #   capture       CAPTURE approach/align velocity    (body, gated)
+      #   avoidance     inter-robot anti-flocking          (inertial, always on)
+      #   pointing      heading-hold torque                (inertial, always on)
+      wrench_sources: ["bounding_box", "flocking", "preparation", "capture", "avoidance", "pointing"]
+      wrench_sources.bounding_box.topic: "spacecraft_wrench"
+      wrench_sources.bounding_box.frame: "body"
+      wrench_sources.flocking.topic: "flocking_wrench"
+      wrench_sources.flocking.frame: "inertial"
+      wrench_sources.preparation.topic: "preparation_wrench"
+      wrench_sources.preparation.frame: "body"
+      wrench_sources.capture.topic: "capture_wrench"
+      wrench_sources.capture.frame: "body"
+      wrench_sources.avoidance.topic: "avoidance_wrench"
+      wrench_sources.avoidance.frame: "inertial"
+      wrench_sources.pointing.topic: "pointing_wrench"
+      wrench_sources.pointing.frame: "inertial"
 
 
-/**/bounding_box_search:
-  ros__parameters:
-    timer_frequency: 0.1  # 10 Hz (was 50 Hz) - callback is time/position driven, not rate driven; consumer holds last wrench between updates
-    reference_timeout: 0.25
-    global_frame_id: "swarm_map"
+    nav2_pidff:
+      # Runs on the control loop tick (virtual_spacecraft.timer_frequency, 20 Hz); dt is measured from the
+      # clock, so the gains do not depend on the rate. update() publishes a zero Twist whenever an input is
+      # older than odometry_timeout below.
 
-    # Box geometry comes from the shared /** block above.
-    # Braking runway inside each wall; must stay below half the shortest side.
-    # Was 0.01 m (≈no runway → max overshoot). 0.4 m starts the reverse burn
-    # well before the boundary. Shortest side is 3.0 m, so half is 1.5 m > 0.4.
-    boundary_margin: 0.4
+      enable_pid: true
 
-    # Finite firings. These must not exceed virtual_spacecraft.maximum_force /
-    # maximum_torque, or the simulator clamps the sum and the guidance law is
-    # silently solving a different problem than the one it commanded.
-    # Brought at/under the 1.0 N / 0.2 Nm envelope so commanded == rendered
-    # (were 1.5 / 2.0 / 0.5 → clamped, so braking was weaker than the law assumed).
-    #
-    # Halved from 1.0 once avoidance_wrench became a second contributor. The
-    # simulator scales the *resultant* down to virtual_spacecraft.maximum_force
-    # (1.0 N), so two contributors capped at 1.0 each cancel to ~0 N when they
-    # oppose -- avoidance could never win, only tie, and the craft would coast
-    # into the neighbour. At 0.5 the box force yields 0.5 N of net authority to a
-    # saturated avoidance push while the total stays inside the validated
-    # envelope. boundary_force and initial_force_* come down with it: capping
-    # maximum_force alone would clamp them internally, which is the exact
-    # commanded-vs-rendered mismatch this block warns about.
-    boundary_force: 0.5
-    rebound_speed: 0.30
-    maximum_force: 0.5
-    maximum_torque: 0.2
+      # Translation: PID + velocity feedforward
+      position_gain: 1.5
+      position_integral_gain: 0.15
+      velocity_error_gain: 0.30
 
-    # Thrust rises and falls as a raised cosine over initial_burn_ramp seconds
-    # at each end of the burn. A step demands unbounded chassis acceleration to
-    # render; the ramp is still steep enough to read as a thruster firing.
-    # Clamped internally to half of initial_burn_duration.
-    initial_burn_duration: 2.0
-    initial_burn_ramp: 2.0
-    # 0.35/0.35 → resultant 0.49 N ≤ the 0.5 maximum_force above (was 0.7/0.7 →
-    # 0.99, which fit the old 1.0 cap but would now be clamped).
-    initial_force_x: 0.0 # 0.35
-    initial_force_y: 0.0 # 0.35
-    initial_torque: 0.0 # 0.2
+      # Yaw: PID + angular-rate feedforward
+      yaw_gain: 1.5
+      yaw_integral_gain: 0.08
+      yaw_rate_error_gain: 1.0
 
-    # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
-    # drawn once per bounce. Breaks the degenerate straight-line rebound.
-    # Set random_seed non-zero to replay an identical run.
-    lateral_kick_fraction: 0.15
-    random_seed: 0
+      # Give feedback controller some recovery authority. Keep these at or below
+      # velocity_smoother.max_velocity: the smoother is downstream and its limits
+      # are invisible to this node's anti-windup, so the tighter cap belongs here.
+      #
+      # 2026-11-02: lifted 2x (0.5->1.0, 1.0->2.0) as the tracker rung of the
+      # ladder. This is the cap whose breach logs "Physical velocity command is
+      # saturated"; at 0.5 it was clipping continuously near the target. Stays
+      # 2x the reference (virtual_spacecraft.maximum_speed 0.5) and == the
+      # velocity_smoother.max_velocity 1.0 below, so the invariant chain holds.
+      maximum_speed: 1.0
+      maximum_yaw_rate: 2.0
 
-    # Blind drift toward the shared target estimate (share_target above): fire
-    # toward it until the closing speed reaches share_drift_speed, then coast.
-    # No firing within share_drift_stop of the centre (own camera takes over);
-    # wall firings keep priority.
-    share_drift_speed: 0.03   # m/s, under the 0.05 m/s cruise cap
-    share_drift_force: 0.5    # N, clamped by maximum_force here and the spacecraft clamp
-    share_drift_stop: 1.0     # m from the shared centre
+      # 0.3 (was 0.25). update() publishes a zero Twist and wipes the integral
+      # whenever either input is older than this, so the value is not a safety
+      # margin -- it is the length of input dropout the controller rides through.
+      # Measured 2026-10-07 on RM2: 24 breaches in 25 s on localization/odom,
+      # worst gap 0.936 s, which is roughly one spurious stop per second.
+      #
+      # The cost of looser gating is acting on a stale pose, and that cost fell
+      # sharply once virtual_spacecraft.maximum_speed capped the reference at
+      # 0.25 m/s: 0.3 s of staleness is now 0.075 m of reference travel, against
+      # 0.28 m at the old uncapped 0.46 m/s coast. That is what makes 0.3
+      # affordable; it would not have been before the cap.
+      #
+      # Deliberately conservative. The gap distribution is unknown, so this may
+      # only catch the shortest of the 24 breaches -- measure the percentiles
+      # before reaching for a larger number.
+      odometry_timeout: 0.3
+      reference_timeout: 0.3
 
-    qos_depth: 10
-    qos_reliability: "RELIABLE"
-    qos_history: "KEEP_LAST"
+
+    bounding_box_search:
+      reference_timeout: 0.25
+      global_frame_id: "swarm_map"
+
+      # Box geometry comes from the shared /** block above.
+      # Braking runway inside each wall; must stay below half the shortest side.
+      # Was 0.01 m (≈no runway → max overshoot). 0.4 m starts the reverse burn
+      # well before the boundary. Shortest side is 3.0 m, so half is 1.5 m > 0.4.
+      boundary_margin: 0.4
+
+      # Finite firings. These must not exceed virtual_spacecraft.maximum_force /
+      # maximum_torque, or the simulator clamps the sum and the guidance law is
+      # silently solving a different problem than the one it commanded.
+      # Brought at/under the 1.0 N / 0.2 Nm envelope so commanded == rendered
+      # (were 1.5 / 2.0 / 0.5 → clamped, so braking was weaker than the law assumed).
+      #
+      # Halved from 1.0 once avoidance_wrench became a second contributor. The
+      # simulator scales the *resultant* down to virtual_spacecraft.maximum_force
+      # (1.0 N), so two contributors capped at 1.0 each cancel to ~0 N when they
+      # oppose -- avoidance could never win, only tie, and the craft would coast
+      # into the neighbour. At 0.5 the box force yields 0.5 N of net authority to a
+      # saturated avoidance push while the total stays inside the validated
+      # envelope. boundary_force and initial_force_* come down with it: capping
+      # maximum_force alone would clamp them internally, which is the exact
+      # commanded-vs-rendered mismatch this block warns about.
+      boundary_force: 0.5
+      rebound_speed: 0.30
+      maximum_force: 0.5
+      maximum_torque: 0.2
+
+      # Thrust rises and falls as a raised cosine over initial_burn_ramp seconds
+      # at each end of the burn. A step demands unbounded chassis acceleration to
+      # render; the ramp is still steep enough to read as a thruster firing.
+      # Clamped internally to half of initial_burn_duration.
+      initial_burn_duration: 2.0
+      initial_burn_ramp: 2.0
+      # 0.35/0.35 → resultant 0.49 N ≤ the 0.5 maximum_force above (was 0.7/0.7 →
+      # 0.99, which fit the old 1.0 cap but would now be clamped).
+      initial_force_x: 0.0 # 0.35
+      initial_force_y: 0.0 # 0.35
+      initial_torque: 0.0 # 0.2
+
+      # Sideways kick on each bounce, as a fraction of boundary_force, with a sign
+      # drawn once per bounce. Breaks the degenerate straight-line rebound.
+      # Set random_seed non-zero to replay an identical run.
+      lateral_kick_fraction: 0.15
+      random_seed: 0
+
+      # Blind drift toward the shared target estimate (share_target above): fire
+      # toward it until the closing speed reaches share_drift_speed, then coast.
+      # No firing within share_drift_stop of the centre (own camera takes over);
+      # wall firings keep priority.
+      share_drift_speed: 0.03   # m/s, under the 0.05 m/s cruise cap
+      share_drift_force: 0.5    # N, clamped by maximum_force here and the spacecraft clamp
+      share_drift_stop: 1.0     # m from the shared centre
+
+
+    velocity_smoother:
+      # Steps once per control tick (smoothing frequency = loop rate); limits are per second as before.
+      scale_velocities: true
+      feedback: "OPEN_LOOP"
+
+
+      # Acceleration authority, not a comfort setting. The chassis must out-
+      # accelerate the virtual reference (a_max = maximum_force / mass) with
+      # enough left over to close position error; at 0.5 the margin over a 0.4
+      # m/s^2 reference was 20% and the burn transient dominated tracking error.
+
+      # 2026-11-02: lifted to the wider block as the downstream rung of the
+      # ladder (velocity 2x, accel ~3x). Must stay >= nav2_pidff.maximum_speed
+      # (1.0) so the tracker's own cap is the binding one. The accel bump also
+      # gives the chassis more margin to out-accelerate the reference's a_max,
+      # which the old 0.5 accel left at only ~20%.
+      max_velocity: [1.0, 1.0, 2.0]
+      min_velocity: [-1.0, -1.0, -2.0]
+      max_accel: [1.5, 1.5, 3.0]
+      max_decel: [-2.0, -2.0, -4.0]
+
+
+      # Previous conservative block, kept for quick A/B revert:
+      # max_velocity: [0.5, 0.5, 1.0]
+      # min_velocity: [-0.5, -0.5, -1.0]
+      # max_accel: [0.5, 0.5, 0.8]
+      # max_decel: [-0.5, -0.5, -0.8]
+
+
+    
+      deadband_velocity: [0.0, 0.0, 0.0]
+      velocity_timeout: 0.25
+
 
 /**/spacecraft_visualizer:
   ros__parameters:
@@ -307,208 +301,6 @@
     qos_reliability: "RELIABLE"
     qos_history: "KEEP_LAST"
 
-/**/nav2_dwb_path:
-  ros__parameters:
-    path_update_period: 0.1
-    reference_timeout: 0.25
-    goal_checker_id: "general_goal_checker"
-    qos_depth: 10
-    qos_reliability: "RELIABLE"
-    qos_history: "KEEP_LAST"
-
-/**/controller_server:
-  ros__parameters:
-    use_sim_time: false
-    controller_frequency: 20.0
-    min_x_velocity_threshold: 0.001
-    min_y_velocity_threshold: 0.001
-    min_theta_velocity_threshold: 0.001
-    failure_tolerance: 0.0
-    odom_topic: "localization/odom"
-    progress_checker_plugin: "progress_checker"
-    goal_checker_plugins: ["general_goal_checker"]
-    controller_plugins: ["DWBStandard", "DWBVelocityFF", "DWBVelocityFeedback"]
-
-    progress_checker:
-      plugin: "nav2_controller::SimpleProgressChecker"
-      required_movement_radius: 0.02
-      movement_time_allowance: 5.0
-
-    general_goal_checker:
-      plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.05
-      yaw_goal_tolerance: 0.1
-      stateful: false
-
-    DWBStandard:
-      plugin: "dwb_core::DWBLocalPlanner"
-      trajectory_generator_name: "dwb_plugins::LimitedAccelGenerator"
-      min_vel_x: -0.4
-      max_vel_x: 0.4
-      min_vel_y: -0.4
-      max_vel_y: 0.4
-      max_vel_theta: 0.8
-      min_speed_xy: 0.0
-      max_speed_xy: 0.4
-      min_speed_theta: 0.0
-      acc_lim_x: 0.3
-      acc_lim_y: 0.3
-      acc_lim_theta: 0.8
-      decel_lim_x: -0.5
-      decel_lim_y: -0.5
-      decel_lim_theta: -1.2
-      vx_samples: 7
-      vy_samples: 7
-      vtheta_samples: 9
-      sim_time: 1.0
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-      transform_tolerance: 0.2
-      short_circuit_trajectory_evaluation: true
-      critics: ["RotateToGoal", "Oscillation", "GoalDist"]
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 16.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
-
-    DWBVelocityFF:
-      plugin: "dwb_core::DWBLocalPlanner"
-      trajectory_generator_name: "dwb_plugins::LimitedAccelGenerator"
-      min_vel_x: -0.4
-      max_vel_x: 0.4
-      min_vel_y: -0.4
-      max_vel_y: 0.4
-      max_vel_theta: 0.8
-      min_speed_xy: 0.0
-      max_speed_xy: 0.4
-      min_speed_theta: 0.0
-      acc_lim_x: 0.3
-      acc_lim_y: 0.3
-      acc_lim_theta: 0.8
-      decel_lim_x: -0.5
-      decel_lim_y: -0.5
-      decel_lim_theta: -1.2
-      vx_samples: 7
-      vy_samples: 7
-      vtheta_samples: 9
-      sim_time: 1.0
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-      transform_tolerance: 0.2
-      short_circuit_trajectory_evaluation: true
-      critics: ["RotateToGoal", "Oscillation", "GoalDist", "VirtualVelocity"]
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 16.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
-      VirtualVelocity.class: "swarm_dwb_critics::VirtualVelocityCritic"
-      VirtualVelocity.scale: 5.0
-      VirtualVelocity.reference_topic: "virtual_spacecraft/odom"
-      VirtualVelocity.reference_timeout: 0.25
-      VirtualVelocity.linear_feedback_gain: 0.0
-      VirtualVelocity.angular_feedback_gain: 0.0
-      VirtualVelocity.linear_x_weight: 1.0
-      VirtualVelocity.linear_y_weight: 1.0
-      VirtualVelocity.angular_weight: 1.0
-
-    DWBVelocityFeedback:
-      plugin: "dwb_core::DWBLocalPlanner"
-      trajectory_generator_name: "dwb_plugins::LimitedAccelGenerator"
-      min_vel_x: -0.4
-      max_vel_x: 0.4
-      min_vel_y: -0.4
-      max_vel_y: 0.4
-      max_vel_theta: 0.8
-      min_speed_xy: 0.0
-      max_speed_xy: 0.4
-      min_speed_theta: 0.0
-      acc_lim_x: 0.3
-      acc_lim_y: 0.3
-      acc_lim_theta: 0.8
-      decel_lim_x: -0.5
-      decel_lim_y: -0.5
-      decel_lim_theta: -1.2
-      vx_samples: 7
-      vy_samples: 7
-      vtheta_samples: 9
-      sim_time: 1.0
-      linear_granularity: 0.05
-      angular_granularity: 0.025
-      transform_tolerance: 0.2
-      short_circuit_trajectory_evaluation: true
-      critics: ["RotateToGoal", "Oscillation", "GoalDist", "VirtualVelocity"]
-      GoalDist.scale: 24.0
-      RotateToGoal.scale: 16.0
-      RotateToGoal.slowing_factor: 5.0
-      RotateToGoal.lookahead_time: -1.0
-      VirtualVelocity.class: "swarm_dwb_critics::VirtualVelocityCritic"
-      VirtualVelocity.scale: 5.0
-      VirtualVelocity.reference_topic: "virtual_spacecraft/odom"
-      VirtualVelocity.reference_timeout: 0.25
-      VirtualVelocity.linear_feedback_gain: 0.3
-      VirtualVelocity.angular_feedback_gain: 0.3
-      VirtualVelocity.linear_x_weight: 1.0
-      VirtualVelocity.linear_y_weight: 1.0
-      VirtualVelocity.angular_weight: 1.0
-
-/**/local_costmap:
-  ros__parameters:
-    use_sim_time: false
-    update_frequency: 5.0
-    publish_frequency: 2.0
-    global_frame: "swarm_map"
-    robot_base_frame: "<robot_namespace>/base_link"
-    rolling_window: true
-    width: 3.0
-    height: 3.0
-    resolution: 0.05
-    robot_radius: 0.22
-    plugins: ["inflation_layer"]
-    inflation_layer:
-      plugin: "nav2_costmap_2d::InflationLayer"
-      cost_scaling_factor: 3.0
-      inflation_radius: 0.3
-    always_send_full_costmap: true
-
-/**/velocity_smoother:
-  ros__parameters:
-    use_sim_time: false
-    smoothing_frequency: 10.0  # was 50 Hz - final cmd_vel rate to driver; robot can't react faster
-    scale_velocities: true
-    feedback: "OPEN_LOOP"
-
-
-    # Acceleration authority, not a comfort setting. The chassis must out-
-    # accelerate the virtual reference (a_max = maximum_force / mass) with
-    # enough left over to close position error; at 0.5 the margin over a 0.4
-    # m/s^2 reference was 20% and the burn transient dominated tracking error.
-
-    # 2026-11-02: lifted to the wider block as the downstream rung of the
-    # ladder (velocity 2x, accel ~3x). Must stay >= nav2_pidff.maximum_speed
-    # (1.0) so the tracker's own cap is the binding one. The accel bump also
-    # gives the chassis more margin to out-accelerate the reference's a_max,
-    # which the old 0.5 accel left at only ~20%.
-    max_velocity: [1.0, 1.0, 2.0]
-    min_velocity: [-1.0, -1.0, -2.0]
-    max_accel: [1.5, 1.5, 3.0]
-    max_decel: [-2.0, -2.0, -4.0]
-
-
-    # Previous conservative block, kept for quick A/B revert:
-    # max_velocity: [0.5, 0.5, 1.0]
-    # min_velocity: [-0.5, -0.5, -1.0]
-    # max_accel: [0.5, 0.5, 0.8]
-    # max_decel: [-0.5, -0.5, -0.8]
-
-
-    
-    deadband_velocity: [0.0, 0.0, 0.0]
-    velocity_timeout: 0.25
-    odom_topic: "localization/odom"
-    odom_duration: 0.1
-
-
-    
 /**/pose_publisher:
   ros__parameters:
     init_period: 2.0

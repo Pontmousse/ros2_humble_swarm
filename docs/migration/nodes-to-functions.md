@@ -208,6 +208,40 @@ least-squares velocity fit) outside ENCAP/CAPTURE.
 
 ## Phase 4: control chain (#6, #7, #10–12)
 
+**Status: done 2026-11-27 on `split-containers`** (rollback / baseline: commit `da5ae53`). One `control` process
+per robot replaces virtual_spacecraft, bounding_box_search, nav2_pidff, the nav2 velocity_smoother and its
+lifecycle manager; the DWB / nav2_pff / `guidance_mode` alternatives and the `swarm_dwb_critics` package are deleted.
+Per robot: 13 → 9 processes. Topics and services are unchanged except the gone `bond` / smoother lifecycle topics;
+`spacecraft_wrench` and `cmd_vel_raw` stay published (`debug_topics`).
+
+| Module | Job |
+|---|---|
+| `swarm_spacecraft/virtual_craft.py` | `VirtualCraft`: wrench hold/sum/clamp, arm/reset, freeze on stale odom, exact integration (moved verbatim) |
+| `swarm_controller/bounding_box_search.py` | `BoxSearch`: initial burn, wall firings, shared-target drift (verbatim) |
+| `swarm_nav2_controller/tracking.py` | `Tracker`: PID+FF with conditional-integration anti-windup (verbatim) |
+| `swarm_nav2_controller/smoother.py` | `VelocitySmoother`: line-for-line port of nav2 Humble's smoother (OPEN_LOOP) |
+| `swarm_spacecraft/control_node.py` | thin node: one 20 Hz timer, box → craft → tracker → smoother → `cmd_vel`, wired with fan-outs |
+
+Parameters: the old node names are sub-blocks of `/**/control` (`virtual_spacecraft.mass`, `nav2_pidff.position_gain`, ...);
+the `/**` box, response scales and `share_*` stay shared. Each class keeps its own staleness rule (freeze 0.25 s,
+tracker stop 0.3 s, smoother timeout). The one deliberate timing change: the smoother steps at the loop rate, so
+`cmd_vel` is 20 Hz (was 10) with the same m/s and m/s² limits; the tracker renders the reference integrated in the same tick.
+
+**Checked:**
+- golden traces: the old `VirtualSpacecraftNode`, `BoundingBoxSearchNode` and `Nav2PidFfNode` (at `da5ae53`) driven on
+  scripted inputs (stale sources, odom gaps, arm/reset, bounces, saturation, frame mismatch), two parameter sets each;
+  the new classes reproduce every output exactly (`test_golden_*.py`); mutations of the code are caught;
+- the smoother port reproduces all 94 outputs recorded from the real nav2 binary (`test_smoother.py`);
+- `test_control_node.py` (real `__init__` on the real yaml): wiring, pre-arm zeros, same-tick reference, freeze/stop/ramp on stale odom;
+- live `control` on an isolated domain: 20 Hz `cmd_vel`, freeze ~0.25 s and stop ~0.3 s after odom stops, resume;
+- SIL N=3 ×2 against the two pre-Phase-4 runs: QC OK, 3/3 docked on the same APs, per-phase `trk_p95` 18–36 mm
+  (before 19–70 mm), true-tracking p95 max 54–70 mm (before 73–75 mm), sync 1–12 ms, mission 58–63 s (before 61–65 s).
+
+**CPU** (SIL, 3 robots): the control chain 31% of a core against 53–56% for the five old processes.
+
+**Not yet:** HIL on one robot: virtual-vs-physical tracking against the 2026-09-09 envelope, and `cmd_vel` at 20 Hz on the
+drivers chassis.
+
 **Why:** the timers here are stacked in series. pose_kf 20 Hz → virtual_spacecraft 50 Hz → pidff 20 Hz →
 smoother 10 Hz gives **~200 ms worst-case feedback latency, half of it from the smoother**. pidff output is
 half discarded, and the smoother's bond has already died on a starved Pi (2026-10-09).

@@ -19,7 +19,6 @@ from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from nav2_common.launch import ReplaceString
 
 
 def robot_names(config_dir):
@@ -42,8 +41,7 @@ def generate_launch_description():
         ld.add_action(Node(
             package="swarm_spacecraft", executable="spacecraft_visualizer",
             name="spacecraft_visualizer", namespace=name, output="screen",
-            parameters=[ReplaceString(source_file=os.path.join(config_dir, "virtual_spacecraft.yaml"),
-                                      replacements={"<robot_namespace>": name}),
+            parameters=[os.path.join(config_dir, "virtual_spacecraft.yaml"),
                         {"show_capture_timing": name == names[0]}],
         ))
 

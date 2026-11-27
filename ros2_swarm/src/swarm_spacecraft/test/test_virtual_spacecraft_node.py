@@ -1,7 +1,7 @@
 """Tests for virtual-spacecraft ROS interface helpers."""
 
-from swarm_spacecraft.virtual_spacecraft_node import namespaced_virtual_frame
-from swarm_spacecraft.virtual_spacecraft_node import timestamp_is_fresh
+from swarm_spacecraft.virtual_craft import namespaced_virtual_frame
+from swarm_spacecraft.virtual_craft import timestamp_is_fresh
 
 
 def test_virtual_frame_is_unique_in_robot_namespace():

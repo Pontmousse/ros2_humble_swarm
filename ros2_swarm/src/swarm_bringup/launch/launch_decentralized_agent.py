@@ -165,7 +165,7 @@ def generate_launch_description():
             namespace=robot_name, extra_env_vars=decentralized_env))
 
     # When set, guidance (capture) becomes the sole writer of cmd_vel and muxes the
-    # nav chain through it (velocity_smoother is remapped to cmd_vel_nav inside
+    # nav chain through it (control then publishes cmd_vel_nav, see
     # launch_virtual_spacecraft.py, which reads the same env). Must match the
     # reads in launch_centralized_swarm.py and launch_virtual_spacecraft.py.
     direct_cmd_vel = os.environ.get("DIRECT_CMD_VEL", "").lower() in (

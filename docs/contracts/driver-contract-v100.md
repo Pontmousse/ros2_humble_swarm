@@ -44,7 +44,7 @@ Optional, not relied on: `imu` (`sensor_msgs/Imu`, off: `imu_rate: 0`), `battery
 
 | Name | Type | Our producer | Drivers behaviour |
 |---|---|---|---|
-| `cmd_vel` (topic) | `geometry_msgs/Twist` | velocity_smoother (or cp_controller with `DIRECT_CMD_VEL`) | body frame, m/s and rad/s; clamped to `max_vx`/`max_vy` 1.0 m/s, `max_wz` 3.14 rad/s; wheels stop after `cmd_timeout` 0.5 s without a message |
+| `cmd_vel` (topic) | `geometry_msgs/Twist` | `control` at 20 Hz (or guidance's capture law with `DIRECT_CMD_VEL`) | body frame, m/s and rad/s; clamped to `max_vx`/`max_vy` 1.0 m/s, `max_wz` 3.14 rad/s; wheels stop after `cmd_timeout` 0.5 s without a message |
 | `engage_wheels` (service, called by us) | `std_srvs/SetBool` | mode_supervisor on DOCK entry/exit | `true` engage, `false` free-wheel; waits for the robot's ack, **up to 3 s** |
 
 ## 2. Messages
@@ -154,3 +154,4 @@ Everything else (other params files, URDF, beacon offsets) comes from the image.
 |---|---|---|---|
 | 1.0.0 | 2026-11-26 | `app-4be73e1-drivers` | First contract: chassis, GNSS, USB camera + ArUco in the drivers container; gnss_bridge and aruco_bridge on our side |
 | 1.0.0 | 2026-11-26 | `app-4be73e1-drivers` | Same topics. Our side: the bridge nodes and the `DRIVER_STACK` switch are gone; `perception` converts the drivers' topics directly (nodes-to-functions Phase 2) |
+| 1.0.0 | 2026-11-27 | `app-4be73e1-drivers` | Same topics. Our side: `cmd_vel` now comes from one `control` process at 20 Hz (was the nav2 velocity_smoother at 10 Hz; same m/s and m/s² limits), nodes-to-functions Phase 4 |

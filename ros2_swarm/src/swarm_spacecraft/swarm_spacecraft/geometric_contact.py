@@ -15,7 +15,7 @@ from std_msgs.msg import Bool
 
 from swarm_interfaces.msg import Markers
 
-from .virtual_spacecraft_node import qos_profile_from_parameters
+from .virtual_craft import qos_profile_from_parameters
 
 
 class GeometricContact(Node):

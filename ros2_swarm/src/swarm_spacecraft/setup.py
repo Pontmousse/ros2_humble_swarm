@@ -20,7 +20,7 @@ setup(
     tests_require=["pytest"],
     entry_points={
         "console_scripts": [
-            "virtual_spacecraft = swarm_spacecraft.virtual_spacecraft_node:main",
+            "control = swarm_spacecraft.control_node:main",
             "arm_all = swarm_spacecraft.arm_all:main",
             "spacecraft_visualizer = swarm_spacecraft.spacecraft_visualizer:main",
             "fake_plant = swarm_spacecraft.fake_plant:main",

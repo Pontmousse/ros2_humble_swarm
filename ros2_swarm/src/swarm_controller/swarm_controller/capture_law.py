@@ -355,7 +355,7 @@ class CaptureLaw:
     ######################################################################################################
 
     def cmd_vel_nav_callback(self, msg: Twist):
-        """Latest nav-chain command (velocity_smoother -> cmd_vel_nav), muxed
+        """Latest nav-chain command (control -> cmd_vel_nav), muxed
         onto cmd_vel in direct mode whenever this node is not capturing."""
         self.cmd_vel_nav = msg
 

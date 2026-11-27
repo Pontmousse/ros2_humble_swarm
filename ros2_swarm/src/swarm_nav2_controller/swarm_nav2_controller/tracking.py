@@ -1,4 +1,5 @@
-"""PID position-error feedback plus velocity-feedforward tracking controller."""
+"""PID position-error feedback plus velocity-feedforward tracking of the virtual spacecraft (formerly the
+nav2_pidff node). Plain class driven by the control node."""
 
 from dataclasses import dataclass
 import math
@@ -6,9 +7,6 @@ from typing import Optional, Tuple
 
 from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy
 
 
 @dataclass
@@ -294,55 +292,6 @@ def frames_match(
     )
 
 
-def qos_profile_from_parameters(node: Node) -> QoSProfile:
-    """Build the repository-standard configurable QoS profile."""
-
-    qos_depth = int(
-        node.get_parameter("qos_depth").value
-    )
-
-    qos_reliability = str(
-        node.get_parameter("qos_reliability").value
-    )
-
-    qos_history = str(
-        node.get_parameter("qos_history").value
-    )
-
-    if qos_depth <= 0:
-        raise ValueError("qos_depth must be positive")
-
-    if qos_reliability not in (
-        "RELIABLE",
-        "BEST_EFFORT",
-    ):
-        raise ValueError(
-            f"Invalid qos_reliability: {qos_reliability}"
-        )
-
-    if qos_history not in (
-        "KEEP_LAST",
-        "KEEP_ALL",
-    ):
-        raise ValueError(
-            f"Invalid qos_history: {qos_history}"
-        )
-
-    return QoSProfile(
-        depth=qos_depth,
-        reliability=(
-            ReliabilityPolicy.RELIABLE
-            if qos_reliability == "RELIABLE"
-            else ReliabilityPolicy.BEST_EFFORT
-        ),
-        history=(
-            HistoryPolicy.KEEP_LAST
-            if qos_history == "KEEP_LAST"
-            else HistoryPolicy.KEEP_ALL
-        ),
-    )
-
-
 def validate_controller_parameters(
     timer_frequency: float,
     position_gain: float,
@@ -392,190 +341,26 @@ def validate_controller_parameters(
         )
 
 
-class Nav2PidFfNode(Node):
+class Tracker:
     """Track virtual spacecraft odometry using PID feedback plus feedforward."""
 
-    def __init__(self):
-        super().__init__("nav2_pidff")
-
-        # ---------------------------------------------------------------
-        # Existing controller parameters
-        # ---------------------------------------------------------------
-
-        self.declare_parameter(
-            "timer_frequency",
-            0.01,
-        )
-
-        self.declare_parameter(
-            "position_gain",
-            1.0,
-        )
-
-        self.declare_parameter(
-            "yaw_gain",
-            2.0,
-        )
-
-        self.declare_parameter(
-            "maximum_speed",
-            0.5,
-        )
-
-        self.declare_parameter(
-            "maximum_yaw_rate",
-            1.0,
-        )
-
-        self.declare_parameter(
-            "odometry_timeout",
-            0.25,
-        )
-
-        self.declare_parameter(
-            "reference_timeout",
-            0.25,
-        )
-
-        # ---------------------------------------------------------------
-        # PID gate
-        #
-        # false -> original P + velocity feedforward behavior
-        # true  -> PID + velocity feedforward behavior
-        # ---------------------------------------------------------------
-
-        self.declare_parameter(
-            "enable_pid",
-            False,
-        )
-
-        # ---------------------------------------------------------------
-        # New translational PID parameters
-        #
-        # position_gain is Kp and is retained from the original node.
-        # ---------------------------------------------------------------
-
-        self.declare_parameter(
-            "position_integral_gain",
-            0.0,
-        )
-
-        self.declare_parameter(
-            "velocity_error_gain",
-            0.0,
-        )
-
-        # ---------------------------------------------------------------
-        # New yaw PID parameters
-        #
-        # yaw_gain is Kp and is retained from the original node.
-        # ---------------------------------------------------------------
-
-        self.declare_parameter(
-            "yaw_integral_gain",
-            0.0,
-        )
-
-        self.declare_parameter(
-            "yaw_rate_error_gain",
-            0.0,
-        )
-
-        # ---------------------------------------------------------------
-        # QoS
-        # ---------------------------------------------------------------
-
-        self.declare_parameter(
-            "qos_depth",
-            10,
-        )
-
-        self.declare_parameter(
-            "qos_reliability",
-            "RELIABLE",
-        )
-
-        self.declare_parameter(
-            "qos_history",
-            "KEEP_LAST",
-        )
-
-        # ---------------------------------------------------------------
-        # Read parameters
-        # ---------------------------------------------------------------
-
-        self.timer_frequency = float(
-            self.get_parameter(
-                "timer_frequency"
-            ).value
-        )
-
-        self.enable_pid = bool(
-            self.get_parameter(
-                "enable_pid"
-            ).value
-        )
-
-        self.position_gain = float(
-            self.get_parameter(
-                "position_gain"
-            ).value
-        )
-
-        self.position_integral_gain = float(
-            self.get_parameter(
-                "position_integral_gain"
-            ).value
-        )
-
-        self.velocity_error_gain = float(
-            self.get_parameter(
-                "velocity_error_gain"
-            ).value
-        )
-
-        self.yaw_gain = float(
-            self.get_parameter(
-                "yaw_gain"
-            ).value
-        )
-
-        self.yaw_integral_gain = float(
-            self.get_parameter(
-                "yaw_integral_gain"
-            ).value
-        )
-
-        self.yaw_rate_error_gain = float(
-            self.get_parameter(
-                "yaw_rate_error_gain"
-            ).value
-        )
-
-        self.maximum_speed = float(
-            self.get_parameter(
-                "maximum_speed"
-            ).value
-        )
-
-        self.maximum_yaw_rate = float(
-            self.get_parameter(
-                "maximum_yaw_rate"
-            ).value
-        )
-
-        self.odometry_timeout = float(
-            self.get_parameter(
-                "odometry_timeout"
-            ).value
-        )
-
-        self.reference_timeout = float(
-            self.get_parameter(
-                "reference_timeout"
-            ).value
-        )
-
+    def __init__(self, node, p, command_publisher, timer_frequency):
+        """p(name, default) reads nav2_pidff.*; timer_frequency is the control loop period."""
+        self.get_clock, self.get_logger = node.get_clock, node.get_logger
+        self.timer_frequency = float(timer_frequency)
+        # PID gate: false -> original P + velocity feedforward, true -> PID + velocity feedforward.
+        self.enable_pid = bool(p("enable_pid", False))
+        # position_gain / yaw_gain are Kp; the integral and error-rate gains are the PID additions.
+        self.position_gain = float(p("position_gain", 1.0))
+        self.position_integral_gain = float(p("position_integral_gain", 0.0))
+        self.velocity_error_gain = float(p("velocity_error_gain", 0.0))
+        self.yaw_gain = float(p("yaw_gain", 2.0))
+        self.yaw_integral_gain = float(p("yaw_integral_gain", 0.0))
+        self.yaw_rate_error_gain = float(p("yaw_rate_error_gain", 0.0))
+        self.maximum_speed = float(p("maximum_speed", 0.5))
+        self.maximum_yaw_rate = float(p("maximum_yaw_rate", 1.0))
+        self.odometry_timeout = float(p("odometry_timeout", 0.25))
+        self.reference_timeout = float(p("reference_timeout", 0.25))
         validate_controller_parameters(
             self.timer_frequency,
             self.position_gain,
@@ -607,48 +392,9 @@ class Nav2PidFfNode(Node):
 
         self.saturation_count = 0
 
-        # ---------------------------------------------------------------
-        # ROS interfaces
-        # ---------------------------------------------------------------
-
-        qos_profile = qos_profile_from_parameters(
-            self
-        )
-
-        self.create_subscription(
-            Odometry,
-            "localization/odom",
-            self.odometry_callback,
-            qos_profile,
-        )
-
-        self.create_subscription(
-            Odometry,
-            "virtual_spacecraft/odom",
-            self.reference_callback,
-            qos_profile,
-        )
-
-        self.command_publisher = self.create_publisher(
-            Twist,
-            "cmd_vel",
-            qos_profile,
-        )
-
-        self.create_timer(
-            self.timer_frequency,
-            self.update,
-        )
-
-        if self.enable_pid:
-            self.get_logger().info(
-                "PID+FF spacecraft tracking controller ready"
-            )
-        else:
-            self.get_logger().info(
-                "P+FF spacecraft tracking controller ready "
-                "(PID disabled)"
-            )
+        self.command_publisher = command_publisher
+        self.get_logger().info("PID+FF spacecraft tracking controller ready" if self.enable_pid
+                               else "P+FF spacecraft tracking controller ready (PID disabled)")
 
     def odometry_callback(
         self,
@@ -891,27 +637,3 @@ class Nav2PidFfNode(Node):
         self.command_publisher.publish(
             Twist()
         )
-
-
-def main(args=None):
-    """Run the PID+FF tracking node."""
-
-    rclpy.init(
-        args=args
-    )
-
-    node = Nav2PidFfNode()
-
-    try:
-        rclpy.spin(
-            node
-        )
-
-    finally:
-        node.publish_stop()
-        node.destroy_node()
-        rclpy.shutdown()
-
-
-if __name__ == "__main__":
-    main()
